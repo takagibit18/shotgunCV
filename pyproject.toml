@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shotguncv"
+version = "0.1.0"
+description = "Pipeline-first AI Resume Ops system for sea-application workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "ShotgunCV Contributors" }]
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = [
+    "packages/py-core/src",
+    "packages/py-agents/src",
+    "packages/py-evals/src",
+    "apps/cli/src",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q -o cache_dir=.pytest_cache"
+testpaths = ["tests"]

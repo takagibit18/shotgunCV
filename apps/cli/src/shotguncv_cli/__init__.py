@@ -1,0 +1,1 @@
+"""ShotgunCV CLI package."""

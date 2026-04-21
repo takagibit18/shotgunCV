@@ -1,0 +1,1 @@
+"""ShotgunCV evaluation package placeholder."""
