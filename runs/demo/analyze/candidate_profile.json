@@ -1,0 +1,27 @@
+{
+  "candidate_id": "cand-001",
+  "base_resume_path": "fixtures\\candidates\\base_resume.md",
+  "experiences": [
+    "围绕 LLM 辅助工作流构建过内部工具",
+    "完成过简历评估与评分流程原型",
+    "与产品和工程团队进行过高频协作"
+  ],
+  "projects": [],
+  "skills": [
+    "LLM workflows"
+  ],
+  "industry_tags": [
+    "AI tooling",
+    "Resume ops"
+  ],
+  "strengths": [
+    "围绕 LLM 辅助工作流构建过内部工具",
+    "完成过简历评估与评分流程原型"
+  ],
+  "constraints": [
+    "No explicit production ML platform ownership yet"
+  ],
+  "preferences": [
+    "Product-oriented AI roles"
+  ]
+}

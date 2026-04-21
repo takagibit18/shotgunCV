@@ -21,9 +21,12 @@
 - `apps/cli/`
   - 对外暴露命令：`shotguncv ingest/analyze/generate/evaluate/plan/report`
   - 不承载核心领域逻辑
+  - 负责统一 `run_dir` 参数与阶段调度
 - `packages/py-core/`
   - 对外提供对象：`JDProfile`、`CandidateProfile`、`ResumeVariant`、`ScoreCard`、`GapMap`、`ApplicationStrategy`
   - 提供阶段间的结构化读写契约
+- `packages/py-agents/`
+  - 对外提供 generator/judge provider 协议与 deterministic stub 实现
 - `packages/py-evals/`
   - 对外提供评估与回归入口
   - 输出评估摘要供 `report` 阶段消费
@@ -34,6 +37,7 @@
 - `tests/` 至少覆盖对象契约、阶段链路与排序回归。
 - `docs/` 文档必须和实现对象命名一致。
 - 文档、注释、提交语言规范以 `docs/conventions.md` 与 `agent.md` 为准。
+- `examples/` 应提供最小 CLI 运行示例，覆盖从 `ingest` 到 `report` 的串行路径。
 
 ## 非目标与边界
 
