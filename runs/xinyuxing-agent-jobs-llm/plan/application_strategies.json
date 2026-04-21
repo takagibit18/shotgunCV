@@ -1,0 +1,46 @@
+[
+  {
+    "jd_id": "jd-001",
+    "recommended_variant_id": "variant-cluster-ai-product",
+    "priority_rank": 1,
+    "apply_decision": "apply",
+    "reason_summary": "overall_score=0.97, gap_risk_score=0.01, variant=variant-cluster-ai-product",
+    "needs_jd_specific_variant": false,
+    "catch_up_notes": [
+      "No major catch-up themes detected."
+    ]
+  },
+  {
+    "jd_id": "jd-002",
+    "recommended_variant_id": "variant-cluster-ai-product",
+    "priority_rank": 2,
+    "apply_decision": "apply",
+    "reason_summary": "overall_score=0.97, gap_risk_score=0.01, variant=variant-cluster-ai-product",
+    "needs_jd_specific_variant": false,
+    "catch_up_notes": [
+      "No major catch-up themes detected."
+    ]
+  },
+  {
+    "jd_id": "jd-003",
+    "recommended_variant_id": "variant-cluster-ai-operations",
+    "priority_rank": 3,
+    "apply_decision": "apply",
+    "reason_summary": "overall_score=0.97, gap_risk_score=0.01, variant=variant-cluster-ai-operations",
+    "needs_jd_specific_variant": false,
+    "catch_up_notes": [
+      "No major catch-up themes detected."
+    ]
+  },
+  {
+    "jd_id": "jd-004",
+    "recommended_variant_id": "variant-cluster-ai-operations",
+    "priority_rank": 4,
+    "apply_decision": "apply",
+    "reason_summary": "overall_score=0.97, gap_risk_score=0.01, variant=variant-cluster-ai-operations",
+    "needs_jd_specific_variant": false,
+    "catch_up_notes": [
+      "No major catch-up themes detected."
+    ]
+  }
+]

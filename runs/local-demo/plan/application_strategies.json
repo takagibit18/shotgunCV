@@ -1,0 +1,26 @@
+[
+  {
+    "jd_id": "jd-001",
+    "recommended_variant_id": "variant-cluster-ai-product",
+    "priority_rank": 1,
+    "apply_decision": "apply",
+    "reason_summary": "overall_score=0.81, gap_risk_score=0.18, variant=variant-cluster-ai-product",
+    "needs_jd_specific_variant": false,
+    "catch_up_notes": [
+      "evaluation",
+      "ranking"
+    ]
+  },
+  {
+    "jd_id": "jd-002",
+    "recommended_variant_id": "variant-jd-jd-002",
+    "priority_rank": 2,
+    "apply_decision": "apply",
+    "reason_summary": "overall_score=0.79, gap_risk_score=0.18, variant=variant-jd-jd-002",
+    "needs_jd_specific_variant": true,
+    "catch_up_notes": [
+      "python",
+      "product collaboration"
+    ]
+  }
+]

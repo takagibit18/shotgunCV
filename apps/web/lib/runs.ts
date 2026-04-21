@@ -1,0 +1,211 @@
+import { access, readdir, readFile, stat } from "node:fs/promises";
+import path from "node:path";
+
+import type {
+  ApplicationStrategy,
+  CandidateProfile,
+  EvalSummaryItem,
+  GapMap,
+  JDProfile,
+  ResumeVariant,
+  RunConfig,
+  ScoreCard,
+} from "./types";
+
+
+type StageName = "ingest" | "analyze" | "generate" | "evaluate" | "plan" | "report";
+
+type RunSummary = {
+  runId: string;
+  lastModified: string;
+  completedStages: StageName[];
+  generatorProvider: string;
+  judgeProvider: string;
+  label: string;
+};
+
+type EvaluateTopVariant = {
+  jdId: string;
+  title: string;
+  variantId: string;
+  overallScore: number;
+  gapCount: number;
+};
+
+type RunDetail = {
+  runId: string;
+  label: string;
+  generatorProvider: string;
+  judgeProvider: string;
+  completedStages: StageName[];
+  analyze: {
+    isComplete: boolean;
+    candidate: CandidateProfile | null;
+    jdProfiles: JDProfile[];
+  };
+  generate: {
+    isComplete: boolean;
+    variants: ResumeVariant[];
+  };
+  evaluate: {
+    isComplete: boolean;
+    topVariants: EvaluateTopVariant[];
+    scorecards: ScoreCard[];
+    gapMaps: GapMap[];
+  };
+  plan: {
+    isComplete: boolean;
+    strategies: ApplicationStrategy[];
+  };
+};
+
+type RunReport = {
+  runId: string;
+  markdown: string;
+};
+
+const STAGE_FILES: Record<StageName, string[]> = {
+  ingest: ["ingest/manifest.json"],
+  analyze: ["analyze/candidate_profile.json", "analyze/jd_profiles.json"],
+  generate: ["generate/resume_variants.json"],
+  evaluate: ["evaluate/scorecards.json", "evaluate/gap_maps.json", "evaluate/eval_summary.json"],
+  plan: ["plan/application_strategies.json"],
+  report: ["report/summary.md"],
+};
+
+
+export async function listRuns(): Promise<RunSummary[]> {
+  const runsDir = getRunsDir();
+  const entries = await readdir(runsDir, { withFileTypes: true });
+  const runs = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const runId = entry.name;
+        const runDir = path.join(runsDir, runId);
+        const metadata = await stat(runDir);
+        const config = await readJsonIfExists<RunConfig>(path.join(runDir, "config", "run_config.json"));
+        return {
+          runId,
+          lastModified: metadata.mtime.toISOString(),
+          completedStages: await getCompletedStages(runDir),
+          generatorProvider: config?.generator.provider ?? "unknown",
+          judgeProvider: config?.judge.provider ?? "unknown",
+          label: config?.run_metadata.label ?? "",
+        };
+      }),
+  );
+  return runs.sort((left, right) => right.lastModified.localeCompare(left.lastModified));
+}
+
+
+export async function loadRunDetail(runId: string): Promise<RunDetail> {
+  const runDir = path.join(getRunsDir(), runId);
+  const config = await readJsonOrThrow<RunConfig>(path.join(runDir, "config", "run_config.json"));
+  const completedStages = await getCompletedStages(runDir);
+  const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
+  const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
+  const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
+  const scorecards = (await readJsonIfExists<ScoreCard[]>(path.join(runDir, "evaluate", "scorecards.json"))) ?? [];
+  const gapMaps = (await readJsonIfExists<GapMap[]>(path.join(runDir, "evaluate", "gap_maps.json"))) ?? [];
+  const evalSummary = (await readJsonIfExists<EvalSummaryItem[]>(path.join(runDir, "evaluate", "eval_summary.json"))) ?? [];
+  const strategies =
+    (await readJsonIfExists<ApplicationStrategy[]>(path.join(runDir, "plan", "application_strategies.json"))) ?? [];
+
+  const gapCounts = new Map(gapMaps.map((gapMap) => [gapMap.jd_id, gapMap.items.length]));
+  const jdIndex = new Map(jdProfiles.map((jd) => [jd.jd_id, jd]));
+  const topVariants = evalSummary.map((item) => {
+    const scorecard = scorecards.find(
+      (candidateScorecard) =>
+        candidateScorecard.jd_id === item.jd_id && candidateScorecard.variant_id === item.top_variant_id,
+    );
+    return {
+      jdId: item.jd_id,
+      title: item.title || jdIndex.get(item.jd_id)?.title || item.jd_id,
+      variantId: item.top_variant_id,
+      overallScore: scorecard?.overall_score ?? 0,
+      gapCount: item.gap_count ?? gapCounts.get(item.jd_id) ?? 0,
+    };
+  });
+
+  return {
+    runId,
+    label: config.run_metadata.label,
+    generatorProvider: config.generator.provider,
+    judgeProvider: config.judge.provider,
+    completedStages,
+    analyze: {
+      isComplete: completedStages.includes("analyze"),
+      candidate,
+      jdProfiles,
+    },
+    generate: {
+      isComplete: completedStages.includes("generate"),
+      variants,
+    },
+    evaluate: {
+      isComplete: completedStages.includes("evaluate"),
+      topVariants,
+      scorecards,
+      gapMaps,
+    },
+    plan: {
+      isComplete: completedStages.includes("plan"),
+      strategies,
+    },
+  };
+}
+
+
+export async function loadRunReport(runId: string): Promise<RunReport | null> {
+  const reportPath = path.join(getRunsDir(), runId, "report", "summary.md");
+  if (!(await pathExists(reportPath))) {
+    return null;
+  }
+  return {
+    runId,
+    markdown: await readFile(reportPath, "utf-8"),
+  };
+}
+
+
+export function getRunsDir(): string {
+  return process.env.SHOTGUNCV_RUNS_DIR ?? path.resolve(process.cwd(), "..", "..", "runs");
+}
+
+
+async function getCompletedStages(runDir: string): Promise<StageName[]> {
+  const stages = await Promise.all(
+    (Object.entries(STAGE_FILES) as [StageName, string[]][]).map(async ([stage, files]) => {
+      const isComplete = await Promise.all(files.map((file) => pathExists(path.join(runDir, file))));
+      return isComplete.every(Boolean) ? stage : null;
+    }),
+  );
+  return stages.filter((stage): stage is StageName => stage !== null);
+}
+
+
+async function readJsonOrThrow<T>(filePath: string): Promise<T> {
+  return JSON.parse(await readFile(filePath, "utf-8")) as T;
+}
+
+
+async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
+  if (!(await pathExists(filePath))) {
+    return null;
+  }
+  return readJsonOrThrow<T>(filePath);
+}
+
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+export type { RunDetail, RunReport, RunSummary };

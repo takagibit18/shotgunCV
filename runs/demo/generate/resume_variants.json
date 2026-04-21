@@ -1,0 +1,60 @@
+[
+  {
+    "variant_id": "variant-cluster-ai-product",
+    "variant_type": "cluster",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001",
+      "jd-002"
+    ],
+    "summary": "ai-product cluster resume emphasizing 围绕 LLM 辅助工作流构建过内部工具 across 2 related roles.",
+    "emphasized_strengths": [
+      "围绕 LLM 辅助工作流构建过内部工具",
+      "完成过简历评估与评分流程原型"
+    ],
+    "stretch_points": [
+      "evaluation",
+      "ranking",
+      "python"
+    ],
+    "source_resume_path": "fixtures\\candidates\\base_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-001",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001"
+    ],
+    "summary": "LLM Product Engineer variant focused on 围绕 LLM 辅助工作流构建过内部工具, evaluation, and evidence-backed delivery.",
+    "emphasized_strengths": [
+      "围绕 LLM 辅助工作流构建过内部工具",
+      "完成过简历评估与评分流程原型"
+    ],
+    "stretch_points": [
+      "evaluation",
+      "ranking",
+      "python"
+    ],
+    "source_resume_path": "fixtures\\candidates\\base_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-002",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-002"
+    ],
+    "summary": "Applied AI Engineer variant focused on 围绕 LLM 辅助工作流构建过内部工具, python, and evidence-backed delivery.",
+    "emphasized_strengths": [
+      "围绕 LLM 辅助工作流构建过内部工具",
+      "完成过简历评估与评分流程原型"
+    ],
+    "stretch_points": [
+      "python",
+      "product collaboration",
+      "automation"
+    ],
+    "source_resume_path": "fixtures\\candidates\\base_resume.md"
+  }
+]

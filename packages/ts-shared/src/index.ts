@@ -1,0 +1,103 @@
+export type CandidateProfile = {
+  candidate_id: string;
+  base_resume_path: string;
+  experiences: string[];
+  projects: string[];
+  skills: string[];
+  industry_tags: string[];
+  strengths: string[];
+  constraints: string[];
+  preferences: string[];
+};
+
+export type JDProfile = {
+  jd_id: string;
+  title: string;
+  company: string;
+  cluster: string;
+  responsibilities: string[];
+  requirements: string[];
+  keywords: string[];
+  seniority: string;
+  bonuses: string[];
+  risk_signals: string[];
+  source_type: string;
+  source_value: string;
+};
+
+export type ResumeVariant = {
+  variant_id: string;
+  variant_type: string;
+  cluster: string;
+  target_jd_ids: string[];
+  summary: string;
+  emphasized_strengths: string[];
+  stretch_points: string[];
+  source_resume_path: string;
+};
+
+export type ScoreCard = {
+  jd_id: string;
+  variant_id: string;
+  fit_score: number;
+  ats_score: number;
+  evidence_score: number;
+  stretch_score: number;
+  gap_risk_score: number;
+  rewrite_cost_score: number;
+  overall_score: number;
+  judge_rationale: string;
+};
+
+export type GapItem = {
+  area: string;
+  current_state: string;
+  target_state: string;
+  priority: string;
+  catch_up_concepts: string[];
+  weak_points: string[];
+};
+
+export type GapMap = {
+  jd_id: string;
+  candidate_id: string;
+  items: GapItem[];
+};
+
+export type ApplicationStrategy = {
+  jd_id: string;
+  recommended_variant_id: string;
+  priority_rank: number;
+  apply_decision: string;
+  reason_summary: string;
+  needs_jd_specific_variant: boolean;
+  catch_up_notes: string[];
+};
+
+export type ProviderConfig = {
+  provider: "deterministic" | "openai";
+  model: string;
+};
+
+export type OpenAIConfig = {
+  base_url: string | null;
+  api_key_env: string;
+};
+
+export type RunMetadata = {
+  label: string;
+};
+
+export type RunConfig = {
+  generator: ProviderConfig;
+  judge: ProviderConfig;
+  openai: OpenAIConfig;
+  run_metadata: RunMetadata;
+};
+
+export type EvalSummaryItem = {
+  jd_id: string;
+  title: string;
+  top_variant_id: string;
+  gap_count: number;
+};

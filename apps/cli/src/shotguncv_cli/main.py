@@ -48,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
                 default=[],
                 help="Path to a JD batch file. May be passed multiple times.",
             )
+            subparser.add_argument(
+                "--config",
+                type=Path,
+                required=False,
+                help="Optional run config JSON to snapshot into the run workspace.",
+            )
 
     return parser
 
@@ -66,7 +72,11 @@ def run(argv: list[str] | None = None) -> tuple[int, str]:
         if command_name is None:
             parser.print_help()
         else:
-            _execute_command(command_name, args)
+            try:
+                _execute_command(command_name, args)
+            except Exception as exc:  # noqa: BLE001
+                print(str(exc))
+                return 1, buffer.getvalue()
 
     return 0, buffer.getvalue()
 
@@ -97,6 +107,7 @@ def _run_ingest(args: argparse.Namespace) -> str:
         candidate_id=args.candidate_id,
         candidate_resume_path=args.candidate_resume,
         jd_sources=args.jd_files,
+        config_path=args.config,
     )
     return f"Ingest completed: `{manifest_path}`"
 

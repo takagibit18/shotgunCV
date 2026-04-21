@@ -1,0 +1,74 @@
+[
+  {
+    "jd_id": "jd-001",
+    "variant_id": "variant-cluster-ai-product",
+    "fit_score": 0.76,
+    "ats_score": 0.6,
+    "evidence_score": 0.99,
+    "stretch_score": 0.9,
+    "gap_risk_score": 0.18,
+    "rewrite_cost_score": 0.19,
+    "overall_score": 0.81,
+    "judge_rationale": "cluster variant aligns cand-001 with LLM Product Engineer; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-001",
+    "variant_id": "variant-jd-jd-001",
+    "fit_score": 0.76,
+    "ats_score": 0.6,
+    "evidence_score": 0.99,
+    "stretch_score": 0.9,
+    "gap_risk_score": 0.18,
+    "rewrite_cost_score": 0.51,
+    "overall_score": 0.79,
+    "judge_rationale": "jd-specific variant aligns cand-001 with LLM Product Engineer; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-001",
+    "variant_id": "variant-jd-jd-002",
+    "fit_score": 0.64,
+    "ats_score": 0.4,
+    "evidence_score": 0.99,
+    "stretch_score": 0.57,
+    "gap_risk_score": 0.34,
+    "rewrite_cost_score": 0.51,
+    "overall_score": 0.66,
+    "judge_rationale": "jd-specific variant aligns cand-001 with LLM Product Engineer; score indicates meaningful catch-up risk for this batch."
+  },
+  {
+    "jd_id": "jd-002",
+    "variant_id": "variant-cluster-ai-product",
+    "fit_score": 0.52,
+    "ats_score": 0.2,
+    "evidence_score": 0.99,
+    "stretch_score": 0.23,
+    "gap_risk_score": 0.5,
+    "rewrite_cost_score": 0.19,
+    "overall_score": 0.54,
+    "judge_rationale": "cluster variant aligns cand-001 with Applied AI Engineer; score indicates meaningful catch-up risk for this batch."
+  },
+  {
+    "jd_id": "jd-002",
+    "variant_id": "variant-jd-jd-001",
+    "fit_score": 0.52,
+    "ats_score": 0.2,
+    "evidence_score": 0.99,
+    "stretch_score": 0.23,
+    "gap_risk_score": 0.5,
+    "rewrite_cost_score": 0.51,
+    "overall_score": 0.53,
+    "judge_rationale": "jd-specific variant aligns cand-001 with Applied AI Engineer; score indicates meaningful catch-up risk for this batch."
+  },
+  {
+    "jd_id": "jd-002",
+    "variant_id": "variant-jd-jd-002",
+    "fit_score": 0.76,
+    "ats_score": 0.6,
+    "evidence_score": 0.99,
+    "stretch_score": 0.9,
+    "gap_risk_score": 0.18,
+    "rewrite_cost_score": 0.51,
+    "overall_score": 0.79,
+    "judge_rationale": "jd-specific variant aligns cand-001 with Applied AI Engineer; score indicates manageable risk for this batch."
+  }
+]

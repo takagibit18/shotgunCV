@@ -1,0 +1,62 @@
+[
+  {
+    "jd_id": "jd-001",
+    "title": "LLM Product Engineer",
+    "company": "Example AI",
+    "cluster": "ai-product",
+    "responsibilities": [
+      "Build evaluation pipelines for resume and strategy ranking",
+      "Strong Python and prompt engineering fundamentals",
+      "Partner with product and engineering on AI workflows"
+    ],
+    "requirements": [
+      "Build evaluation pipelines for resume and strategy ranking",
+      "Strong Python and prompt engineering fundamentals"
+    ],
+    "keywords": [
+      "evaluation",
+      "ranking",
+      "python",
+      "prompt engineering",
+      "product collaboration"
+    ],
+    "seniority": "mid",
+    "bonuses": [],
+    "risk_signals": [
+      "Prompt quality will be probed"
+    ],
+    "source_type": "file",
+    "source_value": "fixtures\\jds\\sample_batch.txt"
+  },
+  {
+    "jd_id": "jd-002",
+    "title": "Applied AI Engineer",
+    "company": "Workflow Labs",
+    "cluster": "ai-product",
+    "responsibilities": [
+      "Build internal automation tools for AI-assisted operations",
+      "Python, LLM workflow tooling, and product collaboration",
+      "Bonus for metrics ownership and experimentation rigor"
+    ],
+    "requirements": [
+      "Build internal automation tools for AI-assisted operations",
+      "Python, LLM workflow tooling, and product collaboration"
+    ],
+    "keywords": [
+      "python",
+      "product collaboration",
+      "automation",
+      "metrics",
+      "experimentation"
+    ],
+    "seniority": "mid",
+    "bonuses": [
+      "metrics ownership and experimentation rigor"
+    ],
+    "risk_signals": [
+      "Requires metrics storytelling"
+    ],
+    "source_type": "file",
+    "source_value": "fixtures\\jds\\sample_batch.txt"
+  }
+]

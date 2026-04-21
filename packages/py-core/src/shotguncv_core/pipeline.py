@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shotguncv_agents.providers import (
-    DeterministicGeneratorProvider,
-    DeterministicJudgeProvider,
+    build_generator_provider,
+    build_judge_provider,
 )
 from shotguncv_core.models import (
     ApplicationStrategy,
@@ -16,6 +16,7 @@ from shotguncv_core.models import (
     ResumeVariant,
     ScoreCard,
 )
+from shotguncv_core.run_config import load_run_config, snapshot_run_config
 from shotguncv_core.storage import dump_json, hydrate, load_json, stage_dir
 from shotguncv_evals.rules import evaluate_resume_fit
 
@@ -48,8 +49,10 @@ def ingest_run(
     candidate_id: str,
     candidate_resume_path: Path,
     jd_sources: list[Path],
+    config_path: Path | None = None,
 ) -> Path:
     ingest_directory = stage_dir(run_dir, "ingest")
+    snapshot_run_config(run_dir, config_path)
     manifest = {
         "candidate_id": candidate_id,
         "candidate_resume_path": str(candidate_resume_path),
@@ -67,6 +70,7 @@ def ingest_run(
 
 
 def analyze_run(run_dir: Path) -> AnalysisArtifacts:
+    load_run_config(run_dir)
     manifest = load_json(run_dir / "ingest" / "manifest.json")
     candidate = _build_candidate_profile(
         candidate_id=manifest["candidate_id"],
@@ -84,9 +88,10 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
 
 
 def generate_run(run_dir: Path) -> GenerationArtifacts:
+    config = load_run_config(run_dir)
     candidate = hydrate(CandidateProfile, load_json(run_dir / "analyze" / "candidate_profile.json"))
     jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
-    generator = DeterministicGeneratorProvider()
+    generator = build_generator_provider(config, stage="generate", run_dir=run_dir)
 
     clusters: dict[str, list[JDProfile]] = {}
     for jd in jd_profiles:
@@ -126,10 +131,11 @@ def generate_run(run_dir: Path) -> GenerationArtifacts:
 
 
 def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
+    config = load_run_config(run_dir)
     candidate = hydrate(CandidateProfile, load_json(run_dir / "analyze" / "candidate_profile.json"))
     jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
     variants = hydrate(list[ResumeVariant], load_json(run_dir / "generate" / "resume_variants.json"))
-    judge = DeterministicJudgeProvider()
+    judge = build_judge_provider(config, stage="evaluate", run_dir=run_dir)
 
     scorecards: list[ScoreCard] = []
     gap_maps: list[GapMap] = []
@@ -179,6 +185,7 @@ def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
 
 
 def plan_run(run_dir: Path) -> PlanArtifacts:
+    load_run_config(run_dir)
     scorecards = hydrate(list[ScoreCard], load_json(run_dir / "evaluate" / "scorecards.json"))
     gap_maps = hydrate(list[GapMap], load_json(run_dir / "evaluate" / "gap_maps.json"))
 
@@ -219,6 +226,7 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
 
 
 def report_run(run_dir: Path) -> Path:
+    load_run_config(run_dir)
     candidate = hydrate(CandidateProfile, load_json(run_dir / "analyze" / "candidate_profile.json"))
     jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
     scorecards = hydrate(list[ScoreCard], load_json(run_dir / "evaluate" / "scorecards.json"))
