@@ -1,0 +1,17 @@
+=== JD ===
+Title: LLM Product Engineer
+Company: Example AI
+SourceType: text
+Body:
+- Build evaluation pipelines for resume and strategy ranking
+- Strong Python and prompt engineering fundamentals
+- Partner with product and engineering on AI workflows
+
+=== JD ===
+Title: Applied AI Engineer
+Company: Workflow Labs
+SourceType: text
+Body:
+- Build internal automation tools for AI-assisted operations
+- Python, LLM workflow tooling, and product collaboration
+- Bonus for metrics ownership and experimentation rigor

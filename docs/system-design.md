@@ -12,7 +12,7 @@
 2. `analyze`
 3. `generate`
 4. `evaluate`
-5. `rank`
+5. `plan`
 6. `report`
 
 混合生成策略：
@@ -37,6 +37,17 @@
 - CLI 子命令保持 `shotguncv ingest/analyze/generate/evaluate/plan/report`。
 - 每个阶段都以 `run_dir` 作为输入输出边界。
 - 各阶段产物使用结构化文件持久化，供后续阶段消费。
+- v1 最小闭环默认写入：
+  - `ingest/manifest.json`
+  - `analyze/candidate_profile.json`
+  - `analyze/jd_profiles.json`
+  - `generate/resume_variants.json`
+  - `evaluate/scorecards.json`
+  - `evaluate/gap_maps.json`
+  - `evaluate/eval_summary.json`
+  - `plan/application_strategies.json`
+  - `report/summary.md`
+- `generate` 与 `evaluate` 均通过 deterministic provider 接口落地，后续可替换为真实模型接入。
 
 ## 评估与质量门禁
 
