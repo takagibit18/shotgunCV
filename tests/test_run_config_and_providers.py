@@ -33,7 +33,6 @@ def test_cli_ingest_writes_default_openai_run_config(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0, output
-
     config_payload = json.loads((run_dir / "config" / "run_config.json").read_text(encoding="utf-8"))
     assert config_payload["analyzer"]["provider"] == "openai"
     assert config_payload["generator"]["provider"] == "openai"
@@ -79,7 +78,6 @@ def test_cli_ingest_snapshots_explicit_run_config(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0, output
-
     snapshot_payload = json.loads((run_dir / "config" / "run_config.json").read_text(encoding="utf-8"))
     assert snapshot_payload["generator"]["provider"] == "openai"
     assert snapshot_payload["judge"]["provider"] == "openai"
@@ -88,7 +86,6 @@ def test_cli_ingest_snapshots_explicit_run_config(tmp_path: Path) -> None:
 
 def test_cli_generate_fails_with_helpful_message_when_run_config_missing(tmp_path: Path) -> None:
     exit_code, output = run(["generate", "--run-dir", str(tmp_path / "missing-run")])
-
     assert exit_code == 1
     assert "run_config.json" in output
     assert "ingest" in output.lower()
@@ -103,20 +100,16 @@ def test_generate_run_uses_openai_generator_from_run_config(monkeypatch: pytest.
         {
             "generator": {"provider": "openai", "model": "gpt-5.4-mini"},
             "judge": {"provider": "deterministic", "model": ""},
-            "openai": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key_env": "OPENAI_API_KEY",
-                "env_file": str(dotenv_path),
-            },
+            "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
             "run_metadata": {"label": "openai-generate"},
         },
     )
-    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen(["OpenAI cluster summary", "OpenAI JD summary", "OpenAI JD summary"]))
+    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen(["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"]))
 
     generation = generate_run(run_dir)
 
-    assert generation.variants[0].summary == "OpenAI cluster summary"
-    assert any(variant.summary == "OpenAI JD summary" for variant in generation.variants)
+    assert generation.variants[0].summary == "岗位簇摘要"
+    assert any(variant.summary == "岗位定制摘要" for variant in generation.variants)
 
 
 def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
@@ -130,11 +123,7 @@ def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
         {
             "generator": {"provider": "deterministic", "model": ""},
             "judge": {"provider": "openai", "model": "gpt-5.4-mini"},
-            "openai": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key_env": "OPENAI_API_KEY",
-                "env_file": str(dotenv_path),
-            },
+            "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
             "run_metadata": {"label": "openai-evaluate"},
         },
     )
@@ -143,26 +132,26 @@ def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
         "urllib.request.urlopen",
         _fake_openai_urlopen(
             [
-                "Judge rationale 1",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "Judge rationale 2",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "Judge rationale 3",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "Judge rationale 4",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "Judge rationale 5",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "Judge rationale 6",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
+                "评审理由 1",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
+                "评审理由 2",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
+                "评审理由 3",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
+                "评审理由 4",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
+                "评审理由 5",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
+                "评审理由 6",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
             ]
         ),
     )
 
     evaluation = evaluate_run(run_dir)
 
-    assert evaluation.scorecards[0].judge_rationale == "Judge rationale 1"
-    assert any(card.judge_rationale == "Judge rationale 6" for card in evaluation.scorecards)
+    assert evaluation.scorecards[0].judge_rationale == "评审理由 1"
+    assert any(card.judge_rationale == "评审理由 6" for card in evaluation.scorecards)
 
 
 def test_generate_run_raises_clear_error_when_openai_api_key_missing(tmp_path: Path) -> None:
@@ -174,11 +163,7 @@ def test_generate_run_raises_clear_error_when_openai_api_key_missing(tmp_path: P
         {
             "generator": {"provider": "openai", "model": "gpt-5.4-mini"},
             "judge": {"provider": "deterministic", "model": ""},
-            "openai": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key_env": "MISSING_OPENAI_KEY",
-                "env_file": str(dotenv_path),
-            },
+            "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "MISSING_OPENAI_KEY", "env_file": str(dotenv_path)},
             "run_metadata": {"label": "openai-generate"},
         },
     )
@@ -203,11 +188,7 @@ def test_generate_run_does_not_fallback_to_system_env(monkeypatch: pytest.Monkey
         {
             "generator": {"provider": "openai", "model": "gpt-5.4-mini"},
             "judge": {"provider": "deterministic", "model": ""},
-            "openai": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key_env": "OPENAI_API_KEY",
-                "env_file": str(dotenv_path),
-            },
+            "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
             "run_metadata": {"label": "openai-generate"},
         },
     )
@@ -232,24 +213,21 @@ def test_generate_run_uses_default_model_when_config_and_env_model_empty(
         {
             "generator": {"provider": "openai", "model": ""},
             "judge": {"provider": "deterministic", "model": ""},
-            "openai": {
-                "base_url": None,
-                "api_key_env": "OPENAI_API_KEY",
-                "env_file": str(dotenv_path),
-            },
+            "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
             "run_metadata": {"label": "openai-generate-default-model"},
         },
     )
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["OpenAI cluster summary", "OpenAI JD summary", "OpenAI JD summary"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
     )
 
     generate_run(run_dir)
 
     assert capture["last_model"] == "gpt-5.4-mini"
     assert capture["last_url"] == "https://api.openai.com/v1/chat/completions"
+    assert "简体中文" in capture["last_system_prompt"]
 
 
 def test_generate_run_uses_openai_compatible_base_url_and_model_from_env_when_config_model_empty(
@@ -266,18 +244,14 @@ def test_generate_run_uses_openai_compatible_base_url_and_model_from_env_when_co
         {
             "generator": {"provider": "openai", "model": ""},
             "judge": {"provider": "deterministic", "model": ""},
-            "openai": {
-                "base_url": None,
-                "api_key_env": "OPENAI_API_KEY",
-                "env_file": str(dotenv_path),
-            },
+            "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
             "run_metadata": {"label": "openai-compatible"},
         },
     )
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["OpenAI cluster summary", "OpenAI JD summary", "OpenAI JD summary"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -304,11 +278,10 @@ def test_generate_run_accepts_openai_compatible_provider_alias(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["OpenAI cluster summary", "OpenAI JD summary", "OpenAI JD summary"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
     )
 
     generate_run(run_dir)
-
     assert capture["last_model"] == "qwen-max"
 
 
@@ -333,11 +306,10 @@ def test_generate_run_env_overrides_model_and_base_url_over_run_config(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["OpenAI cluster summary", "OpenAI JD summary", "OpenAI JD summary"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
     )
 
     generate_run(run_dir)
-
     assert capture["last_model"] == "env-model"
     assert capture["last_url"] == "https://env.example.com/v1/chat/completions"
 
@@ -360,13 +332,13 @@ def test_generate_run_ignores_env_provider_override_when_run_config_is_determini
             "run_metadata": {"label": "provider-override"},
         },
     )
+
     def _unexpected_openai_call(*args, **kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("deterministic provider should not be overridden by .env")
 
     monkeypatch.setattr("urllib.request.urlopen", _unexpected_openai_call)
 
     generation = generate_run(run_dir)
-
     assert generation.variants[0].summary.startswith("ai-product cluster resume emphasizing")
 
 
@@ -396,7 +368,6 @@ def test_evaluate_run_ignores_env_provider_override_when_run_config_is_determini
     monkeypatch.setattr("urllib.request.urlopen", _unexpected_openai_call)
 
     evaluation = evaluate_run(run_dir)
-
     assert evaluation.scorecards[0].judge_rationale.startswith("cluster variant aligns")
 
 
@@ -415,10 +386,7 @@ def _prepare_analyzed_run(tmp_path: Path) -> Path:
 def _write_run_config(run_dir: Path, payload: dict[str, object]) -> None:
     config_dir = run_dir / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "run_config.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    (config_dir / "run_config.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _fake_openai_urlopen(messages: list[str]):
@@ -426,10 +394,7 @@ def _fake_openai_urlopen(messages: list[str]):
 
     class _Response:
         def __init__(self, content: str) -> None:
-            self._payload = json.dumps(
-                {"choices": [{"message": {"content": content}}]},
-                ensure_ascii=False,
-            ).encode("utf-8")
+            self._payload = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=False).encode("utf-8")
 
         def read(self) -> bytes:
             return self._payload
@@ -440,7 +405,7 @@ def _fake_openai_urlopen(messages: list[str]):
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-    def _urlopen(request, timeout=0):  # type: ignore[no-untyped-def]
+    def _urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
         if timeout == 0:
             raise HTTPError("https://api.openai.com/v1/chat/completions", 500, "missing timeout", None, None)
         return _Response(next(responses))
@@ -453,10 +418,7 @@ def _fake_openai_urlopen_capture(messages: list[str], capture: dict[str, str]):
 
     class _Response:
         def __init__(self, content: str) -> None:
-            self._payload = json.dumps(
-                {"choices": [{"message": {"content": content}}]},
-                ensure_ascii=False,
-            ).encode("utf-8")
+            self._payload = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=False).encode("utf-8")
 
         def read(self) -> bytes:
             return self._payload
@@ -471,6 +433,7 @@ def _fake_openai_urlopen_capture(messages: list[str], capture: dict[str, str]):
         payload = json.loads(req.data.decode("utf-8"))
         capture["last_model"] = payload["model"]
         capture["last_url"] = req.full_url
+        capture["last_system_prompt"] = payload["messages"][0]["content"]
         if timeout == 0:
             raise HTTPError("https://api.openai.com/v1/chat/completions", 500, "missing timeout", None, None)
         return _Response(next(responses))

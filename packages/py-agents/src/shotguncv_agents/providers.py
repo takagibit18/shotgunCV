@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import request
@@ -11,6 +12,10 @@ from shotguncv_core.run_config import RunConfig
 
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
 DEFAULT_OPENAI_TIMEOUT_SEC = 90
+DEFAULT_LLM_RETRY_TIMES = 2
+_CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
+_ASCII_LETTER_PATTERN = re.compile(r"[A-Za-z]")
+_IDENTIFIER_LIKE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/@#\-\[\]]+$")
 
 
 @dataclass(slots=True)
@@ -240,24 +245,30 @@ class OpenAIGeneratorProvider:
     def build_cluster_summary(self, cluster: str, candidate: CandidateProfile, jds: list[JDProfile]) -> str:
         titles = ", ".join(jd.title for jd in jds)
         prompt = (
-            "Write a concise resume summary for a cluster resume variant.\n"
-            f"Cluster: {cluster}\n"
-            f"Candidate strengths: {', '.join(candidate.strengths)}\n"
-            f"Target titles: {titles}\n"
-            "Return plain text only."
+            "请基于以下信息，撰写一段简洁的中文简历摘要，用于“岗位簇版本”。\n"
+            f"岗位簇：{cluster}\n"
+            f"候选人优势：{', '.join(candidate.strengths)}\n"
+            f"目标岗位标题：{titles}\n"
+            "只返回纯文本，不要添加编号或解释。"
         )
-        return _chat_completion(self.base_url, self.api_key, self.model, prompt)
+        try:
+            return _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=False)
+        except Exception:
+            return DeterministicGeneratorProvider().build_cluster_summary(cluster, candidate, jds)
 
     def build_jd_summary(self, jd: JDProfile, candidate: CandidateProfile) -> str:
         prompt = (
-            "Write a concise resume summary for one JD-targeted variant.\n"
-            f"JD title: {jd.title}\n"
-            f"Company: {jd.company}\n"
-            f"JD keywords: {', '.join(jd.keywords)}\n"
-            f"Candidate strengths: {', '.join(candidate.strengths)}\n"
-            "Return plain text only."
+            "请基于以下信息，撰写一段简洁的中文简历摘要，用于“单岗位定制版本”。\n"
+            f"岗位标题：{jd.title}\n"
+            f"公司：{jd.company}\n"
+            f"岗位关键词：{', '.join(jd.keywords)}\n"
+            f"候选人优势：{', '.join(candidate.strengths)}\n"
+            "只返回纯文本，不要添加编号或解释。"
         )
-        return _chat_completion(self.base_url, self.api_key, self.model, prompt)
+        try:
+            return _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=False)
+        except Exception:
+            return DeterministicGeneratorProvider().build_jd_summary(jd, candidate)
 
 
 class OpenAIJudgeProvider:
@@ -268,14 +279,17 @@ class OpenAIJudgeProvider:
 
     def review(self, jd: JDProfile, candidate: CandidateProfile, variant: ResumeVariant, overall_score: float) -> JudgeFeedback:
         prompt = (
-            "Write one short rationale for whether this resume variant is worth applying with.\n"
-            f"JD title: {jd.title}\n"
-            f"Candidate: {candidate.candidate_id}\n"
-            f"Variant type: {variant.variant_type}\n"
-            f"Overall score: {overall_score:.2f}\n"
-            "Return plain text only."
+            "请用一句简洁中文，说明这个简历版本是否值得投递。\n"
+            f"岗位标题：{jd.title}\n"
+            f"候选人：{candidate.candidate_id}\n"
+            f"版本类型：{variant.variant_type}\n"
+            f"综合分：{overall_score:.2f}\n"
+            "只返回纯文本，不要附加说明。"
         )
-        rationale = _chat_completion(self.base_url, self.api_key, self.model, prompt)
+        try:
+            rationale = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=False)
+        except Exception:
+            rationale = DeterministicJudgeProvider().review(jd, candidate, variant, overall_score).rationale
         worthiness = "apply" if overall_score >= 0.7 else "stretch"
         return JudgeFeedback(rationale=rationale, application_worthiness=worthiness)
 
@@ -288,17 +302,17 @@ class OpenAIJudgeProvider:
         rule_overall_score: float,
     ) -> LLMAssessment:
         prompt = (
-            "Return STRICT JSON only with keys: role_fit,evidence_quality,persuasiveness,"
-            "interview_pressure_risk,application_worthiness,must_fix_issues,evidence_citations,"
-            "rewrite_opportunities,decision_rationale.\n"
-            f"JD: {jd.title} @ {jd.company}\n"
-            f"Variant: {variant.variant_id} ({variant.variant_type})\n"
-            f"Rule overall score: {rule_overall_score:.2f}\n"
-            f"Candidate strengths: {', '.join(candidate.strengths[:4])}\n"
-            f"Evidence map: {json.dumps(evidence_map, ensure_ascii=False)}\n"
-            "All score fields must be between 0 and 1."
+            "请仅返回严格 JSON（不要 markdown 代码块、不要额外解释），键必须是："
+            "role_fit,evidence_quality,persuasiveness,interview_pressure_risk,"
+            "application_worthiness,must_fix_issues,evidence_citations,rewrite_opportunities,decision_rationale。\n"
+            f"岗位：{jd.title} @ {jd.company}\n"
+            f"简历版本：{variant.variant_id} ({variant.variant_type})\n"
+            f"规则综合分：{rule_overall_score:.2f}\n"
+            f"候选人优势：{', '.join(candidate.strengths[:4])}\n"
+            f"证据映射：{json.dumps(evidence_map, ensure_ascii=False)}\n"
+            "所有分数字段范围必须在 0 到 1 之间。"
         )
-        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt)
+        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=True)
         payload = _parse_json_payload(raw)
         return LLMAssessment(
             jd_id=jd.jd_id,
@@ -325,16 +339,20 @@ class OpenAIAnalyzeProvider:
 
     def analyze(self, candidate_id: str, candidate_resume_path: str, resume_text: str, jd_inputs: list[dict[str, str]]) -> AnalyzeFeedback:
         prompt = (
-            "Return STRICT JSON only with keys: candidate_profile,jd_profiles,evidence_map.\n"
-            "candidate_profile must include: core_claims,verified_evidence,missing_evidence_areas,preferred_role_tracks.\n"
-            "jd_profiles must include: must_have_requirements,nice_to_have_requirements,hidden_signals,"
-            "interview_focus_areas,role_level_confidence.\n"
+            "请仅返回严格 JSON（不要 markdown 代码块、不要额外解释），顶层键必须是："
+            "candidate_profile,jd_profiles,evidence_map。\n"
+            "candidate_profile 必须包含：core_claims,verified_evidence,missing_evidence_areas,preferred_role_tracks。\n"
+            "jd_profiles 必须包含：must_have_requirements,nice_to_have_requirements,hidden_signals,"
+            "interview_focus_areas,role_level_confidence。\n"
             f"candidate_id={candidate_id}\nresume_path={candidate_resume_path}\n"
             f"resume_text={resume_text}\n"
             f"jd_inputs={json.dumps(jd_inputs, ensure_ascii=False)}\n"
         )
-        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt)
-        payload = _parse_json_payload(raw)
+        try:
+            raw = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=True)
+            payload = _parse_json_payload(raw)
+        except Exception:
+            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, jd_inputs)
         candidate_payload = payload.get("candidate_profile", {})
         candidate = CandidateProfile(
             candidate_id=candidate_id,
@@ -400,14 +418,15 @@ class OpenAIPlannerProvider:
         if assessment is None:
             return DeterministicPlannerProvider().build_strategy(jd, candidate, assessment, top_variant, final_score, guardrail_flags)
         prompt = (
-            "Return STRICT JSON only with keys: apply_decision,decision_confidence,decision_drivers,watchouts,"
-            "recommended_actions,interview_prep_points,resume_revision_tasks,reason_summary.\n"
-            f"JD={jd.title} @ {jd.company}\n"
-            f"Assessment={json.dumps(_llm_assessment_to_dict(assessment), ensure_ascii=False)}\n"
-            f"Guardrails={json.dumps(guardrail_flags, ensure_ascii=False)}\n"
-            f"Final score={final_score:.2f}\n"
+            "请仅返回严格 JSON（不要 markdown 代码块、不要额外解释），键必须是："
+            "apply_decision,decision_confidence,decision_drivers,watchouts,"
+            "recommended_actions,interview_prep_points,resume_revision_tasks,reason_summary。\n"
+            f"岗位：{jd.title} @ {jd.company}\n"
+            f"评估结果：{json.dumps(_llm_assessment_to_dict(assessment), ensure_ascii=False)}\n"
+            f"护栏标记：{json.dumps(guardrail_flags, ensure_ascii=False)}\n"
+            f"最终分：{final_score:.2f}\n"
         )
-        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt)
+        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=True)
         payload = _parse_json_payload(raw)
         return PlanFeedback(
             strategy=ApplicationStrategy(
@@ -704,23 +723,119 @@ def _llm_assessment_to_dict(assessment: LLMAssessment) -> dict[str, object]:
     }
 
 
-def _chat_completion(base_url: str, api_key: str, model: str, prompt: str) -> str:
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        }
-    ).encode("utf-8")
-    response = request.Request(
-        url=f"{base_url.rstrip('/')}/chat/completions",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+def _build_system_prompt(expect_json: bool) -> str:
+    base = (
+        "你是简历投递策略助手。"
+        "必须使用简体中文进行自然语言输出。"
+        "禁止输出英文完整句子。"
+        "仅允许必要的英文缩写、字段键名、ID。"
     )
-    with request.urlopen(response, timeout=DEFAULT_OPENAI_TIMEOUT_SEC) as handle:
-        body = json.loads(handle.read().decode("utf-8"))
-    return body["choices"][0]["message"]["content"].strip()
+    if expect_json:
+        return (
+            base
+            + "你必须只输出一个合法 JSON 对象。"
+            + "不要输出 Markdown 代码块、前后缀说明或多余文本。"
+            + "JSON 的键名保持要求，值中的自然语言必须是简体中文。"
+        )
+    return base + "只输出纯文本，不要添加额外解释。"
+
+
+def _is_chinese_dominant(text: str, min_ratio: float = 0.45) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    cjk_count = len(_CJK_PATTERN.findall(stripped))
+    ascii_count = len(_ASCII_LETTER_PATTERN.findall(stripped))
+    if cjk_count == 0:
+        return False
+    if ascii_count == 0:
+        return True
+    ratio = cjk_count / (cjk_count + ascii_count)
+    return ratio >= min_ratio
+
+
+def _is_identifier_like(value: str) -> bool:
+    text = value.strip()
+    if not text:
+        return True
+    if _IDENTIFIER_LIKE_PATTERN.fullmatch(text):
+        return True
+    if len(text) <= 5 and _ASCII_LETTER_PATTERN.search(text):
+        return True
+    return False
+
+
+def _iter_string_values(payload: object) -> list[str]:
+    values: list[str] = []
+    if isinstance(payload, dict):
+        for value in payload.values():
+            values.extend(_iter_string_values(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            values.extend(_iter_string_values(item))
+    elif isinstance(payload, str):
+        values.append(payload)
+    return values
+
+
+def _json_values_chinese_dominant(payload: dict[str, object]) -> bool:
+    has_natural_language = False
+    for value in _iter_string_values(payload):
+        text = value.strip()
+        if not text:
+            continue
+        if _is_identifier_like(text):
+            continue
+        has_natural_language = True
+        if not _is_chinese_dominant(text):
+            return False
+    return has_natural_language
+
+
+def _chat_completion(base_url: str, api_key: str, model: str, prompt: str, expect_json: bool) -> str:
+    messages = [
+        {"role": "system", "content": _build_system_prompt(expect_json=expect_json)},
+        {"role": "user", "content": prompt},
+    ]
+    last_output = ""
+    last_error: Exception | None = None
+
+    for _ in range(DEFAULT_LLM_RETRY_TIMES):
+        payload = json.dumps(
+            {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.2,
+            }
+        ).encode("utf-8")
+        response = request.Request(
+            url=f"{base_url.rstrip('/')}/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with request.urlopen(response, timeout=DEFAULT_OPENAI_TIMEOUT_SEC) as handle:
+            body = json.loads(handle.read().decode("utf-8"))
+        content = body["choices"][0]["message"]["content"].strip()
+        last_output = content
+
+        try:
+            if expect_json:
+                parsed = _parse_json_payload(content)
+                if not _json_values_chinese_dominant(parsed):
+                    raise ValueError("JSON value language check failed")
+            else:
+                if not _is_chinese_dominant(content):
+                    raise ValueError("text language check failed")
+            return content
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise ValueError(f"LLM output failed Chinese dominance check: {last_output[:200]}") from last_error
+    raise ValueError("LLM returned empty output.")
+

@@ -4,8 +4,8 @@ import "./globals.css";
 
 
 export const metadata = {
-  title: "ShotgunCV Run Viewer",
-  description: "Read-only viewer for ShotgunCV run artifacts.",
+  title: "ShotgunCV 运行查看器",
+  description: "用于查看 ShotgunCV 运行产物的只读界面。",
 };
 
 

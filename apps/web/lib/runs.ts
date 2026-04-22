@@ -31,9 +31,15 @@ type EvaluateTopVariant = {
   jdId: string;
   title: string;
   variantId: string;
+  variantDisplayName: string;
   overallScore: number;
   gapCount: number;
   topReasons: string[];
+};
+
+type DisplayVariant = ResumeVariant & {
+  variantDisplayName: string;
+  variantTypeDisplay: string;
 };
 
 type RunDetail = {
@@ -51,7 +57,7 @@ type RunDetail = {
   };
   generate: {
     isComplete: boolean;
-    variants: ResumeVariant[];
+    variants: DisplayVariant[];
   };
   evaluate: {
     isComplete: boolean;
@@ -115,6 +121,11 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
   const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
   const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
+  const displayVariants: DisplayVariant[] = variants.map((variant) => ({
+    ...variant,
+    variantDisplayName: buildVariantDisplayName(variant.variant_id),
+    variantTypeDisplay: buildVariantTypeDisplay(variant.variant_type),
+  }));
   const scorecards = (await readJsonIfExists<ScoreCard[]>(path.join(runDir, "evaluate", "scorecards.json"))) ?? [];
   const gapMaps = (await readJsonIfExists<GapMap[]>(path.join(runDir, "evaluate", "gap_maps.json"))) ?? [];
   const explanations =
@@ -134,6 +145,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       jdId: item.jd_id,
       title: item.title || jdIndex.get(item.jd_id)?.title || item.jd_id,
       variantId: item.top_variant_id,
+      variantDisplayName: buildVariantDisplayName(item.top_variant_id),
       overallScore: scorecard?.final_overall_score ?? scorecard?.overall_score ?? 0,
       gapCount: item.gap_count ?? gapCounts.get(item.jd_id) ?? 0,
       topReasons: item.top_reasons ?? [],
@@ -155,7 +167,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     },
     generate: {
       isComplete: completedStages.includes("generate"),
-      variants,
+      variants: displayVariants,
     },
     evaluate: {
       isComplete: completedStages.includes("evaluate"),
@@ -224,3 +236,27 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 
 export type { RunDetail, RunReport, RunSummary };
+
+
+function buildVariantTypeDisplay(variantType: string): string {
+  if (variantType === "cluster") {
+    return "岗位簇版本";
+  }
+  if (variantType === "jd-specific") {
+    return "岗位定制版本";
+  }
+  return variantType;
+}
+
+
+function buildVariantDisplayName(variantId: string): string {
+  if (variantId.startsWith("variant-jd-")) {
+    const jdId = variantId.replace("variant-jd-", "");
+    return `岗位定制版本（${jdId}）`;
+  }
+  if (variantId.startsWith("variant-cluster-")) {
+    const cluster = variantId.replace("variant-cluster-", "");
+    return `岗位簇版本（${cluster}）`;
+  }
+  return `简历版本（${variantId}）`;
+}
