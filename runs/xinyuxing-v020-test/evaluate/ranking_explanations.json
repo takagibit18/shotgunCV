@@ -1,0 +1,311 @@
+[
+  {
+    "jd_id": "jd-001",
+    "variant_id": "variant-cluster-ai-product",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.19 based on variant type and reuse efficiency.",
+      "overall": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with Agent - 大模型AI训练师; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "Cluster version wins on reuse efficiency"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "decision_summary": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with Agent - 大模型AI训练师; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-001",
+    "variant_id": "variant-jd-jd-001",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Agent - 大模型AI训练师; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Agent - 大模型AI训练师; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-001",
+    "variant_id": "variant-jd-jd-002",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Agent - 大模型AI训练师; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Agent - 大模型AI训练师; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-002",
+    "variant_id": "variant-cluster-ai-product",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 2 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.19 based on variant type and reuse efficiency.",
+      "overall": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with AI Agent 工程师实习生; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "Cluster version wins on reuse efficiency"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "decision_summary": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with AI Agent 工程师实习生; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-002",
+    "variant_id": "variant-jd-jd-001",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 2 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI Agent 工程师实习生; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI Agent 工程师实习生; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-002",
+    "variant_id": "variant-jd-jd-002",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 2 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI Agent 工程师实习生; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI Agent 工程师实习生; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-003",
+    "variant_id": "variant-cluster-ai-operations",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.19 based on variant type and reuse efficiency.",
+      "overall": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with AI数据技术实习生-通用Agent/FC; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "Cluster version wins on reuse efficiency"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "Python",
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "decision_summary": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with AI数据技术实习生-通用Agent/FC; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-003",
+    "variant_id": "variant-jd-jd-003",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI数据技术实习生-通用Agent/FC; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "Python",
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI数据技术实习生-通用Agent/FC; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-003",
+    "variant_id": "variant-jd-jd-004",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI数据技术实习生-通用Agent/FC; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "Python",
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with AI数据技术实习生-通用Agent/FC; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-004",
+    "variant_id": "variant-cluster-ai-operations",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.19 based on variant type and reuse efficiency.",
+      "overall": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with Python（必须有pandas数据经验）线上...; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "Cluster version wins on reuse efficiency"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "Python",
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "decision_summary": "cluster variant scored 0.97 with 0.01 gap risk; cluster variant aligns cand-23012660 with Python（必须有pandas数据经验）线上...; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-004",
+    "variant_id": "variant-jd-jd-003",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Python（必须有pandas数据经验）线上...; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "Python",
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Python（必须有pandas数据经验）线上...; score indicates manageable risk for this batch."
+  },
+  {
+    "jd_id": "jd-004",
+    "variant_id": "variant-jd-jd-004",
+    "ranking_version": "v0.2.0-explainable-ranking",
+    "dimension_reasons": {
+      "fit": "Keyword coverage=0.99 and evidence binding=0.99.",
+      "ats": "ATS score reflects 1 tracked keywords against the current variant.",
+      "evidence": "Evidence binding=0.99 based on emphasized strengths traceable to candidate history.",
+      "stretch": "Stretch score=0.90 after checking untraceable claims.",
+      "gap_risk": "Gap risk=0.01 from missing keywords and indirect evidence.",
+      "rewrite_cost": "Rewrite cost=0.51 based on variant type and reuse efficiency.",
+      "overall": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Python（必须有pandas数据经验）线上...; score indicates manageable risk for this batch."
+    },
+    "positive_signals": [
+      "Fit score 0.99 driven by keyword coverage",
+      "Evidence score 0.99 supported by resume-backed strengths",
+      "JD-specific version wins on precision"
+    ],
+    "risk_flags": [],
+    "evidence_refs": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "Python",
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "decision_summary": "jd-specific variant scored 0.96 with 0.01 gap risk; jd-specific variant aligns cand-23012660 with Python（必须有pandas数据经验）线上...; score indicates manageable risk for this batch."
+  }
+]

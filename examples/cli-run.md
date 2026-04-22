@@ -25,3 +25,8 @@ python -m shotguncv_cli.main report --run-dir ./runs/demo
 - `runs/demo/report/summary.md`
 
 该示例默认使用 deterministic generator/judge stub，不依赖外部模型或网络。
+
+补充说明：
+
+- 若不传 `--config`，`ingest` 会自动写入 deterministic `run config`
+- 快照路径固定为 `runs/demo/config/run_config.json`

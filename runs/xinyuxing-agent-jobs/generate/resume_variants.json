@@ -1,0 +1,84 @@
+[
+  {
+    "variant_id": "variant-cluster-ai-product",
+    "variant_type": "cluster",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001",
+      "jd-002"
+    ],
+    "summary": "ai-product cluster resume emphasizing 中央民族大学计算机科学与技术本科，GPA 3.6，英语 IELTS 7.0 / CET-6。 across 2 related roles.",
+    "emphasized_strengths": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-cluster-ai-operations",
+    "variant_type": "cluster",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-003"
+    ],
+    "summary": "ai-operations cluster resume emphasizing 中央民族大学计算机科学与技术本科，GPA 3.6，英语 IELTS 7.0 / CET-6。 across 1 related roles.",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-001",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001"
+    ],
+    "summary": "Agent - 大模型AI训练师 variant focused on 中央民族大学计算机科学与技术本科，GPA 3.6，英语 IELTS 7.0 / CET-6。, prompt engineering, and evidence-backed delivery.",
+    "emphasized_strengths": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-002",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-002"
+    ],
+    "summary": "AI Agent 工程师实习生 variant focused on 中央民族大学计算机科学与技术本科，GPA 3.6，英语 IELTS 7.0 / CET-6。, python, and evidence-backed delivery.",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-003",
+    "variant_type": "jd-specific",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-003"
+    ],
+    "summary": "AI数据技术实习生-通用Agent/FC variant focused on 中央民族大学计算机科学与技术本科，GPA 3.6，英语 IELTS 7.0 / CET-6。, python, and evidence-backed delivery.",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  }
+]

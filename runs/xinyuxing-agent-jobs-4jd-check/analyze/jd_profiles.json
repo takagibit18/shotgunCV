@@ -1,0 +1,114 @@
+[
+  {
+    "jd_id": "jd-001",
+    "title": "Agent - 大模型AI训练师",
+    "company": "未提供公司名（截图JD-1）",
+    "cluster": "ai-product",
+    "responsibilities": [
+      "负责大模型 Agent 数据标注工作，理解并执行标注规则，产出高质量与高复杂度数据。",
+      "与负责人和算法团队沟通协作，参与规则标准制定、标注工具优化、尺度拉齐和策略迭代。",
+      "在执行需求过程中使用 Prompt engineering 等方法优化数据质量与效率，并持续复盘迭代。",
+      "要求逻辑思维能力强，能准确理解并执行复杂标注规则。",
+      "英文能力要求较强，本科及以上理工相关专业优先。",
+      "有智能语音助手相关经验（如小爱同学、小度）为加分项。"
+    ],
+    "requirements": [
+      "负责大模型 Agent 数据标注工作，理解并执行标注规则，产出高质量与高复杂度数据。",
+      "与负责人和算法团队沟通协作，参与规则标准制定、标注工具优化、尺度拉齐和策略迭代。"
+    ],
+    "keywords": [
+      "prompt engineering"
+    ],
+    "seniority": "mid",
+    "bonuses": [],
+    "risk_signals": [
+      "Prompt quality will be probed"
+    ],
+    "source_type": "file",
+    "source_value": "private_inputs\\20260421_xinyuxing_agent_jobs\\jds_batch.txt"
+  },
+  {
+    "jd_id": "jd-002",
+    "title": "AI Agent 工程师实习生",
+    "company": "未提供公司名（截图JD-2）",
+    "cluster": "ai-product",
+    "responsibilities": [
+      "参与 AI Agent 系统设计、开发与迭代，包括任务分解、规划、工具调用、记忆管理和多 Agent 协作。",
+      "基于主流大语言模型（DeepSeek、Qwen、豆包、GPT、Claude、Gemini）构建 Agent 应用并优化 Prompt。",
+      "优化推理模式与方法，包括 Chain-of-Thought、ReAct、Reflection、Plan-and-Execute。",
+      "开发或优化 Agent 框架并推进 Agent 业务落地。",
+      "负责模型评估、效果调优、幻觉控制、鲁棒性测试和多轮对话稳定性优化。",
+      "要求熟练 Python，熟悉 Linux、Git、Docker，熟悉至少一种 Agent 框架（LangChain 或 LangGraph 等）。",
+      "需要理解 Transformer、SFT、RLHF、Prompt Engineering，并具备项目实践经验。"
+    ],
+    "requirements": [
+      "参与 AI Agent 系统设计、开发与迭代，包括任务分解、规划、工具调用、记忆管理和多 Agent 协作。",
+      "基于主流大语言模型（DeepSeek、Qwen、豆包、GPT、Claude、Gemini）构建 Agent 应用并优化 Prompt。"
+    ],
+    "keywords": [
+      "python",
+      "prompt engineering"
+    ],
+    "seniority": "mid",
+    "bonuses": [],
+    "risk_signals": [
+      "Prompt quality will be probed"
+    ],
+    "source_type": "file",
+    "source_value": "private_inputs\\20260421_xinyuxing_agent_jobs\\jds_batch.txt"
+  },
+  {
+    "jd_id": "jd-003",
+    "title": "AI数据技术实习生-通用Agent/FC",
+    "company": "未提供公司名（截图JD-3）",
+    "cluster": "ai-operations",
+    "responsibilities": [
+      "面向 Agent 与模型工具调用（Function Calling）场景，构建覆盖全生命周期的数据构建、校验与评测体系。",
+      "与产品、算法、工程团队协同，参与 Agent 或模型迭代全流程并提供定制化数据评测方案。",
+      "探索前沿数据构建与效果评测方法，推动 Agent 相关数据评测方案落地。",
+      "结合业务实践优化数据质量和评测分析方法，提升 Agent 与模型的使用体验与迭代效率。",
+      "要求熟悉 Python、提示词工程、Agent and Workflow 构建、Function Calling。",
+      "本科及以上在读，AI 相关专业优先；有大模型产品、数据合成、研发或评测经验优先。",
+      "可实习三个月以上，每周可投入四天及以上。"
+    ],
+    "requirements": [
+      "面向 Agent 与模型工具调用（Function Calling）场景，构建覆盖全生命周期的数据构建、校验与评测体系。",
+      "与产品、算法、工程团队协同，参与 Agent 或模型迭代全流程并提供定制化数据评测方案。"
+    ],
+    "keywords": [
+      "python"
+    ],
+    "seniority": "mid",
+    "bonuses": [],
+    "risk_signals": [],
+    "source_type": "file",
+    "source_value": "private_inputs\\20260421_xinyuxing_agent_jobs\\jds_batch.txt"
+  },
+  {
+    "jd_id": "jd-004",
+    "title": "Python（必须有pandas数据经验）线上...",
+    "company": "未提供公司名（截图JD-4）",
+    "cluster": "ai-operations",
+    "responsibilities": [
+      "注：必须会 pandas。",
+      "在计算机或科学计算领域具备专业知识，熟悉 Python 编程语言和 SQL 数据库。",
+      "具备一定金融学理论基础，能够理解金融行业常用分析指标与模型。",
+      "具备良好的工程实现能力，代码需兼顾高效率与高可靠性。",
+      "加分项：深度参与过投资研究和相关系统项目，具备金融数据处理经验，或具备金融市场、金融产品、证券投资与风险管理知识储备。",
+      "负责承接研究需求的数据量化分析工具开发，包括但不限于计算脚本、实时计算工具、定时计算任务等。",
+      "主要开发语言为 Python，并使用主流数据工具（截图内容末尾有截断）。"
+    ],
+    "requirements": [
+      "注：必须会 pandas。",
+      "在计算机或科学计算领域具备专业知识，熟悉 Python 编程语言和 SQL 数据库。"
+    ],
+    "keywords": [
+      "python"
+    ],
+    "seniority": "mid",
+    "bonuses": [],
+    "risk_signals": [],
+    "source_type": "file",
+    "source_value": "private_inputs\\20260421_xinyuxing_agent_jobs\\jds_batch.txt"
+  }
+]

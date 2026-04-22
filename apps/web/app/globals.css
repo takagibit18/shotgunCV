@@ -1,0 +1,158 @@
+:root {
+  --bg: #f3efe6;
+  --panel: rgba(255, 252, 246, 0.88);
+  --panel-strong: #fff9ef;
+  --border: rgba(77, 50, 27, 0.14);
+  --text: #2f2418;
+  --muted: #6d5a48;
+  --accent: #9a3412;
+  --accent-soft: #f7c9b4;
+  --shadow: 0 24px 70px rgba(81, 49, 18, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(255, 236, 215, 0.9), transparent 30%),
+    linear-gradient(160deg, #f6f2e8 0%, #efe2cc 100%);
+  color: var(--text);
+  font-family: "Georgia", "Times New Roman", serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+main {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 40px 0 72px;
+}
+
+.hero {
+  padding: 28px 30px;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(255, 251, 244, 0.95), rgba(244, 229, 207, 0.88));
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.hero h1,
+.page-title {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.8rem);
+  line-height: 0.95;
+}
+
+.hero p,
+.muted {
+  color: var(--muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.card,
+.section {
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.card {
+  padding: 22px;
+}
+
+.section {
+  padding: 24px;
+  margin-top: 18px;
+}
+
+.statline,
+.pill-row,
+.detail-grid,
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.detail-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.detail-card {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--border);
+}
+
+.detail-card h3,
+.section h2,
+.section h3,
+.card h2 {
+  margin-top: 0;
+}
+
+.empty {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(154, 52, 18, 0.08);
+  color: var(--muted);
+}
+
+.mono {
+  font-family: "Consolas", "SFMono-Regular", monospace;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin-top: 1.4em;
+}
+
+.markdown h1:first-child,
+.markdown h2:first-child,
+.markdown h3:first-child {
+  margin-top: 0;
+}
+
+.backlink {
+  display: inline-flex;
+  margin-bottom: 16px;
+  color: var(--accent);
+}

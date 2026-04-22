@@ -6,6 +6,7 @@ from shotguncv_core.models import (
     GapItem,
     GapMap,
     JDProfile,
+    RankingExplanation,
     ResumeVariant,
     ScoreCard,
 )
@@ -57,7 +58,26 @@ def test_scorecard_and_strategy_capture_v1_fields() -> None:
         gap_risk_score=0.42,
         rewrite_cost_score=0.25,
         overall_score=0.81,
+        ranking_version="v0.2.0-explainable-ranking",
         judge_rationale="Strong fit with manageable concept catch-up.",
+    )
+    explanation = RankingExplanation(
+        jd_id=jd.jd_id,
+        variant_id=variant.variant_id,
+        ranking_version="v0.2.0-explainable-ranking",
+        dimension_reasons={
+            "fit": "keyword coverage and evidence binding are both strong",
+            "ats": "python and evaluation keywords are present",
+            "evidence": "resume bullets support the emphasized strengths",
+            "stretch": "stretch claims remain discussable in interviews",
+            "gap_risk": "missing large-scale benchmark ownership raises risk",
+            "rewrite_cost": "jd-specific version needs moderate tailoring",
+            "overall": "worth applying with light interview prep",
+        },
+        positive_signals=["LLM workflow tooling", "Resume scoring prototype"],
+        risk_flags=["No production ML platform ownership"],
+        evidence_refs=["Built internal tooling for LLM workflows", "Resume scoring prototype"],
+        decision_summary="High-fit role with bounded catch-up risk.",
     )
     gap_map = GapMap(
         jd_id=jd.jd_id,
@@ -79,8 +99,11 @@ def test_scorecard_and_strategy_capture_v1_fields() -> None:
         recommended_variant_id=variant.variant_id,
         priority_rank=1,
         apply_decision="apply",
-        reason_summary="Good fit for sea-application batch.",
+        reason_summary="High-fit role with bounded catch-up risk.",
         needs_jd_specific_variant=True,
+        decision_drivers=["Strong evidence binding", "Good keyword coverage"],
+        watchouts=["Do not overstate production ML ownership"],
+        recommended_actions=["Review offline evaluation metrics before interviews."],
         catch_up_notes=[
             "Review offline evaluation metrics before interviews.",
             "Avoid overstating production ownership.",
@@ -91,8 +114,12 @@ def test_scorecard_and_strategy_capture_v1_fields() -> None:
     assert candidate.constraints == ["No production ML platform ownership"]
     assert variant.variant_type == "cluster"
     assert scorecard.overall_score > scorecard.gap_risk_score
+    assert scorecard.ranking_version == explanation.ranking_version
+    assert explanation.dimension_reasons["overall"] == "worth applying with light interview prep"
     assert gap_map.items[0].catch_up_concepts == ["precision@k", "evaluation rubric"]
     assert strategy.needs_jd_specific_variant is True
+    assert strategy.decision_drivers == ["Strong evidence binding", "Good keyword coverage"]
+    assert strategy.recommended_actions == ["Review offline evaluation metrics before interviews."]
 
 
 def test_strategy_sort_key_prefers_high_score_and_lower_gap_risk() -> None:
@@ -106,6 +133,7 @@ def test_strategy_sort_key_prefers_high_score_and_lower_gap_risk() -> None:
         gap_risk_score=0.3,
         rewrite_cost_score=0.2,
         overall_score=0.88,
+        ranking_version="v0.2.0-explainable-ranking",
         judge_rationale="High priority.",
     )
     weaker = ScoreCard(
@@ -118,6 +146,7 @@ def test_strategy_sort_key_prefers_high_score_and_lower_gap_risk() -> None:
         gap_risk_score=0.55,
         rewrite_cost_score=0.45,
         overall_score=0.7,
+        ranking_version="v0.2.0-explainable-ranking",
         judge_rationale="Lower payoff.",
     )
 

@@ -43,3 +43,6 @@ coverage-final.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Private local inputs
+/private_inputs/20260421_xinyuxing_agent_jobs/

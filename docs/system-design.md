@@ -36,8 +36,10 @@
 
 - CLI 子命令保持 `shotguncv ingest/analyze/generate/evaluate/plan/report`。
 - 每个阶段都以 `run_dir` 作为输入输出边界。
+- `ingest` 负责写入 `run_dir/config/run_config.json`，后续阶段统一读取该快照。
 - 各阶段产物使用结构化文件持久化，供后续阶段消费。
 - v1 最小闭环默认写入：
+  - `config/run_config.json`
   - `ingest/manifest.json`
   - `analyze/candidate_profile.json`
   - `analyze/jd_profiles.json`
@@ -47,7 +49,8 @@
   - `evaluate/eval_summary.json`
   - `plan/application_strategies.json`
   - `report/summary.md`
-- `generate` 与 `evaluate` 均通过 deterministic provider 接口落地，后续可替换为真实模型接入。
+- `generate` 与 `evaluate` 均通过 provider 接口落地，默认 deterministic，可按 `run_config` 切换到 OpenAI。
+- OpenAI 仅负责生成 summary 与 judge rationale，`overall_score` 仍由规则公式决定。
 
 ## 评估与质量门禁
 
@@ -58,6 +61,6 @@
 
 ## 非目标与边界
 
-- v1 不建设 Web 业务能力，`apps/web` 仅保留扩展位。
+- Web Viewer 为只读界面，不触发 pipeline，也不写入 `runs/`。
 - v1 不实现自动投递、浏览器自动化和 CRM。
 - v1 不做截图/OCR 主链路，仅保留后续接口扩展能力。

@@ -1,0 +1,17 @@
+{
+  "generator": {
+    "provider": "deterministic",
+    "model": ""
+  },
+  "judge": {
+    "provider": "deterministic",
+    "model": ""
+  },
+  "openai": {
+    "base_url": null,
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "run_metadata": {
+    "label": ""
+  }
+}

@@ -1,0 +1,101 @@
+[
+  {
+    "variant_id": "variant-cluster-ai-product",
+    "variant_type": "cluster",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001",
+      "jd-002"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科，GPA 3.6，具备扎实的 Python 工程化开发能力。熟练掌握 FastAPI、Pydantic 构建高效后端服务，熟悉 MySQL、Redis 管理 Agent 上下文与数据状态，通过 pytest 确保系统稳定性。英语能力优秀（IELTS 7.0），可无障碍阅读英文技术文档。目标定位 AI Agent 工程师/大模型 AI 训练师，期望以严谨的工程规范赋能智能体开发，实现从模型集成到产品落地的全流程交付。",
+    "emphasized_strengths": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-cluster-ai-operations",
+    "variant_type": "cluster",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-003",
+      "jd-004"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科（GPA 3.6），具备扎实的Python工程化开发能力，熟练使用FastAPI、Pydantic、pytest及MySQL/Redis构建高可用服务。擅长数据流设计与自动化脚本开发，熟练运用pandas进行高效数据清洗、分析与Pipeline搭建。英语流利（IELTS 7.0/CET-6），具备AI数据运营与Agent训练支持思维，致力于在AI数据技术、自动化运维及数据基础设施方向提供可靠工程支持。",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-001",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科，GPA 3.6，雅思7.0。扎实Python工程基础，熟练FastAPI、Pydantic、Redis等技术栈。深耕大模型应用，擅长Prompt Engineering与Agent开发，能高效结合工程化手段进行模型训练与优化，助力AI产品落地。",
+    "emphasized_strengths": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-002",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-002"
+    ],
+    "summary": "中央民族大学计算机本科（GPA 3.6），精通Python工程化开发，熟练运用FastAPI、Pydantic、pytest构建稳健后端架构，掌握MySQL/Redis数据管理。英语流利（IELTS 7.0），具备优秀技术文档阅读能力。以扎实的工程基础赋能AI Agent全链路开发，快速响应Prompt优化与工具调用需求，胜任AI Agent工程师实习。",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-003",
+    "variant_type": "jd-specific",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-003"
+    ],
+    "summary": "Computer Science undergraduate from Minzu University of China (GPA 3.6) with strong proficiency in Python engineering development and hands-on experience building scalable services using FastAPI, Pydantic, pytest, MySQL, and Redis. Skilled in designing reliable data pipelines and API architectures aligned with AI data technology and general agent system workflows. Fluent in English (IELTS 7.0/CET-6) with a rigorous academic background and eager to leverage Python engineering expertise to support AI data infrastructure and agent development as an intern.",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-004",
+    "variant_type": "jd-specific",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-004"
+    ],
+    "summary": "Python developer with a strong CS background (GPA 3.6) and hands-on experience in data processing and analysis using pandas. Proficient in engineering scalable backend services with FastAPI, Pydantic, and pytest, supported by MySQL and Redis for efficient data management. IELTS 7.0, adept at translating data insights into reliable, production-ready online solutions.",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  }
+]

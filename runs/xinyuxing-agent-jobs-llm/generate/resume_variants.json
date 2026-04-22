@@ -1,0 +1,101 @@
+[
+  {
+    "variant_id": "variant-cluster-ai-product",
+    "variant_type": "cluster",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001",
+      "jd-002"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科，GPA 3.6，雅思7.0。具备扎实的Python工程化开发能力，熟练掌握FastAPI、Pydantic、pytest及MySQL/Redis技术栈。拥有优秀的英文文档阅读与技术追踪能力，期望担任AI Agent工程师实习生或大模型AI训练师，凭借稳健的后端工程基础与数据处理经验，快速构建高可用智能体应用，推动大模型产品高效落地。",
+    "emphasized_strengths": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-cluster-ai-operations",
+    "variant_type": "cluster",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-003",
+      "jd-004"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科，GPA 3.6，雅思7.0。熟练掌握Python工程化开发，精通FastAPI、Pydantic、pytest及MySQL/Redis。具备扎实的代码质量保障与系统架构意识，能快速切入AI数据技术、通用Agent运维及线上数据管道开发，胜任AI Ops方向的数据处理、服务部署与自动化测试任务。",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-001",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-001"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科（GPA 3.6），具备扎实的Python工程化开发能力，熟练运用FastAPI、Pydantic、pytest及MySQL/Redis构建稳定服务。深耕Prompt Engineering，擅长LLM提示词设计、Agent工作流编排与大模型效果评测。英语流利（IELTS 7.0/CET-6），可快速吸收国际前沿AI技术。致力于以工程化思维赋能大模型AI训练与智能体落地。",
+    "emphasized_strengths": [
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-002",
+    "variant_type": "jd-specific",
+    "cluster": "ai-product",
+    "target_jd_ids": [
+      "jd-002"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科，GPA 3.6。熟练掌握 Python 工程化开发，熟练使用 FastAPI、Pydantic、pytest、MySQL 及 Redis 构建稳健后端服务。英语流利（IELTS 7.0），具备出色的英文技术文档阅读能力。扎实的 CS 基础与工程素养，能够快速融合 Prompt Engineering 技术，高效设计、开发与迭代 AI Agent 应用，胜任 AI Agent 工程师实习工作。",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。",
+      "掌握 LLM API 接入、Prompt Engineering、Tool Calling、结构化输出与 Agent 基础编排。"
+    ],
+    "stretch_points": [
+      "prompt engineering"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-003",
+    "variant_type": "jd-specific",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-003"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科（GPA 3.6），英语IELTS 7.0。精通Python工程化开发，熟练运用FastAPI、Pydantic构建高效服务，掌握pytest测试规范及MySQL/Redis数据存储。具备扎实的后端与数据处理基础，高度契合AI数据技术实习生岗位，能快速投入通用Agent/FC模块的开发、调试与优化工作。",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  },
+  {
+    "variant_id": "variant-jd-jd-004",
+    "variant_type": "jd-specific",
+    "cluster": "ai-operations",
+    "target_jd_ids": [
+      "jd-004"
+    ],
+    "summary": "中央民族大学计算机科学与技术本科，GPA 3.6。熟练 Python 工程化开发，掌握 FastAPI、Pydantic、pytest 及 MySQL/Redis 技术栈。具备扎实的数据处理与分析能力，英语流利，能快速适配线上业务场景，交付高可用后端解决方案。",
+    "emphasized_strengths": [
+      "熟练 Python 工程化开发，使用过 FastAPI、Pydantic、pytest、MySQL、Redis。"
+    ],
+    "stretch_points": [
+      "python"
+    ],
+    "source_resume_path": "private_inputs\\20260421_xinyuxing_agent_jobs\\candidate_resume.md"
+  }
+]
