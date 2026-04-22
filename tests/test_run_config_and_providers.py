@@ -334,7 +334,7 @@ def test_generate_run_env_overrides_model_and_base_url_over_run_config(
     assert capture["last_url"] == "https://env.example.com/v1/chat/completions"
 
 
-def test_generate_run_env_overrides_provider_from_deterministic_to_openai(
+def test_generate_run_ignores_env_provider_override_when_run_config_is_deterministic(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     run_dir = _prepare_analyzed_run(tmp_path)
@@ -352,16 +352,44 @@ def test_generate_run_env_overrides_provider_from_deterministic_to_openai(
             "run_metadata": {"label": "provider-override"},
         },
     )
-    capture: dict[str, str] = {}
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["OpenAI cluster summary", "OpenAI JD summary", "OpenAI JD summary"], capture=capture),
-    )
+    def _unexpected_openai_call(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("deterministic provider should not be overridden by .env")
+
+    monkeypatch.setattr("urllib.request.urlopen", _unexpected_openai_call)
 
     generation = generate_run(run_dir)
 
-    assert generation.variants[0].summary == "OpenAI cluster summary"
-    assert capture["last_model"] == "override-provider-model"
+    assert generation.variants[0].summary.startswith("ai-product cluster resume emphasizing")
+
+
+def test_evaluate_run_ignores_env_provider_override_when_run_config_is_deterministic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_dir = _prepare_analyzed_run(tmp_path)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "SHOTGUNCV_JUDGE_PROVIDER=openai\nOPENAI_API_KEY=test-key\nOPENAI_MODEL=override-judge-model\n",
+        encoding="utf-8",
+    )
+    _write_run_config(
+        run_dir,
+        {
+            "generator": {"provider": "deterministic", "model": ""},
+            "judge": {"provider": "deterministic", "model": ""},
+            "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
+            "run_metadata": {"label": "judge-provider-override"},
+        },
+    )
+    generate_run(run_dir)
+
+    def _unexpected_openai_call(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("deterministic judge should not be overridden by .env")
+
+    monkeypatch.setattr("urllib.request.urlopen", _unexpected_openai_call)
+
+    evaluation = evaluate_run(run_dir)
+
+    assert evaluation.scorecards[0].judge_rationale.startswith("cluster variant aligns")
 
 
 def _prepare_analyzed_run(tmp_path: Path) -> Path:

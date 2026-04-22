@@ -91,8 +91,22 @@ export default async function RunPage({ params }: PageProps) {
                 <p className="mono">{item.variantId}</p>
                 <p>overall score: {item.overallScore.toFixed(2)}</p>
                 <p>gap count: {item.gapCount}</p>
+                <p>top reasons: {item.topReasons.join(" / ") || "No top reasons captured"}</p>
               </article>
             ))}
+            {detail.evaluate.explanations.map((explanation) => (
+              <article key={`${explanation.jd_id}-${explanation.variant_id}-explanation`} className="detail-card">
+                <h3>{explanation.variant_id}</h3>
+                <p>overall: {explanation.dimension_reasons.overall}</p>
+                <p>risk flags: {explanation.risk_flags.join(" / ") || "No risk flags"}</p>
+              </article>
+            ))}
+            {detail.evaluate.explanations.length === 0 ? (
+              <article className="detail-card">
+                <h3>Ranking Explanations</h3>
+                <p>No ranking explanations found for this run. Legacy artifacts are still readable.</p>
+              </article>
+            ) : null}
           </div>
         ) : (
           <div className="empty">阶段未完成</div>
@@ -108,7 +122,9 @@ export default async function RunPage({ params }: PageProps) {
                 <h3>{strategy.jd_id}</h3>
                 <p>priority: {strategy.priority_rank}</p>
                 <p>decision: {strategy.apply_decision}</p>
-                <p>{strategy.catch_up_notes.join(" / ")}</p>
+                <p>drivers: {strategy.decision_drivers.join(" / ")}</p>
+                <p>watchouts: {strategy.watchouts.join(" / ")}</p>
+                <p>recommended actions: {strategy.recommended_actions.join(" / ")}</p>
               </article>
             ))}
           </div>

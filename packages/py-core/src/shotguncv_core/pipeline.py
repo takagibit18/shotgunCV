@@ -13,6 +13,7 @@ from shotguncv_core.models import (
     CandidateProfile,
     GapMap,
     JDProfile,
+    RankingExplanation,
     ResumeVariant,
     ScoreCard,
 )
@@ -36,12 +37,16 @@ class GenerationArtifacts:
 class EvaluationArtifacts:
     scorecards: list[ScoreCard]
     gap_maps: list[GapMap]
+    explanations: list[RankingExplanation]
     summary: dict[str, object]
 
 
 @dataclass(slots=True)
 class PlanArtifacts:
     strategies: list[ApplicationStrategy]
+
+
+RANKING_VERSION = "v0.2.0-explainable-ranking"
 
 
 def ingest_run(
@@ -139,6 +144,7 @@ def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
 
     scorecards: list[ScoreCard] = []
     gap_maps: list[GapMap] = []
+    explanations: list[RankingExplanation] = []
     eval_summary: list[dict[str, object]] = []
 
     for jd in jd_profiles:
@@ -158,6 +164,16 @@ def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
                     gap_risk_score=rule_eval.gap_risk_score,
                     rewrite_cost_score=rule_eval.rewrite_cost_score,
                     overall_score=rule_eval.overall_score,
+                    ranking_version=RANKING_VERSION,
+                    judge_rationale=judge_feedback.rationale,
+                )
+            )
+            explanations.append(
+                _build_ranking_explanation(
+                    jd=jd,
+                    candidate=candidate,
+                    variant=variant,
+                    rule_eval=rule_eval,
                     judge_rationale=judge_feedback.rationale,
                 )
             )
@@ -165,29 +181,35 @@ def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
 
         gap_map = GapMap(jd_id=jd.jd_id, candidate_id=candidate.candidate_id, items=gap_items)
         gap_maps.append(gap_map)
+        best_scorecard = max((card for card in scorecards if card.jd_id == jd.jd_id), key=ScoreCard.ranking_key)
+        best_explanation = next(
+            explanation
+            for explanation in explanations
+            if explanation.jd_id == jd.jd_id and explanation.variant_id == best_scorecard.variant_id
+        )
         eval_summary.append(
             {
                 "jd_id": jd.jd_id,
                 "title": jd.title,
-                "top_variant_id": max(
-                    (card for card in scorecards if card.jd_id == jd.jd_id),
-                    key=ScoreCard.ranking_key,
-                ).variant_id,
+                "top_variant_id": best_scorecard.variant_id,
                 "gap_count": len(gap_items),
+                "top_reasons": best_explanation.positive_signals[:2] or [best_explanation.dimension_reasons["overall"]],
             }
         )
 
     evaluate_directory = stage_dir(run_dir, "evaluate")
     dump_json(evaluate_directory / "scorecards.json", scorecards)
     dump_json(evaluate_directory / "gap_maps.json", gap_maps)
+    dump_json(evaluate_directory / "ranking_explanations.json", explanations)
     dump_json(evaluate_directory / "eval_summary.json", eval_summary)
-    return EvaluationArtifacts(scorecards=scorecards, gap_maps=gap_maps, summary={"items": eval_summary})
+    return EvaluationArtifacts(scorecards=scorecards, gap_maps=gap_maps, explanations=explanations, summary={"items": eval_summary})
 
 
 def plan_run(run_dir: Path) -> PlanArtifacts:
     load_run_config(run_dir)
     scorecards = hydrate(list[ScoreCard], load_json(run_dir / "evaluate" / "scorecards.json"))
     gap_maps = hydrate(list[GapMap], load_json(run_dir / "evaluate" / "gap_maps.json"))
+    explanations = _load_explanations_with_fallback(run_dir, scorecards, gap_maps)
 
     best_by_jd: dict[str, ScoreCard] = {}
     for scorecard in scorecards:
@@ -197,14 +219,26 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
 
     ordered = sorted(best_by_jd.values(), key=ScoreCard.ranking_key, reverse=True)
     gap_index = {gap_map.jd_id: gap_map for gap_map in gap_maps}
+    explanation_index = {(explanation.jd_id, explanation.variant_id): explanation for explanation in explanations}
     strategies: list[ApplicationStrategy] = []
 
     for rank, scorecard in enumerate(ordered, start=1):
         gap_map = gap_index.get(scorecard.jd_id)
+        explanation = explanation_index[(scorecard.jd_id, scorecard.variant_id)]
         catch_up_notes = []
         if gap_map:
             for item in gap_map.items:
                 catch_up_notes.extend(item.catch_up_concepts[:2])
+        watchouts = list(explanation.risk_flags)
+        if gap_map:
+            for item in gap_map.items:
+                watchouts.extend(item.weak_points[:1])
+        recommended_actions = [
+            f"Review {concept} before interviews."
+            for concept in catch_up_notes[:2]
+        ]
+        if not recommended_actions:
+            recommended_actions.append("Keep the current evidence narrative consistent in interviews.")
         apply_decision = "apply" if scorecard.overall_score >= 0.7 else "stretch"
         strategies.append(
             ApplicationStrategy(
@@ -212,11 +246,11 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
                 recommended_variant_id=scorecard.variant_id,
                 priority_rank=rank,
                 apply_decision=apply_decision,
-                reason_summary=(
-                    f"overall_score={scorecard.overall_score:.2f}, gap_risk_score={scorecard.gap_risk_score:.2f}, "
-                    f"variant={scorecard.variant_id}"
-                ),
+                reason_summary=explanation.decision_summary or explanation.dimension_reasons["overall"],
                 needs_jd_specific_variant="jd-" in scorecard.variant_id,
+                decision_drivers=explanation.positive_signals[:3] or [explanation.dimension_reasons["overall"]],
+                watchouts=watchouts or ["No material watchouts surfaced by current rules."],
+                recommended_actions=recommended_actions,
                 catch_up_notes=catch_up_notes or ["No major catch-up themes detected."],
             )
         )
@@ -232,13 +266,15 @@ def report_run(run_dir: Path) -> Path:
     scorecards = hydrate(list[ScoreCard], load_json(run_dir / "evaluate" / "scorecards.json"))
     strategies = hydrate(list[ApplicationStrategy], load_json(run_dir / "plan" / "application_strategies.json"))
     gap_maps = hydrate(list[GapMap], load_json(run_dir / "evaluate" / "gap_maps.json"))
+    explanations = _load_explanations_with_fallback(run_dir, scorecards, gap_maps)
 
     jd_index = {jd.jd_id: jd for jd in jd_profiles}
     score_index = {(score.jd_id, score.variant_id): score for score in scorecards}
     gap_index = {gap_map.jd_id: gap_map for gap_map in gap_maps}
+    explanation_index = {(explanation.jd_id, explanation.variant_id): explanation for explanation in explanations}
 
     lines = [
-        "# ShotgunCV v1 Run Summary",
+        "# ShotgunCV v0.2.0 Explainable Ranking Summary",
         "",
         f"- Candidate: `{candidate.candidate_id}`",
         f"- Run directory: `{run_dir}`",
@@ -251,14 +287,19 @@ def report_run(run_dir: Path) -> Path:
         jd = jd_index[strategy.jd_id]
         scorecard = score_index[(strategy.jd_id, strategy.recommended_variant_id)]
         gap_map = gap_index.get(strategy.jd_id)
+        explanation = explanation_index[(strategy.jd_id, strategy.recommended_variant_id)]
         lines.extend(
             [
                 f"### {strategy.priority_rank}. {jd.title} @ {jd.company}",
                 f"- Decision: `{strategy.apply_decision}`",
                 f"- Recommended variant: `{strategy.recommended_variant_id}`",
                 f"- overall_score: `{scorecard.overall_score:.2f}`",
-                f"- judge_rationale: {scorecard.judge_rationale}",
-                f"- catch-up: {', '.join(strategy.catch_up_notes)}",
+                f"- Why it ranks here: {strategy.reason_summary}",
+                f"- Judge rationale: {scorecard.judge_rationale}",
+                f"- Top Evidence: {', '.join(explanation.evidence_refs[:3]) or 'No strong evidence references captured.'}",
+                f"- Watchouts: {', '.join(strategy.watchouts)}",
+                f"- Recommended Actions: {', '.join(strategy.recommended_actions)}",
+                f"- Catch-up: {', '.join(strategy.catch_up_notes)}",
             ]
         )
         if gap_map and gap_map.items:
@@ -384,3 +425,107 @@ def _build_stretch_points(jd: JDProfile, candidate: CandidateProfile) -> list[st
     candidate_text = " ".join(candidate.experiences + candidate.projects + candidate.skills).lower()
     stretch_points = [keyword for keyword in jd.keywords if keyword.lower() not in candidate_text]
     return stretch_points[:3] or [jd.keywords[-1]]
+
+
+def _build_ranking_explanation(
+    jd: JDProfile,
+    candidate: CandidateProfile,
+    variant: ResumeVariant,
+    rule_eval,
+    judge_rationale: str,
+) -> RankingExplanation:
+    candidate_evidence = candidate.experiences + candidate.projects + candidate.skills + candidate.strengths
+    matched_evidence = [
+        item
+        for item in candidate_evidence
+        if any(keyword.split()[0] in item.lower() for keyword in jd.keywords)
+    ]
+    positive_signals = [
+        signal
+        for signal in [
+            f"Fit score {rule_eval.fit_score:.2f} driven by keyword coverage",
+            f"Evidence score {rule_eval.evidence_score:.2f} supported by resume-backed strengths",
+            "JD-specific version wins on precision" if variant.variant_type == "jd-specific" else "Cluster version wins on reuse efficiency",
+        ]
+        if signal
+    ]
+    risk_flags = list(rule_eval.untraceable_claim_flags[:2]) or [
+        item.weak_points[0]
+        for item in rule_eval.gaps
+        if item.weak_points
+    ][:2]
+    evidence_refs = matched_evidence[:3] or variant.emphasized_strengths[:2] or candidate.strengths[:2]
+    decision_summary = (
+        f"{variant.variant_type} variant scored {rule_eval.overall_score:.2f} with "
+        f"{rule_eval.gap_risk_score:.2f} gap risk; {judge_rationale}"
+    )
+    return RankingExplanation(
+        jd_id=jd.jd_id,
+        variant_id=variant.variant_id,
+        ranking_version=RANKING_VERSION,
+        dimension_reasons={
+            "fit": f"Keyword coverage={rule_eval.keyword_coverage:.2f} and evidence binding={rule_eval.evidence_binding:.2f}.",
+            "ats": f"ATS score reflects {len(jd.keywords)} tracked keywords against the current variant.",
+            "evidence": f"Evidence binding={rule_eval.evidence_binding:.2f} based on emphasized strengths traceable to candidate history.",
+            "stretch": f"Stretch score={rule_eval.stretch_score:.2f} after checking untraceable claims.",
+            "gap_risk": f"Gap risk={rule_eval.gap_risk_score:.2f} from missing keywords and indirect evidence.",
+            "rewrite_cost": f"Rewrite cost={rule_eval.rewrite_cost_score:.2f} based on variant type and reuse efficiency.",
+            "overall": decision_summary,
+        },
+        positive_signals=positive_signals,
+        risk_flags=risk_flags,
+        evidence_refs=evidence_refs,
+        decision_summary=decision_summary,
+    )
+
+
+def _load_explanations_with_fallback(
+    run_dir: Path, scorecards: list[ScoreCard], gap_maps: list[GapMap]
+) -> list[RankingExplanation]:
+    explanation_path = run_dir / "evaluate" / "ranking_explanations.json"
+    loaded: list[RankingExplanation] = []
+    if explanation_path.exists():
+        loaded = hydrate(list[RankingExplanation], load_json(explanation_path))
+
+    explanation_index = {(explanation.jd_id, explanation.variant_id): explanation for explanation in loaded}
+    gap_index = {gap_map.jd_id: gap_map for gap_map in gap_maps}
+
+    for scorecard in scorecards:
+        key = (scorecard.jd_id, scorecard.variant_id)
+        if key in explanation_index:
+            continue
+        gap_map = gap_index.get(scorecard.jd_id)
+        explanation_index[key] = _build_legacy_ranking_explanation(scorecard, gap_map)
+
+    return list(explanation_index.values())
+
+
+def _build_legacy_ranking_explanation(scorecard: ScoreCard, gap_map: GapMap | None) -> RankingExplanation:
+    weak_points = []
+    if gap_map:
+        for item in gap_map.items:
+            weak_points.extend(item.weak_points[:1])
+
+    risk_flags = weak_points[:2]
+    overall_summary = (
+        f"Legacy run fallback for {scorecard.variant_id}: overall_score={scorecard.overall_score:.2f}, "
+        f"gap_risk_score={scorecard.gap_risk_score:.2f}."
+    )
+    return RankingExplanation(
+        jd_id=scorecard.jd_id,
+        variant_id=scorecard.variant_id,
+        ranking_version=scorecard.ranking_version or RANKING_VERSION,
+        dimension_reasons={
+            "fit": "Legacy run fallback: fit reasoning not captured in v0.1 artifacts.",
+            "ats": "Legacy run fallback: ATS reasoning not captured in v0.1 artifacts.",
+            "evidence": "Legacy run fallback: evidence reasoning not captured in v0.1 artifacts.",
+            "stretch": "Legacy run fallback: stretch reasoning not captured in v0.1 artifacts.",
+            "gap_risk": f"gap_risk_score={scorecard.gap_risk_score:.2f} based on legacy scorecard.",
+            "rewrite_cost": f"rewrite_cost_score={scorecard.rewrite_cost_score:.2f} based on legacy scorecard.",
+            "overall": overall_summary,
+        },
+        positive_signals=[f"overall_score={scorecard.overall_score:.2f} from legacy scorecard"],
+        risk_flags=risk_flags,
+        evidence_refs=[],
+        decision_summary=scorecard.judge_rationale or overall_summary,
+    )

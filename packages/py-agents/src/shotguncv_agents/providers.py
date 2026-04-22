@@ -104,11 +104,7 @@ class OpenAIJudgeProvider:
 def build_generator_provider(config: RunConfig, stage: str, run_dir: Path) -> ResumeGeneratorProvider:
     env_path = _resolve_env_file_path(run_dir=run_dir, env_file=config.openai.env_file)
     env_values = _load_dotenv(env_path) if env_path.exists() else {}
-    provider = _resolve_provider(
-        configured_provider=config.generator.provider,
-        env_values=env_values,
-        provider_env_key="SHOTGUNCV_GENERATOR_PROVIDER",
-    )
+    provider = _resolve_provider(config.generator.provider)
     model = _resolve_model(
         configured_model=config.generator.model,
         env_values=env_values,
@@ -137,11 +133,7 @@ def build_generator_provider(config: RunConfig, stage: str, run_dir: Path) -> Re
 def build_judge_provider(config: RunConfig, stage: str, run_dir: Path) -> JudgeProvider:
     env_path = _resolve_env_file_path(run_dir=run_dir, env_file=config.openai.env_file)
     env_values = _load_dotenv(env_path) if env_path.exists() else {}
-    provider = _resolve_provider(
-        configured_provider=config.judge.provider,
-        env_values=env_values,
-        provider_env_key="SHOTGUNCV_JUDGE_PROVIDER",
-    )
+    provider = _resolve_provider(config.judge.provider)
     model = _resolve_model(
         configured_model=config.judge.model,
         env_values=env_values,
@@ -195,10 +187,7 @@ def _resolve_openai_runtime(
     )
 
 
-def _resolve_provider(configured_provider: str, env_values: dict[str, str], provider_env_key: str) -> str:
-    env_provider = env_values.get(provider_env_key, "").strip().lower()
-    if env_provider:
-        return env_provider
+def _resolve_provider(configured_provider: str) -> str:
     return (configured_provider or "deterministic").strip().lower()
 
 

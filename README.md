@@ -2,6 +2,8 @@
 
 `ShotgunCV` 是一个面向海投场景的 `Pipeline-first` AI Resume Ops 系统，围绕批量岗位输入执行解析、生成、评分、排序与投递策略输出。
 
+当前版本：`v0.2.0`，重点增强 Explainable Ranking 闭环。
+
 主流程：
 
 `multiple JD inputs -> analysis -> resume variants -> scoring -> ranking -> strategy`
@@ -55,13 +57,12 @@ python -m shotguncv_cli.main report --run-dir ./runs/openai-demo
 
 ```bash
 OPENAI_API_KEY=your-real-key
-SHOTGUNCV_GENERATOR_PROVIDER=openai
-SHOTGUNCV_JUDGE_PROVIDER=openai
 ```
 
 说明：
 
-- 运行时配置统一由项目 `.env` 覆盖（provider/model/base_url/api key）
+- provider 选择只由 `run_dir/config/run_config.json` 决定，默认保持 deterministic
+- 项目 `.env` 只负责为已选中的 OpenAI / OpenAI-compatible provider 注入 model/base_url/api key
 - 模型密钥只从项目 `.env` 读取，不读取系统环境变量
 - 可通过 `SHOTGUNCV_GENERATOR_MODEL` / `SHOTGUNCV_JUDGE_MODEL` 指定模型
 - 若模型都留空，则默认 `gpt-5.4-mini`
@@ -76,6 +77,7 @@ SHOTGUNCV_JUDGE_PROVIDER=openai
 - `generate/resume_variants.json`
 - `evaluate/scorecards.json`
 - `evaluate/gap_maps.json`
+- `evaluate/ranking_explanations.json`
 - `evaluate/eval_summary.json`
 - `plan/application_strategies.json`
 - `report/summary.md`

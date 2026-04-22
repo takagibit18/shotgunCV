@@ -55,6 +55,7 @@ class ScoreCard:
     gap_risk_score: float
     rewrite_cost_score: float
     overall_score: float
+    ranking_version: str
     judge_rationale: str
 
     @staticmethod
@@ -85,6 +86,18 @@ class GapMap:
 
 
 @dataclass(slots=True)
+class RankingExplanation:
+    jd_id: str
+    variant_id: str
+    ranking_version: str
+    dimension_reasons: dict[str, str]
+    positive_signals: list[str] = field(default_factory=list)
+    risk_flags: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    decision_summary: str = ""
+
+
+@dataclass(slots=True)
 class ApplicationStrategy:
     jd_id: str
     recommended_variant_id: str
@@ -92,4 +105,7 @@ class ApplicationStrategy:
     apply_decision: str
     reason_summary: str
     needs_jd_specific_variant: bool
+    decision_drivers: list[str] = field(default_factory=list)
+    watchouts: list[str] = field(default_factory=list)
+    recommended_actions: list[str] = field(default_factory=list)
     catch_up_notes: list[str] = field(default_factory=list)

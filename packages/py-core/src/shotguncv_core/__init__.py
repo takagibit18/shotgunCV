@@ -4,6 +4,7 @@ from .models import (
     GapItem,
     GapMap,
     JDProfile,
+    RankingExplanation,
     ResumeVariant,
     ScoreCard,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "GapItem",
     "GapMap",
     "JDProfile",
+    "RankingExplanation",
     "ResumeVariant",
     "ScoreCard",
     "analyze_run",

@@ -46,7 +46,19 @@ export type ScoreCard = {
   gap_risk_score: number;
   rewrite_cost_score: number;
   overall_score: number;
+  ranking_version: string;
   judge_rationale: string;
+};
+
+export type RankingExplanation = {
+  jd_id: string;
+  variant_id: string;
+  ranking_version: string;
+  dimension_reasons: Record<string, string>;
+  positive_signals: string[];
+  risk_flags: string[];
+  evidence_refs: string[];
+  decision_summary: string;
 };
 
 export type GapItem = {
@@ -71,17 +83,21 @@ export type ApplicationStrategy = {
   apply_decision: string;
   reason_summary: string;
   needs_jd_specific_variant: boolean;
+  decision_drivers: string[];
+  watchouts: string[];
+  recommended_actions: string[];
   catch_up_notes: string[];
 };
 
 export type ProviderConfig = {
-  provider: "deterministic" | "openai";
+  provider: "deterministic" | "openai" | "openai-compatible";
   model: string;
 };
 
 export type OpenAIConfig = {
   base_url: string | null;
   api_key_env: string;
+  env_file?: string;
 };
 
 export type RunMetadata = {
@@ -100,4 +116,5 @@ export type EvalSummaryItem = {
   title: string;
   top_variant_id: string;
   gap_count: number;
+  top_reasons: string[];
 };

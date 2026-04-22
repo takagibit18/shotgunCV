@@ -4,6 +4,7 @@ export type {
   EvalSummaryItem,
   GapMap,
   JDProfile,
+  RankingExplanation,
   ResumeVariant,
   RunConfig,
   ScoreCard,

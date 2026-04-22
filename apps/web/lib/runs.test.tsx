@@ -62,11 +62,29 @@ describe("run viewer data loading", () => {
       variantId: "variant-jd-jd-001",
       overallScore: 0.81,
       gapCount: 1,
+      topReasons: ["Strong evidence binding", "Good keyword coverage"],
     });
     expect(detail.plan.strategies[0]).toMatchObject({
       jd_id: "jd-001",
       apply_decision: "apply",
+      watchouts: ["No large-scale benchmark ownership"],
     });
+  });
+
+  it("marks evaluate stage complete for legacy runs without ranking explanations", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-legacy", { includeExplanations: false });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const detail = await loadRunDetail("demo-legacy");
+
+    expect(detail.evaluate.isComplete).toBe(true);
+    expect(detail.evaluate.topVariants[0]).toMatchObject({
+      jdId: "jd-001",
+      variantId: "variant-jd-jd-001",
+      topReasons: ["Strong evidence binding", "Good keyword coverage"],
+    });
+    expect(detail.evaluate.explanations).toEqual([]);
   });
 
   it("loads report markdown for complete run and returns null when report missing", async () => {
@@ -79,7 +97,7 @@ describe("run viewer data loading", () => {
     const existingReport = await loadRunReport("demo-full");
 
     expect(missingReport).toBeNull();
-    expect(existingReport?.markdown).toContain("# ShotgunCV v1 Run Summary");
+    expect(existingReport?.markdown).toContain("# ShotgunCV v0.2.0 Explainable Ranking Summary");
   });
 });
 
@@ -112,6 +130,17 @@ describe("run viewer pages", () => {
     expect(html).toContain("阶段未完成");
   });
 
+  it("renders explanation empty state for legacy evaluate artifacts", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-legacy", { includeExplanations: false });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-legacy" }) }));
+
+    expect(html).toContain("Ranking Explanations");
+    expect(html).toContain("Legacy artifacts are still readable.");
+  });
+
   it("renders report page markdown for complete run", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
@@ -119,7 +148,7 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain("ShotgunCV v1 Run Summary");
+    expect(html).toContain("ShotgunCV v0.2.0 Explainable Ranking Summary");
     expect(html).toContain("LLM Product Engineer");
   });
 });
@@ -176,7 +205,12 @@ async function createIncompleteRun(runsDir: string, runId: string): Promise<void
 }
 
 
-async function createCompleteRun(runsDir: string, runId: string): Promise<void> {
+async function createCompleteRun(
+  runsDir: string,
+  runId: string,
+  options?: { includeExplanations?: boolean },
+): Promise<void> {
+  const includeExplanations = options?.includeExplanations ?? true;
   const runDir = path.join(runsDir, runId)
   await createIncompleteRun(runsDir, runId);
   await mkdir(path.join(runDir, "generate"), { recursive: true });
@@ -217,9 +251,32 @@ async function createCompleteRun(runsDir: string, runId: string): Promise<void> 
       gap_risk_score: 0.42,
       rewrite_cost_score: 0.25,
       overall_score: 0.81,
+      ranking_version: "v0.2.0-explainable-ranking",
       judge_rationale: "Strong fit with manageable catch-up.",
     },
   ]);
+  if (includeExplanations) {
+    await writeJson(path.join(runDir, "evaluate", "ranking_explanations.json"), [
+      {
+        jd_id: "jd-001",
+        variant_id: "variant-jd-jd-001",
+        ranking_version: "v0.2.0-explainable-ranking",
+        dimension_reasons: {
+          fit: "keyword coverage and evidence binding are strong",
+          ats: "python and evaluation keywords are present",
+          evidence: "resume bullets support emphasized strengths",
+          stretch: "stretch claims remain bounded",
+          gap_risk: "large-scale benchmark ownership is missing",
+          rewrite_cost: "jd-specific variant needs moderate tailoring",
+          overall: "Strong fit with bounded catch-up risk.",
+        },
+        positive_signals: ["Strong evidence binding", "Good keyword coverage"],
+        risk_flags: ["No large-scale benchmark ownership"],
+        evidence_refs: ["Built internal tooling for LLM workflows"],
+        decision_summary: "Strong fit with bounded catch-up risk.",
+      },
+    ]);
+  }
   await writeJson(path.join(runDir, "evaluate", "gap_maps.json"), [
     {
       jd_id: "jd-001",
@@ -242,6 +299,7 @@ async function createCompleteRun(runsDir: string, runId: string): Promise<void> 
       title: "LLM Product Engineer",
       top_variant_id: "variant-jd-jd-001",
       gap_count: 1,
+      top_reasons: ["Strong evidence binding", "Good keyword coverage"],
     },
   ]);
   await writeJson(path.join(runDir, "plan", "application_strategies.json"), [
@@ -250,14 +308,17 @@ async function createCompleteRun(runsDir: string, runId: string): Promise<void> 
       recommended_variant_id: "variant-jd-jd-001",
       priority_rank: 1,
       apply_decision: "apply",
-      reason_summary: "overall_score=0.81",
+      reason_summary: "Strong fit with bounded catch-up risk.",
       needs_jd_specific_variant: true,
+      decision_drivers: ["Strong evidence binding", "Good keyword coverage"],
+      watchouts: ["No large-scale benchmark ownership"],
+      recommended_actions: ["Review offline evaluation metrics before interviews."],
       catch_up_notes: ["Review offline evaluation metrics before interviews."],
     },
   ]);
   await writeFile(
     path.join(runDir, "report", "summary.md"),
-    "# ShotgunCV v1 Run Summary\n\n## Ranked Application Strategy\n\n### 1. LLM Product Engineer @ Example AI\n",
+    "# ShotgunCV v0.2.0 Explainable Ranking Summary\n\n## Ranked Application Strategy\n\n### 1. LLM Product Engineer @ Example AI\n\n- Top Evidence: Built internal tooling for LLM workflows\n",
     "utf-8",
   );
 }

@@ -7,6 +7,7 @@ import type {
   EvalSummaryItem,
   GapMap,
   JDProfile,
+  RankingExplanation,
   ResumeVariant,
   RunConfig,
   ScoreCard,
@@ -30,6 +31,7 @@ type EvaluateTopVariant = {
   variantId: string;
   overallScore: number;
   gapCount: number;
+  topReasons: string[];
 };
 
 type RunDetail = {
@@ -52,6 +54,7 @@ type RunDetail = {
     topVariants: EvaluateTopVariant[];
     scorecards: ScoreCard[];
     gapMaps: GapMap[];
+    explanations: RankingExplanation[];
   };
   plan: {
     isComplete: boolean;
@@ -64,7 +67,7 @@ type RunReport = {
   markdown: string;
 };
 
-const STAGE_FILES: Record<StageName, string[]> = {
+const REQUIRED_STAGE_FILES: Record<StageName, string[]> = {
   ingest: ["ingest/manifest.json"],
   analyze: ["analyze/candidate_profile.json", "analyze/jd_profiles.json"],
   generate: ["generate/resume_variants.json"],
@@ -108,6 +111,8 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
   const scorecards = (await readJsonIfExists<ScoreCard[]>(path.join(runDir, "evaluate", "scorecards.json"))) ?? [];
   const gapMaps = (await readJsonIfExists<GapMap[]>(path.join(runDir, "evaluate", "gap_maps.json"))) ?? [];
+  const explanations =
+    (await readJsonIfExists<RankingExplanation[]>(path.join(runDir, "evaluate", "ranking_explanations.json"))) ?? [];
   const evalSummary = (await readJsonIfExists<EvalSummaryItem[]>(path.join(runDir, "evaluate", "eval_summary.json"))) ?? [];
   const strategies =
     (await readJsonIfExists<ApplicationStrategy[]>(path.join(runDir, "plan", "application_strategies.json"))) ?? [];
@@ -125,6 +130,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       variantId: item.top_variant_id,
       overallScore: scorecard?.overall_score ?? 0,
       gapCount: item.gap_count ?? gapCounts.get(item.jd_id) ?? 0,
+      topReasons: item.top_reasons ?? [],
     };
   });
 
@@ -148,6 +154,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       topVariants,
       scorecards,
       gapMaps,
+      explanations,
     },
     plan: {
       isComplete: completedStages.includes("plan"),
@@ -176,7 +183,7 @@ export function getRunsDir(): string {
 
 async function getCompletedStages(runDir: string): Promise<StageName[]> {
   const stages = await Promise.all(
-    (Object.entries(STAGE_FILES) as [StageName, string[]][]).map(async ([stage, files]) => {
+    (Object.entries(REQUIRED_STAGE_FILES) as [StageName, string[]][]).map(async ([stage, files]) => {
       const isComplete = await Promise.all(files.map((file) => pathExists(path.join(runDir, file))));
       return isComplete.every(Boolean) ? stage : null;
     }),
