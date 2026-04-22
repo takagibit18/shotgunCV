@@ -4,10 +4,13 @@ import argparse
 import io
 from contextlib import redirect_stdout
 from pathlib import Path
+from time import perf_counter
 from typing import Callable
 
 from shotguncv_core.pipeline import (
+    EVALUATE_MAX_WORKERS,
     analyze_run,
+    estimate_evaluate_task_total,
     evaluate_run,
     generate_run,
     ingest_run,
@@ -123,7 +126,30 @@ def _run_generate(args: argparse.Namespace) -> str:
 
 
 def _run_evaluate(args: argparse.Namespace) -> str:
-    evaluation = evaluate_run(args.run_dir)
+    total_tasks = estimate_evaluate_task_total(args.run_dir)
+    print(f"Evaluate started: total_tasks={total_tasks}, max_workers={EVALUATE_MAX_WORKERS}")
+    started = perf_counter()
+    ok_count = 0
+    fallback_count = 0
+
+    def _progress_callback(payload: dict[str, object]) -> None:
+        nonlocal ok_count, fallback_count
+        status = str(payload.get("status", "fallback"))
+        if status == "ok":
+            ok_count += 1
+        else:
+            fallback_count += 1
+        print(
+            f"[{payload.get('completed', 0)}/{payload.get('total', 0)}] "
+            f"jd={payload.get('jd_id', '')} "
+            f"variant={payload.get('variant_id', '')} "
+            f"status={status} "
+            f"duration_ms={payload.get('duration_ms', 0)}"
+        )
+
+    evaluation = evaluate_run(args.run_dir, progress_cb=_progress_callback)
+    duration_ms = int((perf_counter() - started) * 1000)
+    print(f"Evaluate finished: ok={ok_count}, fallback={fallback_count}, duration_ms={duration_ms}")
     return f"Evaluate completed: scorecards={len(evaluation.scorecards)}, gap_maps={len(evaluation.gap_maps)}"
 
 

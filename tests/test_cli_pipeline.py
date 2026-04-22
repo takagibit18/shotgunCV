@@ -37,6 +37,10 @@ def test_cli_commands_execute_end_to_end_pipeline(tmp_path: Path) -> None:
         exit_code, output = run(argv)
         assert exit_code == 0, output
         assert "placeholder" not in output.lower()
+        if argv[0] == "evaluate":
+            assert "Evaluate started:" in output
+            assert "Evaluate finished:" in output
+            assert "[1/" in output
 
     report_text = (run_dir / "report" / "summary.md").read_text(encoding="utf-8")
     assert "ShotgunCV" in report_text

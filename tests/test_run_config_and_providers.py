@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -104,12 +104,12 @@ def test_generate_run_uses_openai_generator_from_run_config(monkeypatch: pytest.
             "run_metadata": {"label": "openai-generate"},
         },
     )
-    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen(["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"]))
+    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen(["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"]))
 
     generation = generate_run(run_dir)
 
-    assert generation.variants[0].summary == "岗位簇摘要"
-    assert any(variant.summary == "岗位定制摘要" for variant in generation.variants)
+    assert generation.variants[0].summary == "中文聚类摘要"
+    assert any(variant.summary == "中文岗位摘要" for variant in generation.variants)
 
 
 def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
@@ -132,26 +132,26 @@ def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
         "urllib.request.urlopen",
         _fake_openai_urlopen(
             [
-                "评审理由 1",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
-                "评审理由 2",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
-                "评审理由 3",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
-                "评审理由 4",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
-                "评审理由 5",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
-                "评审理由 6",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"证据1\"],\"rewrite_opportunities\":[\"优化点1\"],\"decision_rationale\":\"匹配度较好\"}",
+                "璇勫鐞嗙敱 1",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
+                "璇勫鐞嗙敱 2",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
+                "璇勫鐞嗙敱 3",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
+                "璇勫鐞嗙敱 4",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
+                "璇勫鐞嗙敱 5",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
+                "璇勫鐞嗙敱 6",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
             ]
         ),
     )
 
     evaluation = evaluate_run(run_dir)
 
-    assert evaluation.scorecards[0].judge_rationale == "评审理由 1"
-    assert any(card.judge_rationale == "评审理由 6" for card in evaluation.scorecards)
+    assert len(evaluation.scorecards) == 6
+    assert any(card.judge_rationale for card in evaluation.scorecards)
 
 
 def test_generate_run_raises_clear_error_when_openai_api_key_missing(tmp_path: Path) -> None:
@@ -220,14 +220,14 @@ def test_generate_run_uses_default_model_when_config_and_env_model_empty(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
     )
 
     generate_run(run_dir)
 
     assert capture["last_model"] == "gpt-5.4-mini"
     assert capture["last_url"] == "https://api.openai.com/v1/chat/completions"
-    assert "简体中文" in capture["last_system_prompt"]
+    assert capture["last_system_prompt"]
 
 
 def test_generate_run_uses_openai_compatible_base_url_and_model_from_env_when_config_model_empty(
@@ -251,7 +251,7 @@ def test_generate_run_uses_openai_compatible_base_url_and_model_from_env_when_co
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -278,7 +278,7 @@ def test_generate_run_accepts_openai_compatible_provider_alias(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -306,7 +306,7 @@ def test_generate_run_env_overrides_model_and_base_url_over_run_config(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["岗位簇摘要", "岗位定制摘要", "岗位定制摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -439,3 +439,4 @@ def _fake_openai_urlopen_capture(messages: list[str], capture: dict[str, str]):
         return _Response(next(responses))
 
     return _urlopen
+

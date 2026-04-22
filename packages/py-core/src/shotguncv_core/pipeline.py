@@ -1,7 +1,10 @@
 ﻿from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
+from typing import Callable
 
 from shotguncv_agents.providers import (
     DeterministicPlannerProvider,
@@ -52,6 +55,29 @@ class PlanArtifacts:
 
 
 RANKING_VERSION = "v0.3.0-llm-eval"
+EVALUATE_MAX_WORKERS = 4
+
+
+@dataclass(slots=True)
+class _EvaluateWorkItem:
+    jd_index: int
+    variant_index: int
+    jd: JDProfile
+    variant: ResumeVariant
+
+
+@dataclass(slots=True)
+class _EvaluateTaskResult:
+    jd_index: int
+    variant_index: int
+    jd_id: str
+    variant_id: str
+    rule_eval: RuleEvaluation
+    scorecard: ScoreCard
+    explanation: RankingExplanation
+    assessment: LLMAssessment | None
+    status: str
+    duration_ms: int
 
 
 def ingest_run(
@@ -141,7 +167,10 @@ def generate_run(run_dir: Path) -> GenerationArtifacts:
     return GenerationArtifacts(variants=variants)
 
 
-def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
+def evaluate_run(
+    run_dir: Path,
+    progress_cb: Callable[[dict[str, object]], None] | None = None,
+) -> EvaluationArtifacts:
     config = load_run_config(run_dir)
     candidate = hydrate(CandidateProfile, load_json(run_dir / "analyze" / "candidate_profile.json"))
     jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
@@ -149,76 +178,78 @@ def evaluate_run(run_dir: Path) -> EvaluationArtifacts:
     evidence_map = _load_evidence_map(run_dir)
     judge = build_judge_provider(config, stage="evaluate", run_dir=run_dir)
 
-    scorecards: list[ScoreCard] = []
-    gap_maps: list[GapMap] = []
-    explanations: list[RankingExplanation] = []
-    llm_assessments: list[LLMAssessment] = []
-    eval_summary: list[dict[str, object]] = []
+    work_items = _build_evaluate_work_items(jd_profiles, variants)
+    total_tasks = len(work_items)
+    completed_tasks = 0
 
-    for jd in jd_profiles:
-        relevant_variants = [variant for variant in variants if jd.jd_id in variant.target_jd_ids or variant.cluster == jd.cluster]
-        best_gap_rule: RuleEvaluation | None = None
-        best_gap_score = -1.0
-        jd_scorecards: list[ScoreCard] = []
-
-        for variant in relevant_variants:
-            rule_eval = evaluate_resume_fit(jd, candidate, variant)
-            judge_feedback = judge.review(jd, candidate, variant, rule_eval.overall_score)
-
-            assessment: LLMAssessment | None = None
-            try:
-                assessment = judge.assess(jd, candidate, variant, evidence_map, rule_eval.overall_score)
-                if not _assessment_has_minimum_fields(assessment):
-                    assessment = None
-            except Exception:
-                assessment = None
-
-            scorecard = _build_scorecard(
-                jd=jd,
+    task_results: list[_EvaluateTaskResult] = []
+    with ThreadPoolExecutor(max_workers=EVALUATE_MAX_WORKERS) as executor:
+        future_to_item = {
+            executor.submit(
+                _evaluate_work_item,
+                item=item,
+                judge=judge,
                 candidate=candidate,
-                variant=variant,
-                rule_eval=rule_eval,
-                assessment=assessment,
-                judge_rationale=judge_feedback.rationale,
+                evidence_map=evidence_map,
                 provider=config.judge.provider,
                 model=config.judge.model,
-            )
-            scorecards.append(scorecard)
-            jd_scorecards.append(scorecard)
-            explanations.append(
-                _build_ranking_explanation(
-                    jd=jd,
+            ): item
+            for item in work_items
+        }
+        for future in as_completed(future_to_item):
+            item = future_to_item[future]
+            try:
+                result = future.result()
+            except Exception:
+                result = _build_fallback_task_result(
+                    item=item,
                     candidate=candidate,
-                    variant=variant,
-                    scorecard=scorecard,
-                    assessment=assessment,
-                    rule_eval=rule_eval,
+                    provider=config.judge.provider,
+                    model=config.judge.model,
                 )
-            )
-            if assessment is not None:
-                llm_assessments.append(assessment)
+            task_results.append(result)
+            completed_tasks += 1
+            if progress_cb is not None:
+                progress_cb(
+                    {
+                        "completed": completed_tasks,
+                        "total": total_tasks,
+                        "jd_id": result.jd_id,
+                        "variant_id": result.variant_id,
+                        "status": result.status,
+                        "duration_ms": result.duration_ms,
+                    }
+                )
 
-            if rule_eval.overall_score > best_gap_score:
-                best_gap_score = rule_eval.overall_score
-                best_gap_rule = rule_eval
+    ordered_results = sorted(task_results, key=lambda item: (item.jd_index, item.variant_index))
+    scorecards: list[ScoreCard] = [item.scorecard for item in ordered_results]
+    explanations: list[RankingExplanation] = [item.explanation for item in ordered_results]
+    llm_assessments: list[LLMAssessment] = [item.assessment for item in ordered_results if item.assessment is not None]
 
-        gap_items = best_gap_rule.gaps if best_gap_rule else []
-        gap_map = GapMap(jd_id=jd.jd_id, candidate_id=candidate.candidate_id, items=gap_items)
-        gap_maps.append(gap_map)
+    grouped_by_jd: dict[int, list[_EvaluateTaskResult]] = {}
+    for item in ordered_results:
+        grouped_by_jd.setdefault(item.jd_index, []).append(item)
 
-        best_scorecard = max(jd_scorecards, key=ScoreCard.ranking_key)
-        best_explanation = next(
-            explanation
-            for explanation in explanations
-            if explanation.jd_id == jd.jd_id and explanation.variant_id == best_scorecard.variant_id
-        )
+    gap_maps: list[GapMap] = []
+    eval_summary: list[dict[str, object]] = []
+    for jd_index, jd in enumerate(jd_profiles):
+        jd_items = grouped_by_jd.get(jd_index, [])
+        best_gap_item = max(jd_items, key=lambda it: it.rule_eval.overall_score) if jd_items else None
+        gap_items = best_gap_item.rule_eval.gaps if best_gap_item else []
+        gap_maps.append(GapMap(jd_id=jd.jd_id, candidate_id=candidate.candidate_id, items=gap_items))
+
+        if not jd_items:
+            continue
+
+        best_item = max(jd_items, key=lambda it: ScoreCard.ranking_key(it.scorecard))
         eval_summary.append(
             {
                 "jd_id": jd.jd_id,
                 "title": jd.title,
-                "top_variant_id": best_scorecard.variant_id,
+                "top_variant_id": best_item.variant_id,
                 "gap_count": len(gap_items),
-                "top_reasons": best_explanation.positive_signals[:2] or [best_explanation.dimension_reasons["overall"]],
+                "top_reasons": best_item.explanation.positive_signals[:2]
+                or [best_item.explanation.dimension_reasons["overall"]],
             }
         )
 
@@ -493,6 +524,129 @@ def _assessment_has_minimum_fields(assessment: LLMAssessment) -> bool:
         assessment.application_worthiness
         and assessment.decision_rationale
         and assessment.evidence_citations
+    )
+
+
+def estimate_evaluate_task_total(run_dir: Path) -> int:
+    jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
+    variants = hydrate(list[ResumeVariant], load_json(run_dir / "generate" / "resume_variants.json"))
+    return len(_build_evaluate_work_items(jd_profiles, variants))
+
+
+def _build_evaluate_work_items(jd_profiles: list[JDProfile], variants: list[ResumeVariant]) -> list[_EvaluateWorkItem]:
+    work_items: list[_EvaluateWorkItem] = []
+    for jd_index, jd in enumerate(jd_profiles):
+        relevant_variants = _select_relevant_variants(jd, variants)
+        for variant_index, variant in enumerate(relevant_variants):
+            work_items.append(
+                _EvaluateWorkItem(
+                    jd_index=jd_index,
+                    variant_index=variant_index,
+                    jd=jd,
+                    variant=variant,
+                )
+            )
+    return work_items
+
+
+def _select_relevant_variants(jd: JDProfile, variants: list[ResumeVariant]) -> list[ResumeVariant]:
+    return [variant for variant in variants if jd.jd_id in variant.target_jd_ids or variant.cluster == jd.cluster]
+
+
+def _evaluate_work_item(
+    item: _EvaluateWorkItem,
+    judge: object,
+    candidate: CandidateProfile,
+    evidence_map: dict[str, object],
+    provider: str,
+    model: str,
+) -> _EvaluateTaskResult:
+    started = perf_counter()
+    rule_eval = evaluate_resume_fit(item.jd, candidate, item.variant)
+
+    try:
+        judge_feedback = judge.review(item.jd, candidate, item.variant, rule_eval.overall_score)
+        judge_rationale = judge_feedback.rationale
+    except Exception:
+        judge_rationale = f"Review unavailable; fallback to rules with score {rule_eval.overall_score:.2f}."
+
+    assessment: LLMAssessment | None = None
+    try:
+        assessment = judge.assess(item.jd, candidate, item.variant, evidence_map, rule_eval.overall_score)
+        if not _assessment_has_minimum_fields(assessment):
+            assessment = None
+    except Exception:
+        assessment = None
+
+    scorecard = _build_scorecard(
+        jd=item.jd,
+        candidate=candidate,
+        variant=item.variant,
+        rule_eval=rule_eval,
+        assessment=assessment,
+        judge_rationale=judge_rationale,
+        provider=provider,
+        model=model,
+    )
+    explanation = _build_ranking_explanation(
+        jd=item.jd,
+        candidate=candidate,
+        variant=item.variant,
+        scorecard=scorecard,
+        assessment=assessment,
+        rule_eval=rule_eval,
+    )
+    return _EvaluateTaskResult(
+        jd_index=item.jd_index,
+        variant_index=item.variant_index,
+        jd_id=item.jd.jd_id,
+        variant_id=item.variant.variant_id,
+        rule_eval=rule_eval,
+        scorecard=scorecard,
+        explanation=explanation,
+        assessment=assessment,
+        status="ok" if assessment is not None else "fallback",
+        duration_ms=int((perf_counter() - started) * 1000),
+    )
+
+
+def _build_fallback_task_result(
+    item: _EvaluateWorkItem,
+    candidate: CandidateProfile,
+    provider: str,
+    model: str,
+) -> _EvaluateTaskResult:
+    started = perf_counter()
+    rule_eval = evaluate_resume_fit(item.jd, candidate, item.variant)
+    scorecard = _build_scorecard(
+        jd=item.jd,
+        candidate=candidate,
+        variant=item.variant,
+        rule_eval=rule_eval,
+        assessment=None,
+        judge_rationale=f"Task failed; fallback to rules with score {rule_eval.overall_score:.2f}.",
+        provider=provider,
+        model=model,
+    )
+    explanation = _build_ranking_explanation(
+        jd=item.jd,
+        candidate=candidate,
+        variant=item.variant,
+        scorecard=scorecard,
+        assessment=None,
+        rule_eval=rule_eval,
+    )
+    return _EvaluateTaskResult(
+        jd_index=item.jd_index,
+        variant_index=item.variant_index,
+        jd_id=item.jd.jd_id,
+        variant_id=item.variant.variant_id,
+        rule_eval=rule_eval,
+        scorecard=scorecard,
+        explanation=explanation,
+        assessment=None,
+        status="fallback",
+        duration_ms=int((perf_counter() - started) * 1000),
     )
 
 
