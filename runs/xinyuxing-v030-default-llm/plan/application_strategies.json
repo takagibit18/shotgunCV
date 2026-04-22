@@ -1,0 +1,174 @@
+[
+  {
+    "jd_id": "jd-002",
+    "recommended_variant_id": "variant-jd-jd-002",
+    "priority_rank": 1,
+    "apply_decision": "Strongly Recommend",
+    "reason_summary": "The candidate's technical foundation strongly aligns with the AI Agent Engineer internship requirements, particularly in Python development, LLM API integration, and foundational Prompt/Tool Calling capabilities. The primary deficiency lies in the resume's omission of explicit coverage for advanced Agent architecture patterns (memory management, multi-agent coordination, and specific reasoning frameworks like ReAct/CoT) alongside a lack of quantified Prompt optimization results. Given the high role fit (0.85) and application worthiness (0.92), the candidate comfortably exceeds baseline internship expectations. Implementing the recommended resume revisions to emphasize project depth, methodological precision, and metric-driven outcomes will effectively neutralize interview risks and substantially increase selection probability.",
+    "needs_jd_specific_variant": true,
+    "decision_drivers": [
+      "High role fit (0.85) with direct alignment to core JD requirements in Python engineering, LLM API integration, Prompt Engineering, and Tool Calling",
+      "Strong application worthiness score (0.92) backed by solid academic credentials (GPA 3.6, IELTS 7.0) indicating strong learning capacity and communication readiness",
+      "Clear, actionable path to bridge identified gaps through targeted resume restructuring and metric-driven storytelling",
+      "Final composite score of 0.81 confirms competitive standing for an internship-level AI Agent role"
+    ],
+    "watchouts": [
+      "Resume lacks explicit documentation of end-to-end Agent development, specifically memory management, multi-agent collaboration, and complex task planning",
+      "No concrete evidence of implementing JD-specified reasoning paradigms (Chain-of-Thought, ReAct, Reflection, Plan-and-Execute)",
+      "Prompt Engineering claims are descriptive rather than quantitative, missing optimization case studies or performance metrics",
+      "Medium interview pressure risk (0.45) suggests candidates may face rigorous technical probing on system architecture and prompt tuning trade-offs"
+    ],
+    "recommended_actions": [
+      "Restructure resume to feature 1-2 comprehensive Agent projects with explicit architectural breakdowns and component roles",
+      "Quantify all AI/LLM initiatives using hard metrics (task success rate, hallucination reduction, latency optimization, cost savings)",
+      "Develop a concise technical narrative or GitHub repo demonstrating ReAct/CoT implementation loops and debugging strategies",
+      "Conduct focused mock interviews targeting Agent system design, memory/state handling, and prompt parameter sensitivity"
+    ],
+    "catch_up_notes": [
+      "Large-scale online experiment ownership"
+    ],
+    "decision_confidence": 0.85,
+    "interview_prep_points": [
+      "Articulate your approach to short-term vs. long-term memory implementation and state synchronization in multi-turn Agent workflows",
+      "Explain step-by-step how you decompose complex user requests into sub-tasks and coordinate multiple specialized Agents",
+      "Walk through a specific Chain-of-Thought or ReAct pipeline you built, highlighting error recovery, tool validation, and reflection mechanisms",
+      "Present a documented Prompt engineering experiment showing baseline vs. optimized performance (e.g., Few-shot template design, output schema enforcement, temperature/top_p tuning)",
+      "Prepare to discuss LLM provider selection criteria, API rate-limit handling, fallback strategies, and latency-cost-performance trade-offs"
+    ],
+    "resume_revision_tasks": [
+      "Add 1-2 end-to-end Agent project entries detailing architecture components, memory mechanisms, planning strategies, and evaluation metrics",
+      "Replace vague phrases like 'Agent基础编排' with precise methodological descriptions (e.g., 'Implemented ReAct framework for iterative tool calling and self-correction')",
+      "Insert quantifiable outcomes for every AI-related bullet (e.g., 'Increased task completion rate by X%', 'Reduced response latency by Y ms', 'Cut hallucination rate by Z%')",
+      "Create a dedicated Prompt Engineering section showcasing concrete optimization techniques (structured output constraints, dynamic Few-shot injection, parameter calibration) with before/after metrics"
+    ]
+  },
+  {
+    "jd_id": "jd-003",
+    "recommended_variant_id": "variant-jd-jd-004",
+    "priority_rank": 2,
+    "apply_decision": "Strongly Recommend",
+    "reason_summary": "The candidate exhibits strong technical alignment with the AI Data Tech Intern role through a rigorous CS foundation, relevant engineering proficiency, and direct exposure to Agent orchestration, Tool Calling, and RAG evaluation. While current documentation lacks explicit end-to-end data evaluation implementation and cross-team collaboration narratives, the underlying competencies are highly transferable. Targeted resume revisions to quantify project impacts and clarify collaborative workflows will significantly strengthen candidacy, making this a high-potential application worth pursuing.",
+    "needs_jd_specific_variant": true,
+    "decision_drivers": [
+      "Solid Computer Science background with strong academic performance (GPA 3.6)",
+      "Core tech stack (Python, FastAPI, MySQL, Redis, LLM API, Prompt Engineering, Tool Calling, Agent orchestration) directly maps to JD requirements",
+      "Practical familiarity with RAG pipelines and RAGAS evaluation frameworks enables immediate contribution to data validation and scoring workflows"
+    ],
+    "watchouts": [
+      "No documented end-to-end data evaluation system built from scratch for Agent/Function Calling scenarios",
+      "Missing explicit evidence of cross-functional collaboration (Product/Algorithm/Engineering) to align data standards or iterate strategies",
+      "RAGAS and evaluation tool usage appears theoretical; lacks demonstrated hands-on tuning impact tied to business metrics"
+    ],
+    "recommended_actions": [
+      "Revise resume to embed quantified STAR case studies for data pipeline construction and evaluation optimization",
+      "Prepare concise narratives highlighting cross-team coordination experiences and closed-loop iteration processes",
+      "Submit application only after integrating specific metric improvements (e.g., success rate uplift, latency reduction, error rate drop)"
+    ],
+    "catch_up_notes": [
+      "Large-scale online experiment ownership"
+    ],
+    "decision_confidence": 0.85,
+    "interview_prep_points": [
+      "Data quality measurement methodologies and KPI definition tailored to Agent/FC execution",
+      "Structured Badcase attribution and root cause analysis workflows",
+      "Hands-on RAGAS parameter tuning, metric selection logic, and correlation with downstream business outcomes",
+      "Strategies for harmonizing data scales, standards, and feedback loops across product, algorithm, and engineering teams"
+    ],
+    "resume_revision_tasks": [
+      "Convert 'RAGAS & Evaluation' notes into a detailed STAR project specifying validation rules designed, metrics optimized, and quantifiable impact on task success/error rates",
+      "Strengthen Python/SQL engineering descriptions to explicitly showcase automated data cleaning pipelines, quality monitoring scripts, and MySQL aggregation analyses",
+      "Add a dedicated bullet demonstrating cross-functional collaboration, emphasizing standardized data scale alignment and customized evaluation scheme delivery"
+    ]
+  },
+  {
+    "jd_id": "jd-001",
+    "recommended_variant_id": "variant-jd-jd-001",
+    "priority_rank": 3,
+    "apply_decision": "Apply",
+    "reason_summary": "候选人具备优秀的计算机科班背景与Python工程底座，技术栈（LLM API、Prompt、Tool Calling、Agent编排）与JD核心需求高度匹配，角色拟合度达0.85。主要短板在于简历偏重技术罗列，缺乏量化产出、大规模实验经验及RAG/评测的实战深度，导致说服力与面试抗压性受限。综合评估后建议投递，但必须优先完成简历量化改造与RAG/Prompt实战案例补充，以有效应对技术深挖并最大化录用概率。",
+    "needs_jd_specific_variant": true,
+    "decision_drivers": [
+      "扎实的计算机科学科班背景与Python工程化开发能力",
+      "熟练掌握LLM API接入、Prompt Engineering、Tool Calling及Agent基础编排",
+      "角色匹配度高（0.85），学术与语言指标优异（GPA 3.6，IELTS 7.0）",
+      "技术栈与JD核心要求（数据标注规则执行、Prompt优化、团队协作）高度契合"
+    ],
+    "watchouts": [
+      "缺乏具体项目成果的量化指标（如数据标注准确率提升、Prompt优化带来的效率/效果增益）",
+      "未体现大规模线上实验或A/B测试的负责经验",
+      "RAG与评测仅停留在‘了解’层面，面试易遭深度技术追问",
+      "底层数据处理经验（pandas/SQL）未明确，可能影响数据构建类任务评估"
+    ],
+    "recommended_actions": [
+      "立即为所有LLM/Prompt相关经历补充可量化的业务指标与前后对比数据",
+      "将Prompt Engineering与JD要求的‘优化数据质量与效率’直接挂钩并附具体场景",
+      "强化Tool Calling与Agent编排的实际应用案例，突出对标注规则执行与工具优化的贡献",
+      "在简历中自然融入‘尺度拉齐’、‘策略迭代’、‘复盘’等JD高频词并配协作事例",
+      "明确列出pandas/SQL数据处理经验（如有）以匹配底层数据构建需求"
+    ],
+    "catch_up_notes": [
+      "Large-scale online experiment ownership"
+    ],
+    "decision_confidence": 0.71,
+    "interview_prep_points": [
+      "准备Prompt深度调优策略、边界case处理及实际效果验证方法",
+      "梳理RAG全流程（Embedding/混合检索/Reranker/RAGAS）的实操细节与调优案例",
+      "演练Agent编排与Tool Calling解决复杂业务流的具体场景与架构设计",
+      "准备关于数据质量优化、跨团队尺度拉齐与策略迭代的STAR行为面试题",
+      "熟悉大规模线上实验设计、指标定义与A/B测试评估方法论"
+    ],
+    "resume_revision_tasks": [
+      "重写项目经历，强制添加量化结果（准确率、耗时下降、成本节省等）",
+      "将‘了解RAG’升级为具体落地项目或调优实践描述",
+      "重构Prompt Engineering段落，突出对标注规则执行与数据质量的直接贡献",
+      "补充Agent/Tool Calling在实际业务流中的集成案例与性能指标",
+      "核对并明确pandas/SQL技能栈，对齐JD底层数据构建要求",
+      "植入JD关键词并配以跨部门协作与复盘改进实例"
+    ]
+  },
+  {
+    "jd_id": "jd-004",
+    "recommended_variant_id": "variant-cluster-ai-operations",
+    "priority_rank": 4,
+    "apply_decision": "Apply with Revisions",
+    "reason_summary": "The candidate possesses a solid CS background and relevant Python/LLM engineering skills, but faces a critical screening barrier due to the explicit absence of Pandas—a mandatory JD requirement. Current evidence is descriptive rather than metric-driven, and AI/Agent experience is not yet aligned with the JD's focus on data construction, validation, and operational workflows. Application is conditionally viable pending targeted resume revisions that explicitly showcase Pandas proficiency, quantify project impacts, and reframe technical experience toward data operations. Without these adjustments, the risk of early-stage rejection or high interview pressure remains significant.",
+    "needs_jd_specific_variant": false,
+    "decision_drivers": [
+      "Strong academic foundation (CS degree, GPA 3.6) and competent Python engineering stack (FastAPI, Pydantic, pytest, MySQL, Redis)",
+      "Critical screening gap: Explicit absence of Pandas, which is a non-negotiable JD requirement ('必须会 pandas')",
+      "Evidence is largely descriptive without quantified outcomes or direct alignment to data construction/validation workflows",
+      "Moderate persuasiveness due to misalignment between current AI/Agent experience and the JD's data operations focus"
+    ],
+    "watchouts": [
+      "High interview pressure risk (0.78) due to potential gaps in practical Pandas usage and large-scale experiment ownership",
+      "Risk of immediate rejection if Pandas proficiency is not explicitly demonstrated early in the application",
+      "Descriptive claims may be challenged during technical deep-dives without concrete metrics or production examples",
+      "Lack of documented A/B testing or metric tracking experience could limit credibility for operational roles"
+    ],
+    "recommended_actions": [
+      "Immediately revise resume to include a dedicated Pandas section with concrete project examples (data cleaning, aggregation, feature engineering)",
+      "Quantify all engineering and LLM/Agent project outcomes using measurable impact (e.g., dataset scale, accuracy improvement, latency/cost reduction)",
+      "Reframe AI development experience to explicitly map to the JD's data construction, validation, and evaluation workflows",
+      "Highlight any indirect experience with A/B testing, metric tracking, or production deployment to address the 'online experiment ownership' gap",
+      "Submit application only after completing these revisions to ensure competitive positioning"
+    ],
+    "catch_up_notes": [
+      "Large-scale online experiment ownership"
+    ],
+    "decision_confidence": 0.61,
+    "interview_prep_points": [
+      "Prepare practical Pandas scenarios covering data manipulation, handling missing values, merging datasets, and performance optimization",
+      "Master data evaluation methodologies, including RAGAS metrics, annotation accuracy tracking, and iterative quality gate implementation",
+      "Articulate clear connections between agent orchestration/prompt engineering and scalable data operations/rule standardization",
+      "Develop structured responses for behavioral questions on cross-functional collaboration with algorithm/product teams and handling production constraints",
+      "Practice explaining how you would design and validate data pipelines for large-scale online experiments"
+    ],
+    "resume_revision_tasks": [
+      "Add a dedicated Pandas proficiency section detailing specific use cases, libraries, and project impacts",
+      "Rewrite LLM/Agent development bullets to emphasize data pipeline design, quality assurance, and iterative evaluation strategies",
+      "Replace vague technical claims with precise metrics (e.g., 'processed 500K+ records', 'improved retrieval accuracy by 15%', 'reduced inference latency by 200ms')",
+      "Align professional summary with JD keywords: rule standardization, tool optimization, data validation, and cross-functional collaboration",
+      "Ensure consistent formatting and prioritize data-centric achievements over purely model/API integration details"
+    ]
+  }
+]

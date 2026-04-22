@@ -8,6 +8,10 @@ export type CandidateProfile = {
   strengths: string[];
   constraints: string[];
   preferences: string[];
+  core_claims: string[];
+  verified_evidence: string[];
+  missing_evidence_areas: string[];
+  preferred_role_tracks: string[];
 };
 
 export type JDProfile = {
@@ -23,6 +27,11 @@ export type JDProfile = {
   risk_signals: string[];
   source_type: string;
   source_value: string;
+  must_have_requirements: string[];
+  nice_to_have_requirements: string[];
+  hidden_signals: string[];
+  interview_focus_areas: string[];
+  role_level_confidence: number;
 };
 
 export type ResumeVariant = {
@@ -48,6 +57,32 @@ export type ScoreCard = {
   overall_score: number;
   ranking_version: string;
   judge_rationale: string;
+  llm_role_fit_score: number;
+  llm_evidence_score: number;
+  llm_persuasion_score: number;
+  llm_risk_score: number;
+  llm_overall_score: number;
+  final_overall_score: number;
+  final_decision_source: string;
+  guardrail_flags: string[];
+  provider: string;
+  model: string;
+};
+
+export type LLMAssessment = {
+  jd_id: string;
+  variant_id: string;
+  role_fit: number;
+  evidence_quality: number;
+  persuasiveness: number;
+  interview_pressure_risk: number;
+  application_worthiness: string;
+  must_fix_issues: string[];
+  evidence_citations: string[];
+  rewrite_opportunities: string[];
+  decision_rationale: string;
+  provider: string;
+  model: string;
 };
 
 export type RankingExplanation = {
@@ -87,6 +122,9 @@ export type ApplicationStrategy = {
   watchouts: string[];
   recommended_actions: string[];
   catch_up_notes: string[];
+  decision_confidence: number;
+  interview_prep_points: string[];
+  resume_revision_tasks: string[];
 };
 
 export type ProviderConfig = {
@@ -105,8 +143,10 @@ export type RunMetadata = {
 };
 
 export type RunConfig = {
+  analyzer: ProviderConfig;
   generator: ProviderConfig;
   judge: ProviderConfig;
+  planner: ProviderConfig;
   openai: OpenAIConfig;
   run_metadata: RunMetadata;
 };

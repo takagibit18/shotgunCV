@@ -18,12 +18,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
 
     ingest_run(
         run_dir=run_dir,
         candidate_id="cand-001",
         candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
         jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+        config_path=config_path,
     )
     analysis = analyze_run(run_dir)
     generation = generate_run(run_dir)
@@ -52,20 +54,22 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
 
     report_text = report_path.read_text(encoding="utf-8")
     assert "LLM Product Engineer" in report_text
-    assert "overall_score" in report_text
-    assert "Top Evidence" in report_text
-    assert "Watchouts" in report_text
-    assert "Recommended Actions" in report_text
+    assert "Final score" in report_text
+    assert "Evidence that holds" in report_text
+    assert "danger points" in report_text
+    assert "revise 3 resume items" in report_text
 
 
 def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
 
     ingest_run(
         run_dir=run_dir,
         candidate_id="cand-001",
         candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
         jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+        config_path=config_path,
     )
     analyze_run(run_dir)
     generate_run(run_dir)
@@ -86,7 +90,7 @@ def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:
     assert plan_payload[0]["recommended_actions"]
 
     explanation_payload = json.loads((run_dir / "evaluate" / "ranking_explanations.json").read_text(encoding="utf-8"))
-    assert explanation_payload[0]["ranking_version"] == "v0.2.0-explainable-ranking"
+    assert explanation_payload[0]["ranking_version"] == "v0.3.0-llm-eval"
     assert explanation_payload[0]["dimension_reasons"]["overall"]
 
     eval_summary_payload = json.loads((run_dir / "evaluate" / "eval_summary.json").read_text(encoding="utf-8"))
@@ -95,12 +99,14 @@ def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:
 
 def test_plan_and_report_support_legacy_runs_without_explanations(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
 
     ingest_run(
         run_dir=run_dir,
         candidate_id="cand-001",
         candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
         jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+        config_path=config_path,
     )
     analyze_run(run_dir)
     generate_run(run_dir)
@@ -121,7 +127,27 @@ def test_plan_and_report_support_legacy_runs_without_explanations(tmp_path: Path
     assert plan_payload[0]["decision_drivers"]
     assert plan_payload[0]["watchouts"]
     assert plan_payload[0]["recommended_actions"]
-    assert "legacy scorecard" in plan_payload[0]["decision_drivers"][0]
+    assert "Final score" in plan_payload[0]["decision_drivers"][0]
 
     report_text = report_path.read_text(encoding="utf-8")
-    assert "Top Evidence: No strong evidence references captured." in report_text
+    assert "Evidence mapping is limited." in report_text
+
+
+def _write_deterministic_config(tmp_path: Path) -> Path:
+    config_path = tmp_path / "deterministic-run-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": "deterministic", "model": ""},
+                "generator": {"provider": "deterministic", "model": ""},
+                "judge": {"provider": "deterministic", "model": ""},
+                "planner": {"provider": "deterministic", "model": ""},
+                "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": ".env"},
+                "run_metadata": {"label": "pytest-deterministic"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return config_path

@@ -27,19 +27,24 @@ class RunMetadata:
 
 @dataclass(slots=True)
 class RunConfig:
+    analyzer: ProviderConfig
     generator: ProviderConfig
     judge: ProviderConfig
+    planner: ProviderConfig
     openai: OpenAIConfig
     run_metadata: RunMetadata
 
 
 RUN_CONFIG_PATH = Path("config") / "run_config.json"
+DEFAULT_PROVIDER = "openai"
 
 
 def default_run_config() -> RunConfig:
     return RunConfig(
-        generator=ProviderConfig(provider="deterministic"),
-        judge=ProviderConfig(provider="deterministic"),
+        analyzer=ProviderConfig(provider=DEFAULT_PROVIDER),
+        generator=ProviderConfig(provider=DEFAULT_PROVIDER),
+        judge=ProviderConfig(provider=DEFAULT_PROVIDER),
+        planner=ProviderConfig(provider=DEFAULT_PROVIDER),
         openai=OpenAIConfig(),
         run_metadata=RunMetadata(),
     )
@@ -65,32 +70,51 @@ def config_stage_dir(run_dir: Path) -> Path:
 
 
 def _normalize_run_config(config: RunConfig) -> RunConfig:
+    analyzer = ProviderConfig(provider=config.analyzer.provider, model=config.analyzer.model or "")
     generator = ProviderConfig(provider=config.generator.provider, model=config.generator.model or "")
     judge = ProviderConfig(provider=config.judge.provider, model=config.judge.model or "")
+    planner = ProviderConfig(provider=config.planner.provider, model=config.planner.model or "")
     openai = OpenAIConfig(
         base_url=config.openai.base_url or None,
         api_key_env=config.openai.api_key_env or "OPENAI_API_KEY",
         env_file=config.openai.env_file or ".env",
     )
     metadata = RunMetadata(label=config.run_metadata.label or "")
-    return RunConfig(generator=generator, judge=judge, openai=openai, run_metadata=metadata)
+    return RunConfig(
+        analyzer=analyzer,
+        generator=generator,
+        judge=judge,
+        planner=planner,
+        openai=openai,
+        run_metadata=metadata,
+    )
 
 
 def _from_payload(payload: Any) -> RunConfig:
     if not isinstance(payload, dict):
         raise ValueError("Run config payload must be a JSON object.")
+    analyzer_data = payload.get("analyzer")
     generator_data = payload.get("generator")
     judge_data = payload.get("judge")
+    planner_data = payload.get("planner")
     openai_data = payload.get("openai")
     metadata_data = payload.get("run_metadata")
 
+    analyzer = ProviderConfig(
+        provider=str(analyzer_data.get("provider", DEFAULT_PROVIDER)) if isinstance(analyzer_data, dict) else DEFAULT_PROVIDER,
+        model=str(analyzer_data.get("model", "")) if isinstance(analyzer_data, dict) else "",
+    )
     generator = ProviderConfig(
-        provider=str(generator_data.get("provider", "deterministic")) if isinstance(generator_data, dict) else "deterministic",
+        provider=str(generator_data.get("provider", DEFAULT_PROVIDER)) if isinstance(generator_data, dict) else DEFAULT_PROVIDER,
         model=str(generator_data.get("model", "")) if isinstance(generator_data, dict) else "",
     )
     judge = ProviderConfig(
-        provider=str(judge_data.get("provider", "deterministic")) if isinstance(judge_data, dict) else "deterministic",
+        provider=str(judge_data.get("provider", DEFAULT_PROVIDER)) if isinstance(judge_data, dict) else DEFAULT_PROVIDER,
         model=str(judge_data.get("model", "")) if isinstance(judge_data, dict) else "",
+    )
+    planner = ProviderConfig(
+        provider=str(planner_data.get("provider", DEFAULT_PROVIDER)) if isinstance(planner_data, dict) else DEFAULT_PROVIDER,
+        model=str(planner_data.get("model", "")) if isinstance(planner_data, dict) else "",
     )
 
     openai = OpenAIConfig(
@@ -99,4 +123,11 @@ def _from_payload(payload: Any) -> RunConfig:
         env_file=str(openai_data.get("env_file", ".env")) if isinstance(openai_data, dict) else ".env",
     )
     metadata = RunMetadata(label=str(metadata_data.get("label", "")) if isinstance(metadata_data, dict) else "")
-    return RunConfig(generator=generator, judge=judge, openai=openai, run_metadata=metadata)
+    return RunConfig(
+        analyzer=analyzer,
+        generator=generator,
+        judge=judge,
+        planner=planner,
+        openai=openai,
+        run_metadata=metadata,
+    )

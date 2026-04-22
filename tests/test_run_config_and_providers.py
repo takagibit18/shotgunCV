@@ -13,7 +13,7 @@ from shotguncv_core.pipeline import analyze_run, evaluate_run, generate_run, ing
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_cli_ingest_writes_default_deterministic_run_config(tmp_path: Path) -> None:
+def test_cli_ingest_writes_default_openai_run_config(tmp_path: Path) -> None:
     run_dir = tmp_path / "cli-run"
     resume_path = ROOT / "fixtures" / "candidates" / "base_resume.md"
     jd_path = ROOT / "fixtures" / "jds" / "sample_batch.txt"
@@ -35,8 +35,10 @@ def test_cli_ingest_writes_default_deterministic_run_config(tmp_path: Path) -> N
     assert exit_code == 0, output
 
     config_payload = json.loads((run_dir / "config" / "run_config.json").read_text(encoding="utf-8"))
-    assert config_payload["generator"]["provider"] == "deterministic"
-    assert config_payload["judge"]["provider"] == "deterministic"
+    assert config_payload["analyzer"]["provider"] == "openai"
+    assert config_payload["generator"]["provider"] == "openai"
+    assert config_payload["judge"]["provider"] == "openai"
+    assert config_payload["planner"]["provider"] == "openai"
     assert config_payload["openai"]["api_key_env"] == "OPENAI_API_KEY"
     assert config_payload["openai"]["env_file"] == ".env"
 
@@ -142,11 +144,17 @@ def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
         _fake_openai_urlopen(
             [
                 "Judge rationale 1",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
                 "Judge rationale 2",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
                 "Judge rationale 3",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
                 "Judge rationale 4",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
                 "Judge rationale 5",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
                 "Judge rationale 6",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
             ]
         ),
     )

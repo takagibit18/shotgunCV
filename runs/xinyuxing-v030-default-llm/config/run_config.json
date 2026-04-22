@@ -1,0 +1,26 @@
+{
+  "analyzer": {
+    "provider": "openai",
+    "model": ""
+  },
+  "generator": {
+    "provider": "openai",
+    "model": ""
+  },
+  "judge": {
+    "provider": "openai",
+    "model": ""
+  },
+  "planner": {
+    "provider": "openai",
+    "model": ""
+  },
+  "openai": {
+    "base_url": null,
+    "api_key_env": "OPENAI_API_KEY",
+    "env_file": ".env"
+  },
+  "run_metadata": {
+    "label": ""
+  }
+}

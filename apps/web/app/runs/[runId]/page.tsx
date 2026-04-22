@@ -23,8 +23,10 @@ export default async function RunPage({ params }: PageProps) {
         <p className="eyebrow">{detail.label || "run detail"}</p>
         <h1 className="page-title">{detail.runId}</h1>
         <div className="pill-row" style={{ marginTop: 18 }}>
+          <span className="pill">analyzer: {detail.analyzerProvider}</span>
           <span className="pill">generator: {detail.generatorProvider}</span>
           <span className="pill">judge: {detail.judgeProvider}</span>
+          <span className="pill">planner: {detail.plannerProvider}</span>
           {detail.completedStages.map((stage) => (
             <span key={stage} className="pill">
               {stage}
@@ -89,7 +91,7 @@ export default async function RunPage({ params }: PageProps) {
               <article key={`${item.jdId}-${item.variantId}`} className="detail-card">
                 <h3>{item.title}</h3>
                 <p className="mono">{item.variantId}</p>
-                <p>overall score: {item.overallScore.toFixed(2)}</p>
+                <p>final score: {item.overallScore.toFixed(2)}</p>
                 <p>gap count: {item.gapCount}</p>
                 <p>top reasons: {item.topReasons.join(" / ") || "No top reasons captured"}</p>
               </article>

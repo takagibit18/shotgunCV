@@ -20,8 +20,10 @@ type RunSummary = {
   runId: string;
   lastModified: string;
   completedStages: StageName[];
+  analyzerProvider: string;
   generatorProvider: string;
   judgeProvider: string;
+  plannerProvider: string;
   label: string;
 };
 
@@ -37,8 +39,10 @@ type EvaluateTopVariant = {
 type RunDetail = {
   runId: string;
   label: string;
+  analyzerProvider: string;
   generatorProvider: string;
   judgeProvider: string;
+  plannerProvider: string;
   completedStages: StageName[];
   analyze: {
     isComplete: boolean;
@@ -92,8 +96,10 @@ export async function listRuns(): Promise<RunSummary[]> {
           runId,
           lastModified: metadata.mtime.toISOString(),
           completedStages: await getCompletedStages(runDir),
-          generatorProvider: config?.generator.provider ?? "unknown",
-          judgeProvider: config?.judge.provider ?? "unknown",
+          analyzerProvider: config?.analyzer?.provider ?? "unknown",
+          generatorProvider: config?.generator?.provider ?? "unknown",
+          judgeProvider: config?.judge?.provider ?? "unknown",
+          plannerProvider: config?.planner?.provider ?? "unknown",
           label: config?.run_metadata.label ?? "",
         };
       }),
@@ -128,7 +134,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       jdId: item.jd_id,
       title: item.title || jdIndex.get(item.jd_id)?.title || item.jd_id,
       variantId: item.top_variant_id,
-      overallScore: scorecard?.overall_score ?? 0,
+      overallScore: scorecard?.final_overall_score ?? scorecard?.overall_score ?? 0,
       gapCount: item.gap_count ?? gapCounts.get(item.jd_id) ?? 0,
       topReasons: item.top_reasons ?? [],
     };
@@ -136,9 +142,11 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
 
   return {
     runId,
-    label: config.run_metadata.label,
-    generatorProvider: config.generator.provider,
-    judgeProvider: config.judge.provider,
+    label: config.run_metadata?.label ?? "",
+    analyzerProvider: config.analyzer?.provider ?? "unknown",
+    generatorProvider: config.generator?.provider ?? "unknown",
+    judgeProvider: config.judge?.provider ?? "unknown",
+    plannerProvider: config.planner?.provider ?? "unknown",
     completedStages,
     analyze: {
       isComplete: completedStages.includes("analyze"),

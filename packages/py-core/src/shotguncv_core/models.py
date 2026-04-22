@@ -17,6 +17,11 @@ class JDProfile:
     risk_signals: list[str]
     source_type: str
     source_value: str
+    must_have_requirements: list[str] = field(default_factory=list)
+    nice_to_have_requirements: list[str] = field(default_factory=list)
+    hidden_signals: list[str] = field(default_factory=list)
+    interview_focus_areas: list[str] = field(default_factory=list)
+    role_level_confidence: float = 0.0
 
 
 @dataclass(slots=True)
@@ -30,6 +35,10 @@ class CandidateProfile:
     strengths: list[str]
     constraints: list[str]
     preferences: list[str]
+    core_claims: list[str] = field(default_factory=list)
+    verified_evidence: list[str] = field(default_factory=list)
+    missing_evidence_areas: list[str] = field(default_factory=list)
+    preferred_role_tracks: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -57,11 +66,22 @@ class ScoreCard:
     overall_score: float
     ranking_version: str
     judge_rationale: str
+    llm_role_fit_score: float = 0.0
+    llm_evidence_score: float = 0.0
+    llm_persuasion_score: float = 0.0
+    llm_risk_score: float = 0.0
+    llm_overall_score: float = 0.0
+    final_overall_score: float = 0.0
+    final_decision_source: str = "rules"
+    guardrail_flags: list[str] = field(default_factory=list)
+    provider: str = ""
+    model: str = ""
 
     @staticmethod
     def ranking_key(scorecard: "ScoreCard") -> tuple[float, float, float, float]:
+        primary_score = scorecard.final_overall_score or scorecard.overall_score
         return (
-            scorecard.overall_score,
+            primary_score,
             scorecard.fit_score,
             scorecard.evidence_score,
             -scorecard.gap_risk_score,
@@ -98,6 +118,23 @@ class RankingExplanation:
 
 
 @dataclass(slots=True)
+class LLMAssessment:
+    jd_id: str
+    variant_id: str
+    role_fit: float
+    evidence_quality: float
+    persuasiveness: float
+    interview_pressure_risk: float
+    application_worthiness: str
+    must_fix_issues: list[str] = field(default_factory=list)
+    evidence_citations: list[str] = field(default_factory=list)
+    rewrite_opportunities: list[str] = field(default_factory=list)
+    decision_rationale: str = ""
+    provider: str = ""
+    model: str = ""
+
+
+@dataclass(slots=True)
 class ApplicationStrategy:
     jd_id: str
     recommended_variant_id: str
@@ -109,3 +146,6 @@ class ApplicationStrategy:
     watchouts: list[str] = field(default_factory=list)
     recommended_actions: list[str] = field(default_factory=list)
     catch_up_notes: list[str] = field(default_factory=list)
+    decision_confidence: float = 0.0
+    interview_prep_points: list[str] = field(default_factory=list)
+    resume_revision_tasks: list[str] = field(default_factory=list)

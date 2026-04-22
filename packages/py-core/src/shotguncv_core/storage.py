@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, fields, is_dataclass
+from dataclasses import MISSING, asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 
@@ -55,5 +55,14 @@ def hydrate(model_type: type[Any], payload: Any) -> Any:
     values: dict[str, Any] = {}
     for field in fields(model_type):
         field_type = hints[field.name]
-        values[field.name] = hydrate(field_type, payload[field.name])
+        if field.name in payload:
+            values[field.name] = hydrate(field_type, payload[field.name])
+            continue
+        if field.default is not MISSING:
+            values[field.name] = field.default
+            continue
+        if field.default_factory is not MISSING:  # type: ignore[attr-defined]
+            values[field.name] = field.default_factory()  # type: ignore[misc]
+            continue
+        raise KeyError(f"Missing required field `{field.name}` for `{model_type.__name__}`.")
     return model_type(**values)
