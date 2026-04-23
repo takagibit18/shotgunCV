@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from shotguncv_core.pipeline import (
     _select_relevant_variants,
     analyze_run,
@@ -391,6 +393,175 @@ def test_evaluate_run_records_llm_failure_details_and_plan_uses_them(monkeypatch
     assert any("llm_assessment_missing" in card.guardrail_flags for card in evaluation.scorecards)
 
 
+def test_analyze_run_with_openai_writes_llm_logs_and_summary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
+        jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+    )
+    _write_openai_config(
+        run_dir,
+        analyzer_provider="openai",
+        generator_provider="deterministic",
+        judge_provider="deterministic",
+        planner_provider="deterministic",
+        env_file=dotenv_path,
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen_payloads(
+            [
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(_analyze_payload(), ensure_ascii=False)
+                            }
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+                }
+            ]
+        ),
+    )
+
+    analyze_run(run_dir)
+
+    log_records = _read_jsonl(run_dir / "logs" / "llm_calls.jsonl")
+    summary = json.loads((run_dir / "logs" / "llm_summary.json").read_text(encoding="utf-8"))
+
+    assert len(log_records) == 1
+    assert log_records[0]["stage"] == "analyze"
+    assert log_records[0]["operation"] == "analyze.profile_extraction"
+    assert summary["totals"]["call_count"] == 1
+    assert summary["by_stage"]["analyze"]["total_tokens"] == 150
+
+
+def test_generate_run_rebuilds_summary_with_multiple_jd_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = _prepare_analyzed_run(tmp_path)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
+    _write_openai_config(
+        run_dir,
+        analyzer_provider="deterministic",
+        generator_provider="openai",
+        judge_provider="deterministic",
+        planner_provider="deterministic",
+        env_file=dotenv_path,
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen_payloads(
+            [
+                {
+                    "choices": [{"message": {"content": "中文岗位摘要 1"}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                },
+                {
+                    "choices": [{"message": {"content": "中文岗位摘要 2"}}],
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+                },
+            ]
+        ),
+    )
+
+    generate_run(run_dir)
+
+    summary = json.loads((run_dir / "logs" / "llm_summary.json").read_text(encoding="utf-8"))
+
+    assert summary["by_stage"]["generate"]["call_count"] == 2
+    assert summary["by_stage"]["generate"]["prompt_tokens"] == 21
+    assert summary["by_stage"]["generate"]["completion_tokens"] == 41
+    assert summary["by_stage"]["generate"]["total_tokens"] == 62
+
+
+def test_evaluate_run_parallel_logging_writes_complete_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = _prepare_analyzed_run(tmp_path)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
+    _write_openai_config(
+        run_dir,
+        analyzer_provider="deterministic",
+        generator_provider="deterministic",
+        judge_provider="openai",
+        planner_provider="deterministic",
+        env_file=dotenv_path,
+    )
+    generate_run(run_dir)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_parallel_evaluate_urlopen())
+
+    evaluate_run(run_dir)
+
+    records = _read_jsonl(run_dir / "logs" / "llm_calls.jsonl")
+    summary = json.loads((run_dir / "logs" / "llm_summary.json").read_text(encoding="utf-8"))
+
+    assert len(records) == 4
+    assert all(record["stage"] == "evaluate" for record in records)
+    assert {record["operation"] for record in records} == {"evaluate.review", "evaluate.assess"}
+    assert summary["by_stage"]["evaluate"]["call_count"] == 4
+
+
+def test_plan_run_refreshes_summary_for_plan_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
+        jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+    )
+    _write_openai_config(
+        run_dir,
+        analyzer_provider="deterministic",
+        generator_provider="deterministic",
+        judge_provider="deterministic",
+        planner_provider="openai",
+        env_file=dotenv_path,
+    )
+    analyze_run(run_dir)
+    generate_run(run_dir)
+    evaluate_run(run_dir)
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen_payloads(
+            [
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "{\"apply_decision\":\"apply\",\"decision_confidence\":0.88,\"decision_drivers\":[\"Final score 0.82\"],\"watchouts\":[\"Need stronger metrics story\"],\"recommended_actions\":[\"Add quantified impact\"],\"interview_prep_points\":[\"Prompt evaluation\"],\"resume_revision_tasks\":[\"Rewrite first bullet\"],\"reason_summary\":\"建议投递。\"}"
+                            }
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 13, "completion_tokens": 9, "total_tokens": 22},
+                },
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "{\"apply_decision\":\"hold\",\"decision_confidence\":0.55,\"decision_drivers\":[\"Final score 0.61\"],\"watchouts\":[\"Domain gap remains\"],\"recommended_actions\":[\"Tighten evidence mapping\"],\"interview_prep_points\":[\"Metrics storytelling\"],\"resume_revision_tasks\":[\"Add one metrics bullet\"],\"reason_summary\":\"暂缓投递。\"}"
+                            }
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 14, "completion_tokens": 10, "total_tokens": 24},
+                },
+            ]
+        ),
+    )
+
+    plan_run(run_dir)
+
+    summary = json.loads((run_dir / "logs" / "llm_summary.json").read_text(encoding="utf-8"))
+
+    assert summary["by_stage"]["plan"]["call_count"] == 2
+    assert summary["by_stage"]["plan"]["total_tokens"] == 46
+
+
 def _write_deterministic_config(tmp_path: Path) -> Path:
     config_path = tmp_path / "deterministic-run-config.json"
     config_path.write_text(
@@ -409,3 +580,187 @@ def _write_deterministic_config(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return config_path
+
+
+def _prepare_analyzed_run(tmp_path: Path) -> Path:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
+        jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+        config_path=config_path,
+    )
+    analyze_run(run_dir)
+    return run_dir
+
+
+def _write_openai_config(
+    run_dir: Path,
+    analyzer_provider: str,
+    generator_provider: str,
+    judge_provider: str,
+    planner_provider: str,
+    env_file: Path,
+) -> None:
+    (run_dir / "config" / "run_config.json").write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": analyzer_provider, "model": "gpt-5.4-mini" if analyzer_provider != "deterministic" else ""},
+                "generator": {"provider": generator_provider, "model": "gpt-5.4-mini" if generator_provider != "deterministic" else ""},
+                "judge": {"provider": judge_provider, "model": "gpt-5.4-mini" if judge_provider != "deterministic" else ""},
+                "planner": {"provider": planner_provider, "model": "gpt-5.4-mini" if planner_provider != "deterministic" else ""},
+                "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "env_file": str(env_file)},
+                "run_metadata": {"label": "openai-logging-test"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _fake_openai_urlopen_payloads(payloads: list[dict[str, object]]):
+    responses = iter(payloads)
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def _urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
+        return _Response(next(responses))
+
+    return _urlopen
+
+
+def _fake_parallel_evaluate_urlopen():
+    review_payloads = iter(
+        [
+            {
+                "choices": [{"message": {"content": "中文评审理由 1"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            },
+            {
+                "choices": [{"message": {"content": "中文评审理由 2"}}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12},
+            },
+        ]
+    )
+    assess_payloads = iter(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"整体匹配。\"}"
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 4, "total_tokens": 10},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "{\"role_fit\":0.82,\"evidence_quality\":0.79,\"persuasiveness\":0.76,\"interview_pressure_risk\":0.29,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e2\"],\"rewrite_opportunities\":[\"r2\"],\"decision_rationale\":\"整体匹配。\"}"
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14},
+            },
+        ]
+    )
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def _urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
+        payload = json.loads(req.data.decode("utf-8"))
+        prompt = payload["messages"][1]["content"]
+        source = assess_payloads if "JSON" in prompt else review_payloads
+        return _Response(next(source))
+
+    return _urlopen
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _analyze_payload() -> dict[str, object]:
+    return {
+        "candidate_profile": {
+            "experiences": ["Built reporting workflows"],
+            "projects": ["Quarterly planning automation"],
+            "skills": ["Python", "Prompt evaluation"],
+            "industry_tags": ["Operations"],
+            "strengths": ["Structured execution"],
+            "constraints": [],
+            "preferences": ["Generalist roles"],
+            "core_claims": ["Delivered internal tools"],
+            "verified_evidence": ["Delivered internal tools"],
+            "missing_evidence_areas": [],
+            "preferred_role_tracks": ["Operations analyst"],
+        },
+        "jd_profiles": [
+            {
+                "jd_id": "jd-001",
+                "title": "LLM Product Engineer",
+                "company": "Example Co",
+                "cluster": "llm-product-engineer",
+                "responsibilities": ["Build evaluation workflow"],
+                "requirements": ["Python", "Prompt evaluation"],
+                "keywords": ["python", "prompt evaluation"],
+                "seniority": "mid",
+                "bonuses": [],
+                "risk_signals": [],
+                "source_type": "file",
+                "source_value": "sample_batch.txt",
+                "must_have_requirements": ["Python"],
+                "nice_to_have_requirements": ["Metrics"],
+                "hidden_signals": [],
+                "interview_focus_areas": ["Prompt evaluation"],
+                "role_level_confidence": 0.8,
+            },
+            {
+                "jd_id": "jd-002",
+                "title": "AI Operations PM",
+                "company": "Example Co",
+                "cluster": "ai-operations-pm",
+                "responsibilities": ["Drive eval operations"],
+                "requirements": ["Experimentation", "Metrics"],
+                "keywords": ["experimentation", "metrics"],
+                "seniority": "mid",
+                "bonuses": [],
+                "risk_signals": [],
+                "source_type": "file",
+                "source_value": "sample_batch.txt",
+                "must_have_requirements": ["Experimentation"],
+                "nice_to_have_requirements": ["Metrics"],
+                "hidden_signals": [],
+                "interview_focus_areas": ["Metrics storytelling"],
+                "role_level_confidence": 0.75,
+            },
+        ],
+        "evidence_map": {"candidate": {}, "jds": {}, "risks": []},
+    }

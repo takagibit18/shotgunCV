@@ -7,7 +7,8 @@ from urllib.error import HTTPError
 import pytest
 
 from shotguncv_cli.main import run
-from shotguncv_agents.providers import OpenAIAnalyzeProvider, _classify_cluster
+from shotguncv_agents.providers import OpenAIAnalyzeProvider, _chat_completion, _classify_cluster
+from shotguncv_core.llm_observability import build_llm_summary
 from shotguncv_core.pipeline import analyze_run, evaluate_run, generate_run, ingest_run
 
 
@@ -127,7 +128,12 @@ def test_openai_analyze_provider_derives_cluster_when_payload_omits_it(monkeypat
     }
     monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen([json.dumps(payload, ensure_ascii=False)]))
 
-    feedback = OpenAIAnalyzeProvider(model="gpt-5.4-mini", base_url="https://api.openai.com/v1", api_key="test-key").analyze(
+    feedback = OpenAIAnalyzeProvider(
+        model="gpt-5.4-mini",
+        base_url="https://api.openai.com/v1",
+        api_key="test-key",
+        run_dir=tmp_path,
+    ).analyze(
         candidate_id="cand-001",
         candidate_resume_path="resume.md",
         resume_text="- Built reporting workflows",
@@ -169,6 +175,148 @@ def test_generate_run_uses_openai_generator_from_run_config(monkeypatch: pytest.
 
     assert [variant.summary for variant in generation.variants] == ["中文岗位摘要 1", "中文岗位摘要 2"]
     assert all(variant.variant_type == "jd-specific" for variant in generation.variants)
+
+
+def test_chat_completion_writes_success_log_and_usage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen_payloads(
+            [
+                {
+                    "choices": [{"message": {"content": "中文岗位摘要"}}],
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+                }
+            ]
+        ),
+    )
+
+    result = _chat_completion(
+        base_url="https://api.openai.com/v1",
+        api_key="test-secret-key",
+        model="gpt-5.4-mini",
+        prompt="请输出中文摘要",
+        expect_json=False,
+        stage="generate",
+        operation="generate.jd_summary",
+        run_dir=tmp_path,
+    )
+
+    assert result.response_text == "中文岗位摘要"
+    assert result.usage.prompt_tokens == 11
+    records = _read_jsonl(tmp_path / "logs" / "llm_calls.jsonl")
+    assert len(records) == 1
+    assert records[0]["stage"] == "generate"
+    assert records[0]["operation"] == "generate.jd_summary"
+    assert records[0]["status"] == "success"
+    assert records[0]["usage"] == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+    assert records[0]["request_messages"][0]["role"] == "system"
+    assert records[0]["request_messages"][1]["role"] == "user"
+
+
+def test_chat_completion_records_retry_then_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen_payloads(
+            [
+                {
+                    "choices": [{"message": {"content": "English summary only"}}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                },
+                {
+                    "choices": [{"message": {"content": "中文摘要通过校验"}}],
+                    "usage": {"prompt_tokens": 6, "completion_tokens": 4, "total_tokens": 10},
+                },
+            ]
+        ),
+    )
+
+    result = _chat_completion(
+        base_url="https://api.openai.com/v1",
+        api_key="test-secret-key",
+        model="gpt-5.4-mini",
+        prompt="请输出中文摘要",
+        expect_json=False,
+        stage="generate",
+        operation="generate.jd_summary",
+        run_dir=tmp_path,
+    )
+
+    assert result.response_text == "中文摘要通过校验"
+    records = _read_jsonl(tmp_path / "logs" / "llm_calls.jsonl")
+    assert [record["attempt"] for record in records] == [1, 2]
+    assert [record["status"] for record in records] == ["failure", "success"]
+    assert all(record["operation"] == "generate.jd_summary" for record in records)
+    assert records[0]["error_type"] == "ValueError"
+    assert "language check failed" in records[0]["error_message"]
+
+
+def test_chat_completion_summary_uses_zero_tokens_when_usage_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen_payloads(
+            [
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "{\"role_fit\":0.7,\"evidence_quality\":0.6,\"persuasiveness\":0.8,\"interview_pressure_risk\":0.2,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"Built prompt service\"],\"rewrite_opportunities\":[\"Add metrics\"],\"decision_rationale\":\"整体匹配。\"}"
+                            }
+                        }
+                    ]
+                }
+            ]
+        ),
+    )
+
+    result = _chat_completion(
+        base_url="https://api.openai.com/v1",
+        api_key="test-secret-key",
+        model="gpt-5.4-mini",
+        prompt="请输出 JSON",
+        expect_json=True,
+        json_language_fields={"decision_rationale"},
+        stage="evaluate",
+        operation="evaluate.assess",
+        run_dir=tmp_path,
+    )
+
+    build_llm_summary(tmp_path)
+
+    assert result.response_text.startswith("{")
+    summary = json.loads((tmp_path / "logs" / "llm_summary.json").read_text(encoding="utf-8"))
+    assert summary["totals"]["prompt_tokens"] == 0
+    assert summary["totals"]["completion_tokens"] == 0
+    assert summary["totals"]["total_tokens"] == 0
+    assert summary["by_stage"]["evaluate"]["call_count"] == 1
+
+
+def test_chat_completion_logs_failure_without_leaking_sensitive_headers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def _boom(req, timeout=0):  # type: ignore[no-untyped-def]
+        raise HTTPError(req.full_url, 401, "bad api key", None, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", _boom)
+
+    with pytest.raises(HTTPError):
+        _chat_completion(
+            base_url="https://api.openai.com/v1",
+            api_key="test-secret-key",
+            model="gpt-5.4-mini",
+            prompt="请输出中文摘要",
+            expect_json=False,
+            stage="generate",
+            operation="generate.jd_summary",
+            run_dir=tmp_path,
+        )
+
+    records = _read_jsonl(tmp_path / "logs" / "llm_calls.jsonl")
+    assert len(records) == 1
+    assert records[0]["status"] == "failure"
+    assert records[0]["error_type"] == "HTTPError"
+    serialized = json.dumps(records[0], ensure_ascii=False)
+    assert "Authorization" not in serialized
+    assert "test-secret-key" not in serialized
 
 
 def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
@@ -571,3 +719,30 @@ def _fake_openai_urlopen_capture(messages: list[str], capture: dict[str, str]):
 
     return _urlopen
 
+
+def _fake_openai_urlopen_payloads(payloads: list[dict[str, object]]):
+    responses = iter(payloads)
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def _urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
+        if timeout == 0:
+            raise HTTPError("https://api.openai.com/v1/chat/completions", 500, "missing timeout", None, None)
+        return _Response(next(responses))
+
+    return _urlopen
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

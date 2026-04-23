@@ -13,6 +13,7 @@ from shotguncv_agents.providers import (
     build_judge_provider,
     build_planner_provider,
 )
+from shotguncv_core.llm_observability import build_llm_summary
 from shotguncv_core.models import (
     ApplicationStrategy,
     CandidateProfile,
@@ -124,6 +125,7 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
     dump_json(analyze_directory / "candidate_profile.json", feedback.candidate_profile)
     dump_json(analyze_directory / "jd_profiles.json", feedback.jd_profiles)
     dump_json(analyze_directory / "evidence_map.json", feedback.evidence_map)
+    build_llm_summary(run_dir)
     return AnalysisArtifacts(candidate=feedback.candidate_profile, jd_profiles=feedback.jd_profiles, evidence_map=feedback.evidence_map)
 
 
@@ -149,6 +151,7 @@ def generate_run(run_dir: Path) -> GenerationArtifacts:
         )
 
     dump_json(stage_dir(run_dir, "generate") / "resume_variants.json", variants)
+    build_llm_summary(run_dir)
     return GenerationArtifacts(variants=variants)
 
 
@@ -249,6 +252,7 @@ def evaluate_run(
     dump_json(evaluate_directory / "llm_assessments.json", llm_assessments)
     dump_json(evaluate_directory / "llm_failures.json", llm_failures)
     dump_json(evaluate_directory / "eval_summary.json", eval_summary)
+    build_llm_summary(run_dir)
     return EvaluationArtifacts(
         scorecards=scorecards,
         gap_maps=gap_maps,
@@ -327,6 +331,7 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
         strategies.append(strategy)
 
     dump_json(stage_dir(run_dir, "plan") / "application_strategies.json", strategies)
+    build_llm_summary(run_dir)
     return PlanArtifacts(strategies=strategies)
 
 

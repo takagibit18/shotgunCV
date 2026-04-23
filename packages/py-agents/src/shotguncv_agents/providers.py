@@ -3,11 +3,24 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from urllib import request
 from typing import Protocol
+from uuid import uuid4
 
-from shotguncv_core.models import ApplicationStrategy, CandidateProfile, JDProfile, LLMAssessment, ResumeVariant
+from shotguncv_core.llm_observability import append_llm_call
+from shotguncv_core.models import (
+    ApplicationStrategy,
+    CandidateProfile,
+    JDProfile,
+    LLMCallRecord,
+    LLMCallUsage,
+    LLMCompletionResult,
+    LLMAssessment,
+    ResumeVariant,
+)
 from shotguncv_core.run_config import RunConfig
 
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
@@ -258,10 +271,11 @@ class DeterministicPlannerProvider:
 
 
 class OpenAIGeneratorProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, run_dir: Path | None = None, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.run_dir = run_dir or Path.cwd()
         self.runtime_provider = provider
         self.runtime_model = model
 
@@ -275,7 +289,18 @@ class OpenAIGeneratorProvider:
             "只返回纯文本，不要添加编号或解释。"
         )
         try:
-            return _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=False)
+            result = _chat_completion(
+                self.base_url,
+                self.api_key,
+                self.model,
+                prompt,
+                expect_json=False,
+                stage="generate",
+                operation="generate.cluster_summary",
+                run_dir=self.run_dir,
+                provider=self.runtime_provider,
+            )
+            return result.response_text
         except Exception:
             return DeterministicGeneratorProvider().build_cluster_summary(cluster, candidate, jds)
 
@@ -289,16 +314,28 @@ class OpenAIGeneratorProvider:
             "只返回纯文本，不要添加编号或解释。"
         )
         try:
-            return _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=False)
+            result = _chat_completion(
+                self.base_url,
+                self.api_key,
+                self.model,
+                prompt,
+                expect_json=False,
+                stage="generate",
+                operation="generate.jd_summary",
+                run_dir=self.run_dir,
+                provider=self.runtime_provider,
+            )
+            return result.response_text
         except Exception:
             return DeterministicGeneratorProvider().build_jd_summary(jd, candidate)
 
 
 class OpenAIJudgeProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, run_dir: Path | None = None, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.run_dir = run_dir or Path.cwd()
         self.runtime_provider = provider
         self.runtime_model = model
 
@@ -312,7 +349,17 @@ class OpenAIJudgeProvider:
             "只返回纯文本，不要附加说明。"
         )
         try:
-            rationale = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=False)
+            rationale = _chat_completion(
+                self.base_url,
+                self.api_key,
+                self.model,
+                prompt,
+                expect_json=False,
+                stage="evaluate",
+                operation="evaluate.review",
+                run_dir=self.run_dir,
+                provider=self.runtime_provider,
+            ).response_text
         except Exception:
             rationale = DeterministicJudgeProvider().review(jd, candidate, variant, overall_score).rationale
         worthiness = "apply" if overall_score >= 0.7 else "stretch"
@@ -344,7 +391,11 @@ class OpenAIJudgeProvider:
             prompt,
             expect_json=True,
             json_language_fields={"decision_rationale"},
-        )
+            stage="evaluate",
+            operation="evaluate.assess",
+            run_dir=self.run_dir,
+            provider=self.runtime_provider,
+        ).response_text
         payload = _parse_json_payload(raw)
         return LLMAssessment(
             jd_id=jd.jd_id,
@@ -364,10 +415,11 @@ class OpenAIJudgeProvider:
 
 
 class OpenAIAnalyzeProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, run_dir: Path | None = None, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.run_dir = run_dir or Path.cwd()
         self.runtime_provider = provider
         self.runtime_model = model
 
@@ -383,7 +435,17 @@ class OpenAIAnalyzeProvider:
             f"jd_inputs={json.dumps(jd_inputs, ensure_ascii=False)}\n"
         )
         try:
-            raw = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=True)
+            raw = _chat_completion(
+                self.base_url,
+                self.api_key,
+                self.model,
+                prompt,
+                expect_json=True,
+                stage="analyze",
+                operation="analyze.profile_extraction",
+                run_dir=self.run_dir,
+                provider=self.runtime_provider,
+            ).response_text
             payload = _parse_json_payload(raw)
         except Exception:
             return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, jd_inputs)
@@ -437,10 +499,11 @@ class OpenAIAnalyzeProvider:
 
 
 class OpenAIPlannerProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, run_dir: Path | None = None, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.run_dir = run_dir or Path.cwd()
         self.runtime_provider = provider
         self.runtime_model = model
 
@@ -480,7 +543,11 @@ class OpenAIPlannerProvider:
             prompt,
             expect_json=True,
             json_language_fields={"reason_summary"},
-        )
+            stage="plan",
+            operation="plan.strategy",
+            run_dir=self.run_dir,
+            provider=self.runtime_provider,
+        ).response_text
         payload = _parse_json_payload(raw)
         return PlanFeedback(
             strategy=ApplicationStrategy(
@@ -526,6 +593,7 @@ def build_generator_provider(config: RunConfig, stage: str, run_dir: Path) -> Re
             model=runtime_model,
             base_url=runtime_base_url,
             api_key=api_key,
+            run_dir=run_dir,
             provider=provider,
         )
     raise ValueError(f"Unsupported generator provider `{provider}` for stage `{stage}`.")
@@ -552,7 +620,13 @@ def build_analyzer_provider(config: RunConfig, stage: str, run_dir: Path) -> Ana
             env_path=env_path,
             env_values=env_values,
         )
-        return OpenAIAnalyzeProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key, provider=provider)
+        return OpenAIAnalyzeProvider(
+            model=runtime_model,
+            base_url=runtime_base_url,
+            api_key=api_key,
+            run_dir=run_dir,
+            provider=provider,
+        )
     raise ValueError(f"Unsupported analyzer provider `{provider}` for stage `{stage}`.")
 
 
@@ -581,6 +655,7 @@ def build_judge_provider(config: RunConfig, stage: str, run_dir: Path) -> JudgeP
             model=runtime_model,
             base_url=runtime_base_url,
             api_key=api_key,
+            run_dir=run_dir,
             provider=provider,
         )
     raise ValueError(f"Unsupported judge provider `{provider}` for stage `{stage}`.")
@@ -607,7 +682,13 @@ def build_planner_provider(config: RunConfig, stage: str, run_dir: Path) -> Plan
             env_path=env_path,
             env_values=env_values,
         )
-        return OpenAIPlannerProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key, provider=provider)
+        return OpenAIPlannerProvider(
+            model=runtime_model,
+            base_url=runtime_base_url,
+            api_key=api_key,
+            run_dir=run_dir,
+            provider=provider,
+        )
     raise ValueError(f"Unsupported planner provider `{provider}` for stage `{stage}`.")
 
 
@@ -872,15 +953,24 @@ def _chat_completion(
     prompt: str,
     expect_json: bool,
     json_language_fields: set[str] | None = None,
-) -> str:
+    *,
+    stage: str,
+    operation: str,
+    run_dir: Path,
+    provider: str = "openai",
+) -> LLMCompletionResult:
     messages = [
         {"role": "system", "content": _build_system_prompt(expect_json=expect_json)},
         {"role": "user", "content": prompt},
     ]
+    call_id = str(uuid4())
     last_output = ""
     last_error: Exception | None = None
 
-    for _ in range(DEFAULT_LLM_RETRY_TIMES):
+    for attempt in range(1, DEFAULT_LLM_RETRY_TIMES + 1):
+        started = perf_counter()
+        content = ""
+        usage = LLMCallUsage()
         payload = json.dumps(
             {
                 "model": model,
@@ -897,12 +987,13 @@ def _chat_completion(
             },
             method="POST",
         )
-        with request.urlopen(response, timeout=DEFAULT_OPENAI_TIMEOUT_SEC) as handle:
-            body = json.loads(handle.read().decode("utf-8"))
-        content = body["choices"][0]["message"]["content"].strip()
-        last_output = content
-
         try:
+            with request.urlopen(response, timeout=DEFAULT_OPENAI_TIMEOUT_SEC) as handle:
+                body = json.loads(handle.read().decode("utf-8"))
+            content = body["choices"][0]["message"]["content"].strip()
+            usage = _extract_usage(body.get("usage"))
+            last_output = content
+
             if expect_json:
                 parsed = _parse_json_payload(content)
                 if json_language_fields and not _json_values_chinese_dominant(parsed, json_language_fields):
@@ -910,11 +1001,74 @@ def _chat_completion(
             else:
                 if not _is_chinese_dominant(content):
                     raise ValueError("text language check failed")
-            return content
+
+            append_llm_call(
+                run_dir,
+                LLMCallRecord(
+                    call_id=call_id,
+                    stage=stage,
+                    operation=operation,
+                    provider=provider,
+                    model=model,
+                    status="success",
+                    attempt=attempt,
+                    duration_ms=int((perf_counter() - started) * 1000),
+                    request_messages=messages,
+                    response_text=content,
+                    usage=usage,
+                    created_at=datetime.now(UTC).isoformat(),
+                ),
+            )
+            return LLMCompletionResult(
+                response_text=content,
+                usage=usage,
+                call_id=call_id,
+                provider=provider,
+                model=model,
+            )
         except Exception as exc:
+            append_llm_call(
+                run_dir,
+                LLMCallRecord(
+                    call_id=call_id,
+                    stage=stage,
+                    operation=operation,
+                    provider=provider,
+                    model=model,
+                    status="failure",
+                    attempt=attempt,
+                    duration_ms=int((perf_counter() - started) * 1000),
+                    request_messages=messages,
+                    response_text=content,
+                    usage=usage,
+                    error_type=exc.__class__.__name__,
+                    error_message=str(exc).strip() or exc.__class__.__name__,
+                    created_at=datetime.now(UTC).isoformat(),
+                ),
+            )
+            if isinstance(exc, ValueError) and "language check failed" in str(exc):
+                last_error = exc
+                continue
             last_error = exc
-            continue
+            raise
 
     if last_error is not None:
         raise ValueError(f"LLM output failed Chinese dominance check: {last_output[:200]}") from last_error
     raise ValueError("LLM returned empty output.")
+
+
+def _extract_usage(payload: object) -> LLMCallUsage:
+    if not isinstance(payload, dict):
+        return LLMCallUsage()
+    return LLMCallUsage(
+        prompt_tokens=_safe_usage_int(payload.get("prompt_tokens")),
+        completion_tokens=_safe_usage_int(payload.get("completion_tokens")),
+        total_tokens=_safe_usage_int(payload.get("total_tokens")),
+    )
+
+
+def _safe_usage_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

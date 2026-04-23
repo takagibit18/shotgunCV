@@ -135,6 +135,56 @@ class LLMAssessment:
 
 
 @dataclass(slots=True)
+class LLMCallUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass(slots=True)
+class LLMCallRecord:
+    call_id: str
+    stage: str
+    operation: str
+    provider: str
+    model: str
+    status: str
+    attempt: int
+    duration_ms: int
+    request_messages: list[dict[str, str]]
+    response_text: str
+    usage: LLMCallUsage = field(default_factory=LLMCallUsage)
+    error_type: str | None = None
+    error_message: str | None = None
+    created_at: str = ""
+
+
+@dataclass(slots=True)
+class LLMStageSummary:
+    call_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass(slots=True)
+class LLMRunSummary:
+    totals: LLMStageSummary = field(default_factory=LLMStageSummary)
+    by_stage: dict[str, LLMStageSummary] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LLMCompletionResult:
+    response_text: str
+    usage: LLMCallUsage = field(default_factory=LLMCallUsage)
+    call_id: str = ""
+    provider: str = ""
+    model: str = ""
+
+
+@dataclass(slots=True)
 class LLMFailure:
     jd_id: str
     variant_id: str
