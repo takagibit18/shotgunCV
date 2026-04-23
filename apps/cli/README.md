@@ -16,7 +16,7 @@
 
 - `ingest`：写入原始输入清单与候选人简历原文
 - `analyze`：写入 `CandidateProfile` 与 `JDProfile` 列表
-- `generate`：写入 cluster 版与 JD-specific 版 `ResumeVariant`
+- `generate`：按 JD 写入 `JD-specific` 的 `ResumeVariant`
 - `evaluate`：写入 `ScoreCard`、`GapMap`、`eval_summary`
 - `plan`：写入 `ApplicationStrategy`
 - `report`：写入 Markdown 汇总报告

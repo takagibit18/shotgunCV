@@ -17,7 +17,7 @@ def test_scorecard_and_strategy_capture_v1_fields() -> None:
         jd_id="jd-001",
         title="LLM Product Engineer",
         company="Example AI",
-        cluster="ai-product",
+        cluster="product-engineer",
         responsibilities=["Ship evaluation pipelines"],
         requirements=["Prompt engineering", "Python"],
         keywords=["evaluation", "python", "llm"],
@@ -39,11 +39,11 @@ def test_scorecard_and_strategy_capture_v1_fields() -> None:
         preferences=["Product-oriented AI roles"],
     )
     variant = ResumeVariant(
-        variant_id="variant-cluster-001",
-        variant_type="cluster",
-        cluster="ai-product",
+        variant_id="variant-jd-jd-001",
+        variant_type="jd-specific",
+        cluster="product-engineer",
         target_jd_ids=["jd-001"],
-        summary="AI product oriented resume variant",
+        summary="JD specific resume variant",
         emphasized_strengths=["LLM workflow tooling"],
         stretch_points=["Frame internal tooling as resume ops platform work"],
         source_resume_path="fixtures/candidates/base_resume.md",
@@ -110,9 +110,9 @@ def test_scorecard_and_strategy_capture_v1_fields() -> None:
         ],
     )
 
-    assert jd.cluster == "ai-product"
+    assert jd.cluster == "product-engineer"
     assert candidate.constraints == ["No production ML platform ownership"]
-    assert variant.variant_type == "cluster"
+    assert variant.variant_type == "jd-specific"
     assert scorecard.overall_score > scorecard.gap_risk_score
     assert scorecard.ranking_version == explanation.ranking_version
     assert explanation.dimension_reasons["overall"] == "worth applying with light interview prep"

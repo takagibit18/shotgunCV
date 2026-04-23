@@ -17,11 +17,11 @@ export default async function ReportPage({ params }: PageProps) {
   return (
     <main>
       <Link href={`/runs/${resolvedParams.runId}`} className="backlink">
-        ← Back to run detail
+        {"\u8fd4\u56de\u8fd0\u884c\u8be6\u60c5"}
       </Link>
 
       <section className="hero">
-        <p className="eyebrow">Run Report</p>
+        <p className="eyebrow">{"\u8fd0\u884c\u62a5\u544a"}</p>
         <h1 className="page-title">{resolvedParams.runId}</h1>
       </section>
 
@@ -31,7 +31,7 @@ export default async function ReportPage({ params }: PageProps) {
             <ReactMarkdown>{report.markdown}</ReactMarkdown>
           </div>
         ) : (
-          <div className="empty">阶段未完成</div>
+          <div className="empty">{"\u9636\u6bb5\u672a\u5b8c\u6210"}</div>
         )}
       </section>
     </main>

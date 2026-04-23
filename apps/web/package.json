@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test": "vitest run"
+    "test": "node scripts/check-zh-dominance.mjs && vitest run"
   },
   "dependencies": {
     "next": "^15.1.4",

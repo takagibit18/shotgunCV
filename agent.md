@@ -42,6 +42,23 @@
 - 优先输出结构化结果，避免纯自然语言结果。
 - 运行产物必须可复现，避免仅控制台瞬时输出。
 
+## ❌ Forbidden commands
+
+- DO NOT run: npm test
+- DO NOT run: pnpm test
+- DO NOT run: pytest (without file scope)
+
+## ✅ Allowed commands
+
+- npm run test -- --run
+- vitest run <file>
+- pytest <file> -q
+
+## Execution policy
+
+- Always run the smallest possible test scope
+- Never run full test suite unless explicitly requested
+
 ## 文档维护规则
 
 - 架构或产品关键取舍变化时更新 `docs/decision-log.md`。
