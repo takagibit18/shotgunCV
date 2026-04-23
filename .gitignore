@@ -46,3 +46,6 @@ Thumbs.db
 
 # Private local inputs
 /private_inputs/20260421_xinyuxing_agent_jobs/
+
+# Local pipeline outputs
+/runs/

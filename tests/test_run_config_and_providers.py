@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 import pytest
 
 from shotguncv_cli.main import run
+from shotguncv_agents.providers import OpenAIAnalyzeProvider, _classify_cluster
 from shotguncv_core.pipeline import analyze_run, evaluate_run, generate_run, ingest_run
 
 
@@ -84,6 +85,64 @@ def test_cli_ingest_snapshots_explicit_run_config(tmp_path: Path) -> None:
     assert snapshot_payload["run_metadata"]["label"] == "internal-openai"
 
 
+def test_classify_cluster_derives_generic_slug_and_falls_back_to_general() -> None:
+    assert _classify_cluster("Senior Sales Manager", ["Own enterprise pipeline", "Coordinate regional forecasting"]) == (
+        "senior-sales-manager"
+    )
+    assert _classify_cluster("   ", []) == "general"
+    assert _classify_cluster("Legal Counsel", ["Draft commercial contracts"]) not in {"ai-product", "ai-operations"}
+
+
+def test_openai_analyze_provider_derives_cluster_when_payload_omits_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "candidate_profile": {
+            "experiences": ["Built reporting workflows"],
+            "projects": ["Quarterly planning automation"],
+            "skills": ["Python"],
+            "industry_tags": ["Operations"],
+            "strengths": ["Structured execution"],
+            "constraints": [],
+            "preferences": ["Generalist roles"],
+            "core_claims": ["Delivered internal tools"],
+            "verified_evidence": ["Delivered internal tools"],
+            "missing_evidence_areas": [],
+            "preferred_role_tracks": ["Operations analyst"],
+        },
+        "jd_profiles": [
+            {
+                "jd_id": "jd-001",
+                "title": "Operations Analyst",
+                "company": "Example Co",
+                "responsibilities": ["Own KPI reporting"],
+                "requirements": ["Excel", "SQL"],
+                "keywords": ["excel", "sql"],
+                "seniority": "mid",
+                "bonuses": [],
+                "risk_signals": [],
+                "source_type": "text",
+                "source_value": "Operations Analyst at Example Co",
+            }
+        ],
+        "evidence_map": {},
+    }
+    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen([json.dumps(payload, ensure_ascii=False)]))
+
+    feedback = OpenAIAnalyzeProvider(model="gpt-5.4-mini", base_url="https://api.openai.com/v1", api_key="test-key").analyze(
+        candidate_id="cand-001",
+        candidate_resume_path="resume.md",
+        resume_text="- Built reporting workflows",
+        jd_inputs=[
+            {
+                "source_type": "text",
+                "source_value": "Operations Analyst at Example Co",
+                "content": "=== JD ===\nTitle: Operations Analyst\nCompany: Example Co\nBody:\n- Own KPI reporting\n- Excel and SQL",
+            }
+        ],
+    )
+
+    assert feedback.jd_profiles[0].cluster == "operations-analyst"
+
+
 def test_cli_generate_fails_with_helpful_message_when_run_config_missing(tmp_path: Path) -> None:
     exit_code, output = run(["generate", "--run-dir", str(tmp_path / "missing-run")])
     assert exit_code == 1
@@ -104,12 +163,12 @@ def test_generate_run_uses_openai_generator_from_run_config(monkeypatch: pytest.
             "run_metadata": {"label": "openai-generate"},
         },
     )
-    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen(["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"]))
+    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen(["中文岗位摘要 1", "中文岗位摘要 2"]))
 
     generation = generate_run(run_dir)
 
-    assert generation.variants[0].summary == "中文聚类摘要"
-    assert any(variant.summary == "中文岗位摘要" for variant in generation.variants)
+    assert [variant.summary for variant in generation.variants] == ["中文岗位摘要 1", "中文岗位摘要 2"]
+    assert all(variant.variant_type == "jd-specific" for variant in generation.variants)
 
 
 def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
@@ -136,22 +195,52 @@ def test_evaluate_run_uses_openai_judge_rationale_from_run_config(
                 "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
                 "璇勫鐞嗙敱 2",
                 "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "璇勫鐞嗙敱 3",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "璇勫鐞嗙敱 4",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "璇勫鐞嗙敱 5",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
-                "璇勫鐞嗙敱 6",
-                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"e1\"],\"rewrite_opportunities\":[\"r1\"],\"decision_rationale\":\"ok\"}",
             ]
         ),
     )
 
     evaluation = evaluate_run(run_dir)
 
-    assert len(evaluation.scorecards) == 6
+    assert len(evaluation.scorecards) == 2
     assert any(card.judge_rationale for card in evaluation.scorecards)
+
+
+def test_evaluate_run_accepts_english_evidence_and_rewrite_text_in_judge_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_dir = _prepare_analyzed_run(tmp_path)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
+    _write_run_config(
+        run_dir,
+        {
+            "generator": {"provider": "deterministic", "model": ""},
+            "judge": {"provider": "openai", "model": "gpt-5.4-mini"},
+            "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
+            "run_metadata": {"label": "openai-evaluate-english-json"},
+        },
+    )
+    generate_run(run_dir)
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen(
+            [
+                "中文评审理由 1",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"Built prompt routing service for internal ops\"],\"rewrite_opportunities\":[\"Add metrics story to top bullet\"],\"decision_rationale\":\"整体较匹配，建议投递。\"}",
+                "中文评审理由 2",
+                "{\"role_fit\":0.81,\"evidence_quality\":0.78,\"persuasiveness\":0.75,\"interview_pressure_risk\":0.31,\"application_worthiness\":\"apply\",\"must_fix_issues\":[],\"evidence_citations\":[\"Built prompt routing service for internal ops\"],\"rewrite_opportunities\":[\"Add metrics story to top bullet\"],\"decision_rationale\":\"整体较匹配，建议投递。\"}",
+            ]
+        ),
+    )
+
+    evaluation = evaluate_run(run_dir)
+
+    assert len(evaluation.llm_assessments) == len(evaluation.scorecards)
+    assert all("llm_assessment_missing" not in card.guardrail_flags for card in evaluation.scorecards)
+    assert any(
+        assessment.evidence_citations == ["Built prompt routing service for internal ops"]
+        for assessment in evaluation.llm_assessments
+    )
 
 
 def test_generate_run_raises_clear_error_when_openai_api_key_missing(tmp_path: Path) -> None:
@@ -220,7 +309,7 @@ def test_generate_run_uses_default_model_when_config_and_env_model_empty(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文岗位摘要 1", "中文岗位摘要 2"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -251,7 +340,7 @@ def test_generate_run_uses_openai_compatible_base_url_and_model_from_env_when_co
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文岗位摘要 1", "中文岗位摘要 2"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -278,7 +367,7 @@ def test_generate_run_accepts_openai_compatible_provider_alias(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文岗位摘要 1", "中文岗位摘要 2"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -306,7 +395,7 @@ def test_generate_run_env_overrides_model_and_base_url_over_run_config(
     capture: dict[str, str] = {}
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _fake_openai_urlopen_capture(messages=["中文聚类摘要", "中文岗位摘要", "中文岗位摘要"], capture=capture),
+        _fake_openai_urlopen_capture(messages=["中文岗位摘要 1", "中文岗位摘要 2"], capture=capture),
     )
 
     generate_run(run_dir)
@@ -339,7 +428,7 @@ def test_generate_run_ignores_env_provider_override_when_run_config_is_determini
     monkeypatch.setattr("urllib.request.urlopen", _unexpected_openai_call)
 
     generation = generate_run(run_dir)
-    assert generation.variants[0].summary.startswith("ai-product cluster resume emphasizing")
+    assert generation.variants[0].summary.startswith("LLM Product Engineer variant focused on")
 
 
 def test_evaluate_run_ignores_env_provider_override_when_run_config_is_deterministic(
@@ -368,7 +457,49 @@ def test_evaluate_run_ignores_env_provider_override_when_run_config_is_determini
     monkeypatch.setattr("urllib.request.urlopen", _unexpected_openai_call)
 
     evaluation = evaluate_run(run_dir)
-    assert evaluation.scorecards[0].judge_rationale.startswith("cluster variant aligns")
+    assert evaluation.scorecards[0].judge_rationale.startswith("jd-specific variant aligns")
+
+
+def test_evaluate_run_uses_resolved_runtime_provider_and_model_in_fallback_scorecards(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_dir = _prepare_analyzed_run(tmp_path)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "OPENAI_API_KEY=test-key\nOPENAI_MODEL=qwen-eval-model\nOPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1\n",
+        encoding="utf-8",
+    )
+    _write_run_config(
+        run_dir,
+        {
+            "generator": {"provider": "deterministic", "model": ""},
+            "judge": {"provider": "openai-compatible", "model": ""},
+            "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
+            "run_metadata": {"label": "openai-compatible-evaluate-fallback"},
+        },
+    )
+    generate_run(run_dir)
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_openai_urlopen(
+            [
+                "中文评审理由 1",
+                "not-json-response",
+                "中文评审理由 2",
+                "not-json-response",
+            ]
+        ),
+    )
+
+    evaluation = evaluate_run(run_dir)
+    failures = json.loads((run_dir / "evaluate" / "llm_failures.json").read_text(encoding="utf-8"))
+
+    assert failures
+    assert all(item["provider"] == "openai-compatible" for item in failures)
+    assert all(item["model"] == "qwen-eval-model" for item in failures)
+    assert any(card.final_decision_source == "guardrail-fallback" for card in evaluation.scorecards)
+    assert all(card.provider == "openai-compatible" for card in evaluation.scorecards)
+    assert all(card.model == "qwen-eval-model" for card in evaluation.scorecards)
 
 
 def _prepare_analyzed_run(tmp_path: Path) -> Path:

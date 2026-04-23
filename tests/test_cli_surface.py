@@ -25,3 +25,16 @@ def test_cli_run_lists_commands() -> None:
     assert "shotguncv" in output
     assert "ingest" in output
     assert "report" in output
+
+
+def test_cli_command_descriptions_use_neutral_jd_specific_language() -> None:
+    parser = build_parser()
+    subcommands = parser._subparsers._group_actions[0].choices
+
+    analyze_help = subcommands["analyze"].description
+    generate_help = subcommands["generate"].description
+
+    assert "cluster" not in analyze_help.lower()
+    assert "cluster" not in generate_help.lower()
+    assert "JD" in analyze_help
+    assert "JD-specific" in generate_help

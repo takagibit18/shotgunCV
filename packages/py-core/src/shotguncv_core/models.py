@@ -135,6 +135,18 @@ class LLMAssessment:
 
 
 @dataclass(slots=True)
+class LLMFailure:
+    jd_id: str
+    variant_id: str
+    stage: str
+    provider: str
+    model: str
+    error_type: str
+    error_message: str
+    raw_output_excerpt: str = ""
+
+
+@dataclass(slots=True)
 class ApplicationStrategy:
     jd_id: str
     recommended_variant_id: str

@@ -16,6 +16,7 @@ DEFAULT_LLM_RETRY_TIMES = 2
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 _ASCII_LETTER_PATTERN = re.compile(r"[A-Za-z]")
 _IDENTIFIER_LIKE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/@#\-\[\]]+$")
+_CLUSTER_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
 
 @dataclass(slots=True)
@@ -73,11 +74,16 @@ class PlannerProvider(Protocol):
         top_variant: ResumeVariant,
         final_score: float,
         guardrail_flags: list[str],
+        assessment_failure_reason: str | None = None,
     ) -> PlanFeedback:
         ...
 
 
 class DeterministicGeneratorProvider:
+    def __init__(self, provider: str = "deterministic", model: str = "heuristic-v0.3.0") -> None:
+        self.runtime_provider = provider
+        self.runtime_model = model
+
     def build_cluster_summary(self, cluster: str, candidate: CandidateProfile, jds: list[JDProfile]) -> str:
         primary_strength = candidate.strengths[0] if candidate.strengths else "AI workflow delivery"
         return f"{cluster} cluster resume emphasizing {primary_strength} across {len(jds)} related roles."
@@ -88,6 +94,10 @@ class DeterministicGeneratorProvider:
 
 
 class DeterministicJudgeProvider:
+    def __init__(self, provider: str = "deterministic", model: str = "heuristic-v0.3.0") -> None:
+        self.runtime_provider = provider
+        self.runtime_model = model
+
     def review(self, jd: JDProfile, candidate: CandidateProfile, variant: ResumeVariant, overall_score: float) -> JudgeFeedback:
         risk_phrase = "manageable risk" if overall_score >= 0.7 else "meaningful catch-up risk"
         worthiness = "apply" if overall_score >= 0.7 else "stretch"
@@ -122,12 +132,16 @@ class DeterministicJudgeProvider:
             evidence_citations=candidate.verified_evidence[:3],
             rewrite_opportunities=variant.stretch_points[:2],
             decision_rationale=f"Deterministic LLM-assessment fallback based on rule score {rule_overall_score:.2f}.",
-            provider="deterministic",
-            model="heuristic-v0.3.0",
+            provider=self.runtime_provider,
+            model=self.runtime_model,
         )
 
 
 class DeterministicAnalyzeProvider:
+    def __init__(self, provider: str = "deterministic", model: str = "heuristic-v0.3.0") -> None:
+        self.runtime_provider = provider
+        self.runtime_model = model
+
     def analyze(self, candidate_id: str, candidate_resume_path: str, resume_text: str, jd_inputs: list[dict[str, str]]) -> AnalyzeFeedback:
         bullet_lines = [line.strip("- ").strip() for line in resume_text.splitlines() if line.strip().startswith("-")]
         lowered = " ".join(bullet_lines).lower()
@@ -205,6 +219,10 @@ class DeterministicAnalyzeProvider:
 
 
 class DeterministicPlannerProvider:
+    def __init__(self, provider: str = "deterministic", model: str = "heuristic-v0.3.0") -> None:
+        self.runtime_provider = provider
+        self.runtime_model = model
+
     def build_strategy(
         self,
         jd: JDProfile,
@@ -213,10 +231,13 @@ class DeterministicPlannerProvider:
         top_variant: ResumeVariant,
         final_score: float,
         guardrail_flags: list[str],
+        assessment_failure_reason: str | None = None,
     ) -> PlanFeedback:
         decision = "apply" if final_score >= 0.7 else "hold"
         confidence = round(min(0.95, max(0.35, final_score + 0.1)), 2)
         rationale = assessment.decision_rationale if assessment else "Guardrail fallback strategy."
+        if not assessment and assessment_failure_reason:
+            rationale = f"LLM assessment unavailable: {assessment_failure_reason}"
         return PlanFeedback(
             strategy=ApplicationStrategy(
                 jd_id=jd.jd_id,
@@ -237,10 +258,12 @@ class DeterministicPlannerProvider:
 
 
 class OpenAIGeneratorProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str) -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.runtime_provider = provider
+        self.runtime_model = model
 
     def build_cluster_summary(self, cluster: str, candidate: CandidateProfile, jds: list[JDProfile]) -> str:
         titles = ", ".join(jd.title for jd in jds)
@@ -272,10 +295,12 @@ class OpenAIGeneratorProvider:
 
 
 class OpenAIJudgeProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str) -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.runtime_provider = provider
+        self.runtime_model = model
 
     def review(self, jd: JDProfile, candidate: CandidateProfile, variant: ResumeVariant, overall_score: float) -> JudgeFeedback:
         prompt = (
@@ -312,7 +337,14 @@ class OpenAIJudgeProvider:
             f"证据映射：{json.dumps(evidence_map, ensure_ascii=False)}\n"
             "所有分数字段范围必须在 0 到 1 之间。"
         )
-        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=True)
+        raw = _chat_completion(
+            self.base_url,
+            self.api_key,
+            self.model,
+            prompt,
+            expect_json=True,
+            json_language_fields={"decision_rationale"},
+        )
         payload = _parse_json_payload(raw)
         return LLMAssessment(
             jd_id=jd.jd_id,
@@ -326,16 +358,18 @@ class OpenAIJudgeProvider:
             evidence_citations=_safe_list(payload.get("evidence_citations")),
             rewrite_opportunities=_safe_list(payload.get("rewrite_opportunities")),
             decision_rationale=str(payload.get("decision_rationale", "")).strip(),
-            provider="openai",
-            model=self.model,
+            provider=self.runtime_provider,
+            model=self.runtime_model,
         )
 
 
 class OpenAIAnalyzeProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str) -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.runtime_provider = provider
+        self.runtime_model = model
 
     def analyze(self, candidate_id: str, candidate_resume_path: str, resume_text: str, jd_inputs: list[dict[str, str]]) -> AnalyzeFeedback:
         prompt = (
@@ -373,13 +407,15 @@ class OpenAIAnalyzeProvider:
         for item in payload.get("jd_profiles", []):
             if not isinstance(item, dict):
                 continue
+            responsibilities = _safe_list(item.get("responsibilities"))
+            cluster = str(item.get("cluster", "")).strip() or _classify_cluster(str(item.get("title", "")), responsibilities)
             jd_profiles.append(
                 JDProfile(
                     jd_id=str(item.get("jd_id", "")),
                     title=str(item.get("title", "")),
                     company=str(item.get("company", "")),
-                    cluster=str(item.get("cluster", "ai-operations")),
-                    responsibilities=_safe_list(item.get("responsibilities")),
+                    cluster=cluster,
+                    responsibilities=responsibilities,
                     requirements=_safe_list(item.get("requirements")),
                     keywords=_safe_list(item.get("keywords")),
                     seniority=str(item.get("seniority", "mid")),
@@ -401,10 +437,12 @@ class OpenAIAnalyzeProvider:
 
 
 class OpenAIPlannerProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str) -> None:
+    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai") -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
+        self.runtime_provider = provider
+        self.runtime_model = model
 
     def build_strategy(
         self,
@@ -414,9 +452,18 @@ class OpenAIPlannerProvider:
         top_variant: ResumeVariant,
         final_score: float,
         guardrail_flags: list[str],
+        assessment_failure_reason: str | None = None,
     ) -> PlanFeedback:
         if assessment is None:
-            return DeterministicPlannerProvider().build_strategy(jd, candidate, assessment, top_variant, final_score, guardrail_flags)
+            return DeterministicPlannerProvider().build_strategy(
+                jd,
+                candidate,
+                assessment,
+                top_variant,
+                final_score,
+                guardrail_flags,
+                assessment_failure_reason=assessment_failure_reason,
+            )
         prompt = (
             "请仅返回严格 JSON（不要 markdown 代码块、不要额外解释），键必须是："
             "apply_decision,decision_confidence,decision_drivers,watchouts,"
@@ -426,7 +473,14 @@ class OpenAIPlannerProvider:
             f"护栏标记：{json.dumps(guardrail_flags, ensure_ascii=False)}\n"
             f"最终分：{final_score:.2f}\n"
         )
-        raw = _chat_completion(self.base_url, self.api_key, self.model, prompt, expect_json=True)
+        raw = _chat_completion(
+            self.base_url,
+            self.api_key,
+            self.model,
+            prompt,
+            expect_json=True,
+            json_language_fields={"reason_summary"},
+        )
         payload = _parse_json_payload(raw)
         return PlanFeedback(
             strategy=ApplicationStrategy(
@@ -457,7 +511,7 @@ def build_generator_provider(config: RunConfig, stage: str, run_dir: Path) -> Re
         role_model_env_key="SHOTGUNCV_GENERATOR_MODEL",
     )
     if provider == "deterministic":
-        return DeterministicGeneratorProvider()
+        return DeterministicGeneratorProvider(provider=provider)
     if provider in {"openai", "openai-compatible"}:
         runtime_model, runtime_base_url, api_key = _resolve_openai_runtime(
             stage=stage,
@@ -472,6 +526,7 @@ def build_generator_provider(config: RunConfig, stage: str, run_dir: Path) -> Re
             model=runtime_model,
             base_url=runtime_base_url,
             api_key=api_key,
+            provider=provider,
         )
     raise ValueError(f"Unsupported generator provider `{provider}` for stage `{stage}`.")
 
@@ -486,7 +541,7 @@ def build_analyzer_provider(config: RunConfig, stage: str, run_dir: Path) -> Ana
         role_model_env_key="SHOTGUNCV_ANALYZER_MODEL",
     )
     if provider == "deterministic":
-        return DeterministicAnalyzeProvider()
+        return DeterministicAnalyzeProvider(provider=provider)
     if provider in {"openai", "openai-compatible"}:
         runtime_model, runtime_base_url, api_key = _resolve_openai_runtime(
             stage=stage,
@@ -497,7 +552,7 @@ def build_analyzer_provider(config: RunConfig, stage: str, run_dir: Path) -> Ana
             env_path=env_path,
             env_values=env_values,
         )
-        return OpenAIAnalyzeProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key)
+        return OpenAIAnalyzeProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key, provider=provider)
     raise ValueError(f"Unsupported analyzer provider `{provider}` for stage `{stage}`.")
 
 
@@ -511,7 +566,7 @@ def build_judge_provider(config: RunConfig, stage: str, run_dir: Path) -> JudgeP
         role_model_env_key="SHOTGUNCV_JUDGE_MODEL",
     )
     if provider == "deterministic":
-        return DeterministicJudgeProvider()
+        return DeterministicJudgeProvider(provider=provider)
     if provider in {"openai", "openai-compatible"}:
         runtime_model, runtime_base_url, api_key = _resolve_openai_runtime(
             stage=stage,
@@ -526,6 +581,7 @@ def build_judge_provider(config: RunConfig, stage: str, run_dir: Path) -> JudgeP
             model=runtime_model,
             base_url=runtime_base_url,
             api_key=api_key,
+            provider=provider,
         )
     raise ValueError(f"Unsupported judge provider `{provider}` for stage `{stage}`.")
 
@@ -540,7 +596,7 @@ def build_planner_provider(config: RunConfig, stage: str, run_dir: Path) -> Plan
         role_model_env_key="SHOTGUNCV_PLANNER_MODEL",
     )
     if provider == "deterministic":
-        return DeterministicPlannerProvider()
+        return DeterministicPlannerProvider(provider=provider)
     if provider in {"openai", "openai-compatible"}:
         runtime_model, runtime_base_url, api_key = _resolve_openai_runtime(
             stage=stage,
@@ -551,7 +607,7 @@ def build_planner_provider(config: RunConfig, stage: str, run_dir: Path) -> Plan
             env_path=env_path,
             env_values=env_values,
         )
-        return OpenAIPlannerProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key)
+        return OpenAIPlannerProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key, provider=provider)
     raise ValueError(f"Unsupported planner provider `{provider}` for stage `{stage}`.")
 
 
@@ -661,10 +717,11 @@ def _extract_keywords(text: str) -> list[str]:
 
 
 def _classify_cluster(title: str, body_lines: list[str]) -> str:
-    lowered = f"{title} {' '.join(body_lines)}".lower()
-    if "product" in lowered or "evaluation" in lowered or "prompt" in lowered:
-        return "ai-product"
-    return "ai-operations"
+    for source in [title, " ".join(body_lines)]:
+        tokens = _CLUSTER_TOKEN_PATTERN.findall(source.lower())
+        if tokens:
+            return "-".join(tokens[:4])
+    return "general"
 
 
 def _build_risk_signals(body_lines: list[str]) -> list[str]:
@@ -778,9 +835,23 @@ def _iter_string_values(payload: object) -> list[str]:
     return values
 
 
-def _json_values_chinese_dominant(payload: dict[str, object]) -> bool:
+def _iter_field_string_values(payload: object, field_names: set[str]) -> list[str]:
+    values: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in field_names:
+                values.extend(_iter_string_values(value))
+            values.extend(_iter_field_string_values(value, field_names))
+    elif isinstance(payload, list):
+        for item in payload:
+            values.extend(_iter_field_string_values(item, field_names))
+    return values
+
+
+def _json_values_chinese_dominant(payload: dict[str, object], field_names: set[str] | None = None) -> bool:
     has_natural_language = False
-    for value in _iter_string_values(payload):
+    string_values = _iter_field_string_values(payload, field_names) if field_names else _iter_string_values(payload)
+    for value in string_values:
         text = value.strip()
         if not text:
             continue
@@ -789,10 +860,19 @@ def _json_values_chinese_dominant(payload: dict[str, object]) -> bool:
         has_natural_language = True
         if not _is_chinese_dominant(text):
             return False
+    if field_names is not None:
+        return True if not has_natural_language else has_natural_language
     return has_natural_language
 
 
-def _chat_completion(base_url: str, api_key: str, model: str, prompt: str, expect_json: bool) -> str:
+def _chat_completion(
+    base_url: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    expect_json: bool,
+    json_language_fields: set[str] | None = None,
+) -> str:
     messages = [
         {"role": "system", "content": _build_system_prompt(expect_json=expect_json)},
         {"role": "user", "content": prompt},
@@ -825,7 +905,7 @@ def _chat_completion(base_url: str, api_key: str, model: str, prompt: str, expec
         try:
             if expect_json:
                 parsed = _parse_json_payload(content)
-                if not _json_values_chinese_dominant(parsed):
+                if json_language_fields and not _json_values_chinese_dominant(parsed, json_language_fields):
                     raise ValueError("JSON value language check failed")
             else:
                 if not _is_chinese_dominant(content):
@@ -838,4 +918,3 @@ def _chat_completion(base_url: str, api_key: str, model: str, prompt: str, expec
     if last_error is not None:
         raise ValueError(f"LLM output failed Chinese dominance check: {last_output[:200]}") from last_error
     raise ValueError("LLM returned empty output.")
-

@@ -21,8 +21,8 @@ from shotguncv_core.pipeline import (
 
 COMMAND_DESCRIPTIONS = {
     "ingest": "Load candidate material and job descriptions into a run workspace.",
-    "analyze": "Parse JDs and build candidate and cluster views.",
-    "generate": "Create cluster and JD-specific resume variants.",
+    "analyze": "Parse JDs and build candidate and JD profiles.",
+    "generate": "Create JD-specific resume variants.",
     "evaluate": "Run rules and judge-oriented evaluation passes.",
     "plan": "Produce ranked application strategy recommendations.",
     "report": "Render run artifacts into readable summaries.",

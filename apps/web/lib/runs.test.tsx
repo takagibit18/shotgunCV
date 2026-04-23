@@ -209,7 +209,7 @@ async function createIncompleteRun(runsDir: string, runId: string): Promise<void
       jd_id: "jd-001",
       title: "LLM Product Engineer",
       company: "Example AI",
-      cluster: "ai-product",
+      cluster: "product-engineer",
       responsibilities: ["Build evaluation pipelines"],
       requirements: ["Python"],
       keywords: ["evaluation", "python"],
@@ -243,19 +243,9 @@ async function createCompleteRun(
 
   await writeJson(path.join(runDir, "generate", "resume_variants.json"), [
     {
-      variant_id: "variant-cluster-ai-product",
-      variant_type: "cluster",
-      cluster: "ai-product",
-      target_jd_ids: ["jd-001", "jd-002"],
-      summary: "岗位簇摘要",
-      emphasized_strengths: ["LLM workflow delivery"],
-      stretch_points: ["metrics"],
-      source_resume_path: "fixtures/candidates/base_resume.md",
-    },
-    {
       variant_id: "variant-jd-jd-001",
       variant_type: "jd-specific",
-      cluster: "ai-product",
+      cluster: "product-engineer",
       target_jd_ids: ["jd-001"],
       summary: "岗位定制摘要",
       emphasized_strengths: ["evaluation"],
