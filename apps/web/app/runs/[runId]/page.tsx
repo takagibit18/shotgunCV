@@ -2,11 +2,19 @@ import React from "react";
 import Link from "next/link";
 
 import { loadRunDetail } from "../../../lib/runs";
-import type { RankingExplanation, ScoreCard } from "../../../lib/types";
+import type { ApplicationStrategy, RankingExplanation, ScoreCard } from "../../../lib/types";
+import { ScoreRing } from "./ScoreRing";
 
 
 type PageProps = {
   params: Promise<{ runId: string }>;
+};
+
+type DimensionItem = {
+  key: string;
+  label: string;
+  value?: number;
+  tone?: "default" | "risk";
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -97,9 +105,8 @@ export default async function RunPage({ params }: PageProps) {
         {detail.generate.isComplete ? (
           <div className="detail-grid">
             {detail.generate.variants.map((variant) => (
-              <article key={variant.variant_id} className="detail-card">
+              <article key={variant.variant_id} id={buildVariantAnchorId(variant.variant_id)} className="detail-card">
                 <h3>{variant.variantDisplayName}</h3>
-                <p className="pill">{variant.variantTypeDisplay}</p>
                 <p className="mono">{variant.variant_id}</p>
                 <p>{variant.summary}</p>
               </article>
@@ -113,16 +120,18 @@ export default async function RunPage({ params }: PageProps) {
       <section className="section">
         <SectionHeading eyebrow="阶段评估" title="评估阶段" action="岗位优先级矩阵" />
         {detail.evaluate.isComplete ? (
-          <>
-            <div className="score-matrix">
-              <div className="matrix-header">
-                <div>
-                  <p className="eyebrow">{"决策矩阵"}</p>
-                  <h3>{"岗位优先级矩阵"}</h3>
-                </div>
-                <p className="muted">{"综合得分、证据覆盖和风险压力共同决定投递顺序。"}</p>
+          <div className="score-matrix">
+            <div className="matrix-header">
+              <div>
+                <p className="eyebrow">{"决策矩阵"}</p>
+                <h3>{"岗位优先级矩阵"}</h3>
               </div>
-              {detail.evaluate.topVariants.map((item) => (
+              <p className="muted">{"综合得分、证据覆盖和风险压力共同决定投递顺序。点击岗位标题可跳转到对应定制简历。"}</p>
+            </div>
+            {detail.evaluate.topVariants
+              .slice()
+              .sort((left, right) => right.overallScore - left.overallScore)
+              .map((item) => (
                 <ScoreMatrixRow
                   key={`${item.jdId}-${item.variantId}`}
                   title={item.title}
@@ -137,54 +146,9 @@ export default async function RunPage({ params }: PageProps) {
                   explanation={detail.evaluate.explanations.find(
                     (explanation) => explanation.jd_id === item.jdId && explanation.variant_id === item.variantId,
                   )}
+                  strategy={detail.plan.strategies.find((strategy) => strategy.jd_id === item.jdId)}
                 />
               ))}
-            </div>
-
-            <div className="detail-grid">
-              {detail.evaluate.explanations.map((explanation) => (
-                <article key={`${explanation.jd_id}-${explanation.variant_id}-explanation`} className="detail-card">
-                  <h3>{buildVariantDisplayName(explanation.variant_id)}</h3>
-                  <p className="mono">{explanation.variant_id}</p>
-                  <p>
-                    {"评估解释："}
-                    {explanation.dimension_reasons.overall}
-                  </p>
-                  <p>
-                    {"风险标记："}
-                    {explanation.risk_flags.join(" / ") || "无风险标记"}
-                  </p>
-                </article>
-              ))}
-              {detail.evaluate.explanations.length === 0 ? (
-                <article className="detail-card">
-                  <h3>{"评估解释"}</h3>
-                  <p>
-                    {"当前运行未生成评估解释文件，旧版产物仍可继续阅读，评分矩阵会使用 scorecards 降级展示。"}
-                  </p>
-                </article>
-              ) : null}
-            </div>
-          </>
-        ) : (
-          <div className="empty">{"阶段未完成"}</div>
-        )}
-      </section>
-
-      <section className="section">
-        <SectionHeading eyebrow="阶段计划" title="计划阶段" />
-        {detail.plan.isComplete ? (
-          <div className="detail-grid">
-            {detail.plan.strategies.map((strategy) => (
-              <article key={`${strategy.jd_id}-${strategy.recommended_variant_id}`} className="detail-card">
-                <h3>{strategy.jd_id}</h3>
-                <p>{"优先级："}{strategy.priority_rank}</p>
-                <p>{"投递决策："}{strategy.apply_decision}</p>
-                <p>{"决策驱动："}{strategy.decision_drivers.join(" / ")}</p>
-                <p>{"风险提醒："}{strategy.watchouts.join(" / ")}</p>
-                <p>{"建议动作："}{strategy.recommended_actions.join(" / ")}</p>
-              </article>
-            ))}
           </div>
         ) : (
           <div className="empty">{"阶段未完成"}</div>
@@ -217,6 +181,7 @@ type ScoreMatrixRowProps = {
   topReasons: string[];
   scorecard?: ScoreCard;
   explanation?: RankingExplanation;
+  strategy?: ApplicationStrategy;
 };
 
 
@@ -229,53 +194,72 @@ function ScoreMatrixRow({
   topReasons,
   scorecard,
   explanation,
+  strategy,
 }: ScoreMatrixRowProps) {
   const score = toPercent(scorecard?.final_overall_score ?? scorecard?.overall_score ?? overallScore);
-  const dimensions = [
-    ["Fit", "岗位匹配", scorecard?.fit_score],
-    ["ATS", "关键词", scorecard?.ats_score],
-    ["Evidence", "证据覆盖", scorecard?.evidence_score],
-    ["Stretch", "拉伸可控", scorecard?.stretch_score],
-    ["Risk", "风险压力", scorecard ? 1 - scorecard.gap_risk_score : undefined],
-    ["Cost", "改写成本", scorecard ? 1 - scorecard.rewrite_cost_score : undefined],
-  ] as const;
+  const dimensions: DimensionItem[] = [
+    { key: "fit", label: "岗位匹配", value: scorecard?.fit_score },
+    { key: "ats", label: "关键词", value: scorecard?.ats_score },
+    { key: "evidence", label: "证据覆盖", value: scorecard?.evidence_score },
+    { key: "stretch", label: "拉伸可控", value: scorecard?.stretch_score },
+    { key: "risk", label: "风险压力", value: scorecard?.gap_risk_score, tone: "risk" },
+    { key: "cost", label: "改写成本", value: scorecard?.rewrite_cost_score },
+  ];
   const riskScore = toPercent(scorecard?.gap_risk_score ?? 0);
   const signals = explanation?.positive_signals.length ? explanation.positive_signals : topReasons;
   const risks = explanation?.risk_flags ?? [];
-  const evidenceCount = explanation?.evidence_refs.length ?? 0;
+  const evidenceRefs = explanation?.evidence_refs ?? [];
+  const evidenceCount = evidenceRefs.length;
 
   return (
     <article className="matrix-row">
-      <div className="score-ring" style={{ "--score": `${score}%` } as React.CSSProperties}>
-        <span>{score}</span>
-        <small>{"%"}</small>
-      </div>
+      <ScoreRing score={score} />
       <div className="matrix-main">
         <div className="matrix-titleline">
           <div>
-            <h4>{title}</h4>
+            <a className="matrix-title-link" href={`#${buildVariantAnchorId(variantId)}`} title="打开对应定制简历">
+              <h4>{title}</h4>
+            </a>
             <p className="muted">
               {variantDisplayName}
               {" · "}
               <span className="mono">{variantId}</span>
             </p>
           </div>
-          <span className="decision-badge">{"综合得分"}</span>
-        </div>
-        <div className="dimension-grid" aria-label="维度矩阵">
-          <span className="dimension-caption">{"维度矩阵"}</span>
-          {dimensions.map(([key, label, value]) => (
-            <div key={key} className="dimension-cell">
-              <div className="dimension-label">
-                <span>{label}</span>
-                <strong>{value === undefined ? "--" : `${toPercent(value)}%`}</strong>
+          <div className="matrix-actions">
+            <span className="decision-badge">{"综合评分"}</span>
+            <details className="matrix-action-detail">
+              <summary>{"适配度分析"}</summary>
+              <div className="matrix-action-panel">
+                <h5>{"适配度分析"}</h5>
+                <p>{explanation?.dimension_reasons.overall ?? "当前运行未生成评估解释文件，旧版产物仍可继续阅读，评分矩阵会使用 scorecards 降级展示。"}</p>
+                <p>
+                  {"风险标记："}
+                  {risks.join(" / ") || "无明显风险标记"}
+                </p>
               </div>
-              <div className="score-bar">
-                <span style={{ width: value === undefined ? "0%" : `${toPercent(value)}%` }} />
+            </details>
+            <details className="matrix-action-detail">
+              <summary>{"投递建议"}</summary>
+              <div className="matrix-action-panel">
+                <h5>{"投递建议"}</h5>
+                <p>
+                  {"投递决策："}
+                  {strategy?.apply_decision ?? "暂无投递决策"}
+                </p>
+                <p>
+                  {"决策驱动："}
+                  {strategy?.decision_drivers.join(" / ") || "暂无决策驱动"}
+                </p>
+                <p>
+                  {"建议动作："}
+                  {strategy?.recommended_actions.join(" / ") || "暂无建议动作"}
+                </p>
               </div>
-            </div>
-          ))}
+            </details>
+          </div>
         </div>
+        <DimensionBars dimensions={dimensions} />
         <div className="signal-grid">
           <div>
             <span className="mini-label">{"证据覆盖"}</span>
@@ -292,8 +276,49 @@ function ScoreMatrixRow({
         </div>
         <p className="reason-line">{signals.join(" / ") || "未记录主要原因"}</p>
         <p className="risk-line">{risks.join(" / ") || "无明显风险标记"}</p>
+        <div className="matrix-expansion">
+          <div className="matrix-expansion-card">
+            <h5>{"证据引用展开"}</h5>
+            <ul>
+              {(evidenceRefs.length ? evidenceRefs : signals).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="matrix-expansion-card">
+            <h5>{"风险解释展开"}</h5>
+            <ul>
+              {(risks.length ? risks : ["当前岗位未记录显著风险，建议继续核对岗位要求与证据覆盖。"]).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </div>
     </article>
+  );
+}
+
+
+function DimensionBars({ dimensions }: { dimensions: DimensionItem[] }) {
+  return (
+    <div className="dimension-grid" aria-label="维度矩阵">
+      <span className="dimension-caption">{"维度矩阵"}</span>
+      {dimensions.map((dimension) => {
+        const percent = dimension.value === undefined ? 0 : toPercent(dimension.value);
+        return (
+          <div key={dimension.key} className="dimension-cell">
+            <div className="dimension-label">
+              <span>{dimension.label}</span>
+              <strong>{dimension.value === undefined ? "--" : `${percent}%`}</strong>
+            </div>
+            <div className={dimension.tone === "risk" ? "score-bar risk-bar" : "score-bar"}>
+              <span style={{ width: `${percent}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -303,14 +328,6 @@ function toPercent(value: number): number {
 }
 
 
-function buildVariantDisplayName(variantId: string): string {
-  if (variantId.startsWith("variant-jd-")) {
-    const jdId = variantId.replace("variant-jd-", "");
-    return `岗位定制版本（${jdId}）`;
-  }
-  if (variantId.startsWith("variant-cluster-")) {
-    const cluster = variantId.replace("variant-cluster-", "");
-    return `岗位簇版本（${cluster}）`;
-  }
-  return `简历版本（${variantId}）`;
+function buildVariantAnchorId(variantId: string): string {
+  return `variant-${variantId}`;
 }

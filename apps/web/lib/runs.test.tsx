@@ -154,7 +154,18 @@ describe("run viewer pages", () => {
     expect(html).toContain("variant-jd-jd-001");
   });
 
-  it("renders scorecards as a visual job priority matrix", async () => {
+  it("renders generate variants without the variant type pill", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(html).toContain('id="variant-variant-jd-jd-001"');
+    expect(html).not.toContain('<p class="pill">岗位定制版本</p>');
+  });
+
+  it("renders scorecards as a viewport-animated technology-style priority matrix", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -164,9 +175,39 @@ describe("run viewer pages", () => {
     expect(html).toContain("岗位优先级矩阵");
     expect(html).toContain("综合得分");
     expect(html).toContain("维度矩阵");
-    expect(html).toContain("证据覆盖");
-    expect(html).toContain("风险压力");
+    expect(html).toContain("证据引用展开");
+    expect(html).toContain("风险解释展开");
+    expect(html).toContain("score-ring score-ring-tech");
+    expect(html).toContain("--target-score:81%");
+    expect(html).toContain('data-target-score="81"');
+    expect(html).toContain("score-ring-orbit");
     expect(html).toContain("81%");
+    expect(html).not.toContain("移动端改成可纵向扫描的决策卡");
+  });
+
+  it("links matrix rows to the matching customized resume card", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(html).toContain('href="#variant-variant-jd-jd-001"');
+    expect(html).toContain("打开对应定制简历");
+  });
+
+  it("moves fit analysis and application advice into matrix row expanders", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(html).toContain("适配度分析");
+    expect(html).toContain("投递建议");
+    expect(html).toContain("决策驱动");
+    expect(html).not.toContain("阶段计划");
+    expect(html).not.toContain("评估解释：");
   });
 
   it("renders explanation empty state for legacy evaluate artifacts", async () => {
@@ -176,11 +217,11 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-legacy" }) }));
 
-    expect(html).toContain("评估解释");
+    expect(html).toContain("适配度分析");
     expect(html).toContain("旧版产物");
   });
 
-  it("renders report page markdown for complete run", async () => {
+  it("renders report page markdown with structured interview prep summary", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -189,6 +230,11 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("ShotgunCV v0.3.0 LLM Eval Summary");
     expect(html).toContain("LLM Product Engineer");
+    expect(html).toContain("推荐结论");
+    expect(html).toContain("关键证据");
+    expect(html).toContain("面试前突击内容");
+    expect(html).toContain("离线评估指标");
+    expect(html).not.toContain("主要风险");
   });
 });
 
@@ -362,8 +408,8 @@ async function createCompleteRun(
       needs_jd_specific_variant: true,
       decision_drivers: ["证据绑定强", "关键词覆盖好"],
       watchouts: ["缺少大规模 benchmark 经验"],
-      recommended_actions: ["面试前复习离线评估指标。"],
-      catch_up_notes: ["面试前复习离线评估指标。"],
+      recommended_actions: ["投递前补齐离线评估指标表达"],
+      catch_up_notes: ["面试前复习离线评估指标"],
       decision_confidence: 0.81,
       interview_prep_points: ["evaluation"],
       resume_revision_tasks: [],
