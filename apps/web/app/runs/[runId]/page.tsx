@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 
 import { loadRunDetail } from "../../../lib/runs";
+import type { RankingExplanation, ScoreCard } from "../../../lib/types";
 
 
 type PageProps = {
@@ -9,12 +10,12 @@ type PageProps = {
 };
 
 const STAGE_LABELS: Record<string, string> = {
-  ingest: "\u5bfc\u5165",
-  analyze: "\u5206\u6790",
-  generate: "\u751f\u6210",
-  evaluate: "\u8bc4\u4f30",
-  plan: "\u8ba1\u5212",
-  report: "\u62a5\u544a",
+  ingest: "导入",
+  analyze: "分析",
+  generate: "生成",
+  evaluate: "评估",
+  plan: "计划",
+  report: "报告",
 };
 
 
@@ -23,59 +24,59 @@ export default async function RunPage({ params }: PageProps) {
   const detail = await loadRunDetail(resolvedParams.runId);
 
   return (
-    <main>
+    <main className="app-shell">
       <Link href="/" className="backlink">
-        {"\u8fd4\u56de\u8fd0\u884c\u5217\u8868"}
+        {"返回运行列表"}
       </Link>
 
-      <section className="hero">
-        <p className="eyebrow">{detail.label || "\u8fd0\u884c\u8be6\u60c5"}</p>
-        <h1 className="page-title">{detail.runId}</h1>
-        <div className="pill-row" style={{ marginTop: 18 }}>
-          <span className="pill">
-            {"\u5206\u6790\u5668\uff1a"}
-            {detail.analyzerProvider}
-          </span>
-          <span className="pill">
-            {"\u751f\u6210\u5668\uff1a"}
-            {detail.generatorProvider}
-          </span>
-          <span className="pill">
-            {"\u8bc4\u5ba1\u5668\uff1a"}
-            {detail.judgeProvider}
-          </span>
-          <span className="pill">
-            {"\u89c4\u5212\u5668\uff1a"}
-            {detail.plannerProvider}
-          </span>
-          {detail.completedStages.map((stage) => (
-            <span key={stage} className="pill">
-              {STAGE_LABELS[stage] ?? stage}
-            </span>
-          ))}
+      <section className="workspace-hero">
+        <div>
+          <p className="eyebrow">{detail.label || "运行详情"}</p>
+          <h1 className="page-title">{detail.runId}</h1>
+          <p className="hero-copy">
+            {"从阶段产物到评分矩阵的只读视图，用于快速判断岗位优先级、简历版本收益和风险压力。"}
+          </p>
+          <div className="pill-row">
+            <span className="pill">{"分析器："}{detail.analyzerProvider}</span>
+            <span className="pill">{"生成器："}{detail.generatorProvider}</span>
+            <span className="pill">{"评审器："}{detail.judgeProvider}</span>
+            <span className="pill">{"规划器："}{detail.plannerProvider}</span>
+            {detail.completedStages.map((stage) => (
+              <span key={stage} className="pill">
+                {STAGE_LABELS[stage] ?? stage}
+              </span>
+            ))}
+          </div>
         </div>
-        <p style={{ marginTop: 18 }}>
-          <Link href={`/runs/${detail.runId}/report`} className="backlink">
-            {"\u6253\u5f00\u62a5\u544a"}
+        <div className="run-control-panel">
+          <div className="metric-tile">
+            <span className="metric-value">
+              {detail.completedStages.length}
+              {"/6"}
+            </span>
+            <span className="metric-label">{"阶段完成"}</span>
+          </div>
+          <Link href={`/runs/${detail.runId}/report`} className="primary-link">
+            {"打开报告"}
           </Link>
-        </p>
+        </div>
       </section>
 
       <section className="section">
-        <h2>{"\u5206\u6790\u9636\u6bb5"}</h2>
+        <SectionHeading eyebrow="阶段分析" title="分析阶段" />
         {detail.analyze.isComplete && detail.analyze.candidate ? (
           <div className="detail-grid">
             <article className="detail-card">
-              <h3>{"\u5019\u9009\u4eba"}</h3>
+              <h3>{"候选人"}</h3>
               <p className="mono">{detail.analyze.candidate.candidate_id}</p>
               <p>{detail.analyze.candidate.strengths.join(" / ")}</p>
             </article>
             <article className="detail-card">
-              <h3>{"\u5c97\u4f4d\u753b\u50cf"}</h3>
+              <h3>{"岗位画像"}</h3>
               <p>
-                {"\u5171 "}
+                {"共 "}
                 {detail.analyze.jdProfiles.length}
-                {" \u6761\u5c97\u4f4d\u63cf\u8ff0"}
+                {" 条岗位描述"}
               </p>
               <ul>
                 {detail.analyze.jdProfiles.map((jd) => (
@@ -87,12 +88,12 @@ export default async function RunPage({ params }: PageProps) {
             </article>
           </div>
         ) : (
-          <div className="empty">{"\u9636\u6bb5\u672a\u5b8c\u6210"}</div>
+          <div className="empty">{"阶段未完成"}</div>
         )}
       </section>
 
       <section className="section">
-        <h2>{"\u751f\u6210\u9636\u6bb5"}</h2>
+        <SectionHeading eyebrow="阶段生成" title="生成阶段" />
         {detail.generate.isComplete ? (
           <div className="detail-grid">
             {detail.generate.variants.map((variant) => (
@@ -105,93 +106,88 @@ export default async function RunPage({ params }: PageProps) {
             ))}
           </div>
         ) : (
-          <div className="empty">{"\u9636\u6bb5\u672a\u5b8c\u6210"}</div>
+          <div className="empty">{"阶段未完成"}</div>
         )}
       </section>
 
       <section className="section">
-        <h2>{"\u8bc4\u4f30\u9636\u6bb5"}</h2>
+        <SectionHeading eyebrow="阶段评估" title="评估阶段" action="岗位优先级矩阵" />
         {detail.evaluate.isComplete ? (
-          <div className="detail-grid">
-            {detail.evaluate.topVariants.map((item) => (
-              <article key={`${item.jdId}-${item.variantId}`} className="detail-card">
-                <h3>{item.title}</h3>
-                <p>{item.variantDisplayName}</p>
-                <p className="mono">{item.variantId}</p>
-                <p>
-                  {"\u6700\u7ec8\u5f97\u5206\uff1a"}
-                  {item.overallScore.toFixed(2)}
-                </p>
-                <p>
-                  {"\u5dee\u8ddd\u6570\u91cf\uff1a"}
-                  {item.gapCount}
-                </p>
-                <p>
-                  {"\u4e3b\u8981\u539f\u56e0\uff1a"}
-                  {item.topReasons.join(" / ") || "\u672a\u8bb0\u5f55\u4e3b\u8981\u539f\u56e0"}
-                </p>
-              </article>
-            ))}
-            {detail.evaluate.explanations.map((explanation) => (
-              <article key={`${explanation.jd_id}-${explanation.variant_id}-explanation`} className="detail-card">
-                <h3>{buildVariantDisplayName(explanation.variant_id)}</h3>
-                <p className="mono">{explanation.variant_id}</p>
-                <p>
-                  {"\u603b\u4f53\u8bf4\u660e\uff1a"}
-                  {explanation.dimension_reasons.overall}
-                </p>
-                <p>
-                  {"\u98ce\u9669\u6807\u8bb0\uff1a"}
-                  {explanation.risk_flags.join(" / ") || "\u65e0\u98ce\u9669\u6807\u8bb0"}
-                </p>
-              </article>
-            ))}
-            {detail.evaluate.explanations.length === 0 ? (
-              <article className="detail-card">
-                <h3>{"\u8bc4\u4f30\u89e3\u91ca"}</h3>
-                <p>
-                  {"\u5f53\u524d\u8fd0\u884c\u672a\u751f\u6210\u8bc4\u4f30\u89e3\u91ca\u6587\u4ef6\uff0c\u4ecd\u53ef\u7ee7\u7eed\u9605\u8bfb\u65e7\u7248\u4ea7\u7269\u3002"}
-                </p>
-              </article>
-            ) : null}
-          </div>
+          <>
+            <div className="score-matrix">
+              <div className="matrix-header">
+                <div>
+                  <p className="eyebrow">{"决策矩阵"}</p>
+                  <h3>{"岗位优先级矩阵"}</h3>
+                </div>
+                <p className="muted">{"综合得分、证据覆盖和风险压力共同决定投递顺序。"}</p>
+              </div>
+              {detail.evaluate.topVariants.map((item) => (
+                <ScoreMatrixRow
+                  key={`${item.jdId}-${item.variantId}`}
+                  title={item.title}
+                  variantDisplayName={item.variantDisplayName}
+                  variantId={item.variantId}
+                  overallScore={item.overallScore}
+                  gapCount={item.gapCount}
+                  topReasons={item.topReasons}
+                  scorecard={detail.evaluate.scorecards.find(
+                    (scorecard) => scorecard.jd_id === item.jdId && scorecard.variant_id === item.variantId,
+                  )}
+                  explanation={detail.evaluate.explanations.find(
+                    (explanation) => explanation.jd_id === item.jdId && explanation.variant_id === item.variantId,
+                  )}
+                />
+              ))}
+            </div>
+
+            <div className="detail-grid">
+              {detail.evaluate.explanations.map((explanation) => (
+                <article key={`${explanation.jd_id}-${explanation.variant_id}-explanation`} className="detail-card">
+                  <h3>{buildVariantDisplayName(explanation.variant_id)}</h3>
+                  <p className="mono">{explanation.variant_id}</p>
+                  <p>
+                    {"评估解释："}
+                    {explanation.dimension_reasons.overall}
+                  </p>
+                  <p>
+                    {"风险标记："}
+                    {explanation.risk_flags.join(" / ") || "无风险标记"}
+                  </p>
+                </article>
+              ))}
+              {detail.evaluate.explanations.length === 0 ? (
+                <article className="detail-card">
+                  <h3>{"评估解释"}</h3>
+                  <p>
+                    {"当前运行未生成评估解释文件，旧版产物仍可继续阅读，评分矩阵会使用 scorecards 降级展示。"}
+                  </p>
+                </article>
+              ) : null}
+            </div>
+          </>
         ) : (
-          <div className="empty">{"\u9636\u6bb5\u672a\u5b8c\u6210"}</div>
+          <div className="empty">{"阶段未完成"}</div>
         )}
       </section>
 
       <section className="section">
-        <h2>{"\u8ba1\u5212\u9636\u6bb5"}</h2>
+        <SectionHeading eyebrow="阶段计划" title="计划阶段" />
         {detail.plan.isComplete ? (
           <div className="detail-grid">
             {detail.plan.strategies.map((strategy) => (
               <article key={`${strategy.jd_id}-${strategy.recommended_variant_id}`} className="detail-card">
                 <h3>{strategy.jd_id}</h3>
-                <p>
-                  {"\u4f18\u5148\u7ea7\uff1a"}
-                  {strategy.priority_rank}
-                </p>
-                <p>
-                  {"\u6295\u9012\u51b3\u7b56\uff1a"}
-                  {strategy.apply_decision}
-                </p>
-                <p>
-                  {"\u51b3\u7b56\u9a71\u52a8\uff1a"}
-                  {strategy.decision_drivers.join(" / ")}
-                </p>
-                <p>
-                  {"\u98ce\u9669\u63d0\u9192\uff1a"}
-                  {strategy.watchouts.join(" / ")}
-                </p>
-                <p>
-                  {"\u5efa\u8bae\u52a8\u4f5c\uff1a"}
-                  {strategy.recommended_actions.join(" / ")}
-                </p>
+                <p>{"优先级："}{strategy.priority_rank}</p>
+                <p>{"投递决策："}{strategy.apply_decision}</p>
+                <p>{"决策驱动："}{strategy.decision_drivers.join(" / ")}</p>
+                <p>{"风险提醒："}{strategy.watchouts.join(" / ")}</p>
+                <p>{"建议动作："}{strategy.recommended_actions.join(" / ")}</p>
               </article>
             ))}
           </div>
         ) : (
-          <div className="empty">{"\u9636\u6bb5\u672a\u5b8c\u6210"}</div>
+          <div className="empty">{"阶段未完成"}</div>
         )}
       </section>
     </main>
@@ -199,14 +195,122 @@ export default async function RunPage({ params }: PageProps) {
 }
 
 
+function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: string; action?: string }) {
+  return (
+    <div className="section-heading">
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <h2>{title}</h2>
+      </div>
+      {action ? <span className="status-chip">{action}</span> : null}
+    </div>
+  );
+}
+
+
+type ScoreMatrixRowProps = {
+  title: string;
+  variantDisplayName: string;
+  variantId: string;
+  overallScore: number;
+  gapCount: number;
+  topReasons: string[];
+  scorecard?: ScoreCard;
+  explanation?: RankingExplanation;
+};
+
+
+function ScoreMatrixRow({
+  title,
+  variantDisplayName,
+  variantId,
+  overallScore,
+  gapCount,
+  topReasons,
+  scorecard,
+  explanation,
+}: ScoreMatrixRowProps) {
+  const score = toPercent(scorecard?.final_overall_score ?? scorecard?.overall_score ?? overallScore);
+  const dimensions = [
+    ["Fit", "岗位匹配", scorecard?.fit_score],
+    ["ATS", "关键词", scorecard?.ats_score],
+    ["Evidence", "证据覆盖", scorecard?.evidence_score],
+    ["Stretch", "拉伸可控", scorecard?.stretch_score],
+    ["Risk", "风险压力", scorecard ? 1 - scorecard.gap_risk_score : undefined],
+    ["Cost", "改写成本", scorecard ? 1 - scorecard.rewrite_cost_score : undefined],
+  ] as const;
+  const riskScore = toPercent(scorecard?.gap_risk_score ?? 0);
+  const signals = explanation?.positive_signals.length ? explanation.positive_signals : topReasons;
+  const risks = explanation?.risk_flags ?? [];
+  const evidenceCount = explanation?.evidence_refs.length ?? 0;
+
+  return (
+    <article className="matrix-row">
+      <div className="score-ring" style={{ "--score": `${score}%` } as React.CSSProperties}>
+        <span>{score}</span>
+        <small>{"%"}</small>
+      </div>
+      <div className="matrix-main">
+        <div className="matrix-titleline">
+          <div>
+            <h4>{title}</h4>
+            <p className="muted">
+              {variantDisplayName}
+              {" · "}
+              <span className="mono">{variantId}</span>
+            </p>
+          </div>
+          <span className="decision-badge">{"综合得分"}</span>
+        </div>
+        <div className="dimension-grid" aria-label="维度矩阵">
+          <span className="dimension-caption">{"维度矩阵"}</span>
+          {dimensions.map(([key, label, value]) => (
+            <div key={key} className="dimension-cell">
+              <div className="dimension-label">
+                <span>{label}</span>
+                <strong>{value === undefined ? "--" : `${toPercent(value)}%`}</strong>
+              </div>
+              <div className="score-bar">
+                <span style={{ width: value === undefined ? "0%" : `${toPercent(value)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="signal-grid">
+          <div>
+            <span className="mini-label">{"证据覆盖"}</span>
+            <strong>{evidenceCount || "待检查"}</strong>
+          </div>
+          <div>
+            <span className="mini-label">{"风险压力"}</span>
+            <strong>{riskScore}{"%"}</strong>
+          </div>
+          <div>
+            <span className="mini-label">{"Gap"}</span>
+            <strong>{gapCount}</strong>
+          </div>
+        </div>
+        <p className="reason-line">{signals.join(" / ") || "未记录主要原因"}</p>
+        <p className="risk-line">{risks.join(" / ") || "无明显风险标记"}</p>
+      </div>
+    </article>
+  );
+}
+
+
+function toPercent(value: number): number {
+  return Math.round(Math.max(0, Math.min(1, value)) * 100);
+}
+
+
 function buildVariantDisplayName(variantId: string): string {
   if (variantId.startsWith("variant-jd-")) {
     const jdId = variantId.replace("variant-jd-", "");
-    return `\u5c97\u4f4d\u5b9a\u5236\u7248\u672c\uff08${jdId}\uff09`;
+    return `岗位定制版本（${jdId}）`;
   }
   if (variantId.startsWith("variant-cluster-")) {
     const cluster = variantId.replace("variant-cluster-", "");
-    return `\u5c97\u4f4d\u7c07\u7248\u672c\uff08${cluster}\uff09`;
+    return `岗位簇版本（${cluster}）`;
   }
-  return `\u7b80\u5386\u7248\u672c\uff08${variantId}\uff09`;
+  return `简历版本（${variantId}）`;
 }
