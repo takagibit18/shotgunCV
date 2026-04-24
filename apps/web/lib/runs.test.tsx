@@ -120,6 +120,18 @@ describe("run viewer pages", () => {
     expect(html).toContain("导入");
   });
 
+  it("renders the light SaaS run workspace language", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "demo");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await HomePage());
+
+    expect(html).toContain("运行工作台");
+    expect(html).toContain("只读 AI 决策视图");
+    expect(html).toContain("阶段完成度");
+  });
+
   it("renders run detail page with incomplete-stage messaging", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
@@ -140,6 +152,21 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("岗位定制版本（jd-001）");
     expect(html).toContain("variant-jd-jd-001");
+  });
+
+  it("renders scorecards as a visual job priority matrix", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(html).toContain("岗位优先级矩阵");
+    expect(html).toContain("综合得分");
+    expect(html).toContain("维度矩阵");
+    expect(html).toContain("证据覆盖");
+    expect(html).toContain("风险压力");
+    expect(html).toContain("81%");
   });
 
   it("renders explanation empty state for legacy evaluate artifacts", async () => {
