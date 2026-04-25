@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
+import base64
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from urllib import request
 
 
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown"}
@@ -33,20 +36,37 @@ class InputDocument:
     media_type: str
     text: str
     extraction_status: str
+    extraction_provider: str = ""
+    extraction_error: str = ""
 
 
-def collect_input_documents(sources: Iterable[Path]) -> list[InputDocument]:
+@dataclass(slots=True)
+class InputExtractionOptions:
+    ocr_provider: str = "local_ocr"
+    vision_provider: str = "openai_vision"
+    vision_model: str = "gpt-5.4-mini"
+    ocr_languages: str = "eng+chi_sim"
+    vision_enabled: bool = True
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str = ""
+
+
+def collect_input_documents(
+    sources: Iterable[Path],
+    options: InputExtractionOptions | None = None,
+) -> list[InputDocument]:
+    extraction_options = options or InputExtractionOptions()
     documents: list[InputDocument] = []
     for source in sources:
-        documents.extend(_collect_from_source(Path(source)))
+        documents.extend(_collect_from_source(Path(source), extraction_options))
     return documents
 
 
-def _collect_from_source(source: Path) -> list[InputDocument]:
+def _collect_from_source(source: Path, options: InputExtractionOptions) -> list[InputDocument]:
     if source.is_dir():
-        return [_extract_document(path) for path in _iter_supported_files(source)]
+        return [_extract_document(path, options) for path in _iter_supported_files(source)]
     if source.is_file():
-        return [_extract_document(source)]
+        return [_extract_document(source, options)]
     raise InputExtractionError(f"Input source `{source}` does not exist.")
 
 
@@ -62,7 +82,7 @@ def _iter_supported_files(directory: Path) -> list[Path]:
     return paths
 
 
-def _extract_document(path: Path) -> InputDocument:
+def _extract_document(path: Path, options: InputExtractionOptions) -> InputDocument:
     suffix = path.suffix.lower()
     if suffix in TEXT_EXTENSIONS:
         return InputDocument(
@@ -71,6 +91,7 @@ def _extract_document(path: Path) -> InputDocument:
             media_type=_text_media_type(suffix),
             text=path.read_text(encoding="utf-8"),
             extraction_status="extracted",
+            extraction_provider="local_text",
         )
     if suffix in PDF_EXTENSIONS:
         text = _extract_pdf_text(path)
@@ -85,21 +106,65 @@ def _extract_document(path: Path) -> InputDocument:
             media_type="application/pdf",
             text=text,
             extraction_status="extracted",
+            extraction_provider="local_pdf",
         )
     if suffix in IMAGE_EXTENSIONS:
-        sidecar = _find_sidecar(path)
-        if sidecar is None:
-            raise InputExtractionError(
-                f"Image input `{path}` requires a same-name .txt or .md sidecar because OCR is not enabled."
-            )
+        return _extract_image_document(path, suffix, options)
+    raise InputExtractionError(f"Unsupported input type `{path.suffix}` for `{path}`.")
+
+
+def _extract_image_document(path: Path, suffix: str, options: InputExtractionOptions) -> InputDocument:
+    media_type = _image_media_type(suffix)
+    sidecar = _find_sidecar(path)
+    try:
+        if options.ocr_provider != "disabled":
+            ocr_text = _extract_image_text_with_ocr(path, options.ocr_languages).strip()
+            if ocr_text:
+                return InputDocument(
+                    source_type="file",
+                    source_value=str(path),
+                    media_type=media_type,
+                    text=ocr_text,
+                    extraction_status="ocr",
+                    extraction_provider=options.ocr_provider,
+                )
+            ocr_error = "OCR returned empty text."
+        else:
+            ocr_error = "OCR provider is disabled."
+    except Exception as exc:
+        ocr_error = str(exc).strip() or exc.__class__.__name__
+
+    if options.vision_enabled and options.vision_provider != "disabled":
+        try:
+            vision_text = _extract_image_text_with_vision(path, options, ocr_error).strip()
+            if vision_text:
+                return InputDocument(
+                    source_type="file",
+                    source_value=str(path),
+                    media_type=media_type,
+                    text=vision_text,
+                    extraction_status="vision",
+                    extraction_provider=options.vision_provider,
+                    extraction_error=f"ocr: {ocr_error}",
+                )
+            vision_error = "Vision provider returned empty text."
+        except Exception as exc:
+            vision_error = str(exc).strip() or exc.__class__.__name__
+    else:
+        vision_error = "Vision fallback is disabled."
+
+    if sidecar is not None:
         return InputDocument(
             source_type="file",
             source_value=str(path),
-            media_type=_image_media_type(suffix),
+            media_type=media_type,
             text=sidecar.read_text(encoding="utf-8"),
             extraction_status="sidecar",
+            extraction_provider="sidecar",
+            extraction_error=f"ocr: {ocr_error}; vision: {vision_error}",
         )
-    raise InputExtractionError(f"Unsupported input type `{path.suffix}` for `{path}`.")
+
+    raise InputExtractionError(_format_image_extraction_error(path, ocr_error, vision_error))
 
 
 def _text_media_type(suffix: str) -> str:
@@ -157,3 +222,70 @@ def _extract_pdf_literal_text(payload: bytes) -> str:
 
 def _unescape_pdf_literal(value: str) -> str:
     return value.replace(r"\(", "(").replace(r"\)", ")").replace(r"\\", "\\")
+
+
+def _extract_image_text_with_ocr(path: Path, languages: str) -> str:
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+        import pytesseract  # type: ignore[import-not-found]
+    except Exception as exc:
+        raise RuntimeError("Tesseract OCR requires Pillow, pytesseract, and the Tesseract executable.") from exc
+    with Image.open(path) as image:
+        return str(pytesseract.image_to_string(image, lang=languages))
+
+
+def _extract_image_text_with_vision(path: Path, options: InputExtractionOptions, ocr_error: str) -> str:
+    if not options.openai_api_key:
+        raise RuntimeError("missing OPENAI_API_KEY for vision fallback")
+    payload = json.dumps(
+        {
+            "model": options.vision_model or "gpt-5.4-mini",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Extract all CV or job description text from this image. "
+                                f"OCR failed first with: {ocr_error}. Return plain text only."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": _image_data_url(path)},
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0.0,
+        }
+    ).encode("utf-8")
+    response = request.Request(
+        url=f"{options.openai_base_url.rstrip('/')}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {options.openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with request.urlopen(response, timeout=90) as handle:
+        body = json.loads(handle.read().decode("utf-8"))
+    return str(body["choices"][0]["message"]["content"]).strip()
+
+
+def _image_data_url(path: Path) -> str:
+    mime = _image_media_type(path.suffix.lower())
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _format_image_extraction_error(path: Path, ocr_error: str, vision_error: str) -> str:
+    return (
+        f"Image input `{path}` could not be extracted. "
+        f"OCR error: {ocr_error}. "
+        f"Vision fallback error: {vision_error}. "
+        "Install Tesseract with required language packs, configure OPENAI_API_KEY/SHOTGUNCV_VISION_MODEL, "
+        "or provide a same-name .txt or .md sidecar."
+    )

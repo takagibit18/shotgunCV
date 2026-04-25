@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from shotguncv_core.inputs import InputExtractionError, collect_input_documents
+from shotguncv_core.inputs import InputExtractionError, InputExtractionOptions, collect_input_documents
 
 
 def test_collects_markdown_and_text_documents(tmp_path: Path) -> None:
@@ -55,8 +55,8 @@ def test_image_without_sidecar_raises_actionable_error(tmp_path: Path) -> None:
     image_path = tmp_path / "resume.jpg"
     image_path.write_bytes(b"not a real image")
 
-    with pytest.raises(InputExtractionError, match="sidecar"):
-        collect_input_documents([image_path])
+    with pytest.raises(InputExtractionError, match="Tesseract"):
+        collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
 
 
 def test_directory_collection_filters_supported_inputs(tmp_path: Path) -> None:
@@ -84,3 +84,68 @@ def test_directory_collection_does_not_duplicate_image_sidecars(tmp_path: Path) 
     assert len(documents) == 1
     assert Path(documents[0].source_value).name == "jd.png"
     assert documents[0].extraction_status == "sidecar"
+
+
+def test_image_ocr_success_records_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "resume.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "OCR Resume Text")
+
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].text == "OCR Resume Text"
+    assert documents[0].extraction_status == "ocr"
+    assert documents[0].extraction_provider == "local_ocr"
+    assert documents[0].extraction_error == ""
+
+
+def test_image_empty_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "jd.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_vision",
+        lambda path, options, ocr_error: "Vision JD Text",
+    )
+
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=True))
+
+    assert documents[0].text == "Vision JD Text"
+    assert documents[0].extraction_status == "vision"
+    assert documents[0].extraction_provider == "openai_vision"
+
+
+def test_image_failure_reports_ocr_and_vision_guidance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "resume.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: (_ for _ in ()).throw(RuntimeError("tesseract missing")),
+    )
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_vision",
+        lambda path, options, ocr_error: (_ for _ in ()).throw(RuntimeError("missing OPENAI_API_KEY")),
+    )
+
+    with pytest.raises(InputExtractionError) as excinfo:
+        collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=True))
+
+    message = str(excinfo.value)
+    assert str(image_path) in message
+    assert "tesseract missing" in message
+    assert "missing OPENAI_API_KEY" in message
+    assert "Install Tesseract" in message
+
+
+def test_no_vision_fallback_does_not_call_vision(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "resume.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+
+    def _unexpected_vision_call(path, options, ocr_error):  # type: ignore[no-untyped-def]
+        raise AssertionError("vision fallback should be disabled")
+
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_vision", _unexpected_vision_call)
+
+    with pytest.raises(InputExtractionError, match="Vision fallback is disabled"):
+        collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))

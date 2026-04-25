@@ -74,6 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
                 required=False,
                 help="Optional run config JSON to snapshot into the run workspace.",
             )
+            subparser.add_argument(
+                "--no-vision-fallback",
+                action="store_true",
+                help="Disable OpenAI-compatible vision fallback for image extraction.",
+            )
+            subparser.add_argument(
+                "--ocr-languages",
+                required=False,
+                help="Override OCR languages, for example `eng` or `eng+chi_sim`.",
+            )
 
     return parser
 
@@ -137,6 +147,8 @@ def _run_ingest(args: argparse.Namespace) -> str:
         config_path=args.config,
         candidate_sources=cv_sources,
         jd_input_sources=jd_input_sources,
+        vision_fallback_enabled=False if getattr(args, "no_vision_fallback", False) else None,
+        ocr_languages=getattr(args, "ocr_languages", None),
     )
     return f"Ingest completed: `{manifest_path}`"
 

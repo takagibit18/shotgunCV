@@ -18,7 +18,13 @@ python -m shotguncv_cli.main plan --run-dir ./runs/demo
 python -m shotguncv_cli.main report --run-dir ./runs/demo
 ```
 
-`--cv` 与 `--jd` 可重复传入，也可指向文件或目录。支持 `.txt`、`.md`、文本型 `.pdf`，以及带同名 `.txt` / `.md` sidecar 的图片。当前版本不做 OCR；扫描 PDF 或无 sidecar 图片会返回可操作错误。
+`--cv` 与 `--jd` 可重复传入，也可指向文件或目录。支持 `.txt`、`.md`、文本型 `.pdf`，以及图片输入。
+
+图片会先走本地 Tesseract OCR；OCR 为空或失败时，默认尝试 OpenAI-compatible 视觉兜底；如果同名 `.txt` / `.md` sidecar 存在，也可以作为最后兜底。完全本地运行时可加 `--no-vision-fallback`：
+
+```bash
+python -m shotguncv_cli.main run --run-dir ./runs/image-demo --candidate-id cand-001 --cv ./private_inputs/resume.png --jd ./fixtures/jds/sample_batch.txt --no-vision-fallback
+```
 
 生成后的关键文件：
 
