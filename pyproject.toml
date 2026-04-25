@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shotguncv"
-version = "0.2.0"
+version = "0.3.1"
 description = "Pipeline-first AI Resume Ops system for sea-application workflows."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "ShotgunCV Contributors" }]
-dependencies = ["pypdf>=5.0"]
+dependencies = ["pypdf>=5.0", "Pillow>=10.0", "pytesseract>=0.3.10"]
 
 [tool.setuptools]
 package-dir = {"" = "."}

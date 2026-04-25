@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from shotguncv_cli.main import run
 
 
@@ -131,3 +133,50 @@ def test_cli_run_command_executes_full_pipeline_from_multiform_inputs(tmp_path: 
     assert "Run completed" in output
     assert (run_dir / "report" / "summary.md").exists()
     assert (run_dir / "evaluate" / "scorecards.json").exists()
+
+
+def test_cli_run_accepts_image_cv_with_mock_ocr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    image_path = tmp_path / "resume.png"
+    jd_path = ROOT / "fixtures" / "jds" / "sample_batch.txt"
+    config_path = tmp_path / "deterministic.json"
+    image_path.write_bytes(b"image")
+    config_path.write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": "deterministic", "model": ""},
+                "generator": {"provider": "deterministic", "model": ""},
+                "judge": {"provider": "deterministic", "model": ""},
+                "planner": {"provider": "deterministic", "model": ""},
+                "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": ".env"},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "- Built LLM workflow tools\n- Shipped ranking diagnostics",
+    )
+
+    exit_code, output = run(
+        [
+            "run",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(image_path),
+            "--jd",
+            str(jd_path),
+            "--config",
+            str(config_path),
+            "--no-vision-fallback",
+        ]
+    )
+
+    assert exit_code == 0, output
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["candidate_inputs"][0]["extraction_status"] == "ocr"
+    assert (run_dir / "report" / "summary.md").exists()

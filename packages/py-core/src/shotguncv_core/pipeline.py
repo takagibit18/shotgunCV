@@ -13,7 +13,7 @@ from shotguncv_agents.providers import (
     build_judge_provider,
     build_planner_provider,
 )
-from shotguncv_core.inputs import InputDocument, collect_input_documents
+from shotguncv_core.inputs import InputDocument, InputExtractionOptions, collect_input_documents
 from shotguncv_core.models import (
     ApplicationStrategy,
     CandidateProfile,
@@ -92,13 +92,27 @@ def ingest_run(
     config_path: Path | None = None,
     candidate_sources: list[Path] | None = None,
     jd_input_sources: list[Path] | None = None,
+    vision_fallback_enabled: bool | None = None,
+    ocr_languages: str | None = None,
 ) -> Path:
     ingest_directory = stage_dir(run_dir, "ingest")
-    snapshot_run_config(run_dir, config_path)
+    snapshot_run_config(
+        run_dir,
+        config_path,
+        vision_fallback_enabled=vision_fallback_enabled,
+        ocr_languages=ocr_languages,
+    )
+    config = load_run_config(run_dir)
+    extraction_options = _build_input_extraction_options(
+        run_dir=run_dir,
+        config=config,
+        vision_fallback_enabled=vision_fallback_enabled,
+        ocr_languages=ocr_languages,
+    )
     candidate_paths = _resolve_candidate_sources(candidate_resume_path, candidate_sources)
     jd_paths = _resolve_jd_sources(jd_sources, jd_input_sources)
-    candidate_inputs = collect_input_documents(candidate_paths)
-    jd_inputs = collect_input_documents(jd_paths)
+    candidate_inputs = collect_input_documents(candidate_paths, options=extraction_options)
+    jd_inputs = collect_input_documents(jd_paths, options=extraction_options)
     if not candidate_inputs:
         raise ValueError("At least one CV input is required for ingest.")
     if not jd_inputs:
@@ -432,6 +446,8 @@ def _input_document_to_manifest_item(document: InputDocument) -> dict[str, str]:
         "media_type": document.media_type,
         "text": document.text,
         "extraction_status": document.extraction_status,
+        "extraction_provider": document.extraction_provider,
+        "extraction_error": document.extraction_error,
     }
 
 
@@ -439,6 +455,79 @@ def _input_document_to_jd_input(document: InputDocument) -> dict[str, str]:
     payload = _input_document_to_manifest_item(document)
     payload["content"] = document.text
     return payload
+
+
+def _build_input_extraction_options(
+    run_dir: Path,
+    config: object,
+    vision_fallback_enabled: bool | None,
+    ocr_languages: str | None,
+) -> InputExtractionOptions:
+    env_path = _resolve_env_file_path(run_dir=run_dir, env_file=config.openai.env_file)
+    env_values = _load_dotenv(env_path) if env_path.exists() else {}
+    vision_provider = config.input_extraction.vision_provider
+    vision_enabled = vision_fallback_enabled if vision_fallback_enabled is not None else vision_provider != "disabled"
+    if not vision_enabled:
+        vision_provider = "disabled"
+    resolved_ocr_languages = (
+        ocr_languages
+        or env_values.get("SHOTGUNCV_OCR_LANGUAGES", "").strip()
+        or config.input_extraction.ocr_languages
+        or "eng+chi_sim"
+    )
+    vision_model = (
+        env_values.get("SHOTGUNCV_VISION_MODEL", "").strip()
+        or config.input_extraction.vision_model
+        or env_values.get("OPENAI_MODEL", "").strip()
+        or "gpt-5.4-mini"
+    )
+    api_key_name = env_values.get("OPENAI_API_KEY_ENV", "").strip() or config.openai.api_key_env
+    base_url = (
+        env_values.get("OPENAI_BASE_URL", "").strip()
+        or (config.openai.base_url or "").strip()
+        or "https://api.openai.com/v1"
+    )
+    return InputExtractionOptions(
+        ocr_provider=config.input_extraction.ocr_provider,
+        vision_provider=vision_provider,
+        vision_model=vision_model,
+        ocr_languages=resolved_ocr_languages,
+        vision_enabled=vision_enabled,
+        openai_base_url=base_url,
+        openai_api_key=env_values.get(api_key_name, "").strip(),
+    )
+
+
+def _resolve_env_file_path(run_dir: Path, env_file: str) -> Path:
+    candidate = Path(env_file)
+    if candidate.is_absolute():
+        return candidate
+    project_relative = Path.cwd() / candidate
+    if project_relative.exists():
+        return project_relative
+    run_relative = run_dir / candidate
+    if run_relative.exists():
+        return run_relative
+    return project_relative
+
+
+def _load_dotenv(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, raw_value = line.split("=", maxsplit=1)
+        key = key.strip()
+        value = raw_value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values
 
 
 def _build_scorecard(

@@ -8,7 +8,8 @@ import pytest
 
 from shotguncv_cli.main import run
 from shotguncv_agents.providers import OpenAIAnalyzeProvider, _classify_cluster
-from shotguncv_core.pipeline import analyze_run, evaluate_run, generate_run, ingest_run
+from shotguncv_core.pipeline import _build_input_extraction_options, analyze_run, evaluate_run, generate_run, ingest_run
+from shotguncv_core.run_config import load_run_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,74 @@ def test_cli_ingest_writes_default_openai_run_config(tmp_path: Path) -> None:
     assert config_payload["planner"]["provider"] == "openai"
     assert config_payload["openai"]["api_key_env"] == "OPENAI_API_KEY"
     assert config_payload["openai"]["env_file"] == ".env"
+    assert config_payload["input_extraction"]["ocr_provider"] == "local_ocr"
+    assert config_payload["input_extraction"]["vision_provider"] == "openai_vision"
+    assert config_payload["input_extraction"]["ocr_languages"] == "eng+chi_sim"
+
+
+def test_cli_ingest_snapshots_input_extraction_overrides(tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    image_path = tmp_path / "resume.png"
+    sidecar_path = tmp_path / "resume.md"
+    jd_path = ROOT / "fixtures" / "jds" / "sample_batch.txt"
+    image_path.write_bytes(b"image")
+    sidecar_path.write_text("- Built image input workflows", encoding="utf-8")
+
+    exit_code, output = run(
+        [
+            "ingest",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(image_path),
+            "--jd",
+            str(jd_path),
+            "--no-vision-fallback",
+            "--ocr-languages",
+            "eng",
+        ]
+    )
+
+    assert exit_code == 0, output
+    config_payload = json.loads((run_dir / "config" / "run_config.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    assert config_payload["input_extraction"]["vision_provider"] == "disabled"
+    assert config_payload["input_extraction"]["ocr_languages"] == "eng"
+    assert manifest["candidate_inputs"][0]["extraction_provider"] == "sidecar"
+
+
+def test_dotenv_overrides_vision_model_and_ocr_languages(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "OPENAI_API_KEY=test-key\nSHOTGUNCV_VISION_MODEL=gpt-vision-test\nSHOTGUNCV_OCR_LANGUAGES=eng\n",
+        encoding="utf-8",
+    )
+    _write_run_config(
+        run_dir,
+        {
+            "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY", "env_file": str(dotenv_path)},
+            "input_extraction": {
+                "ocr_provider": "local_ocr",
+                "vision_provider": "openai_vision",
+                "vision_model": "",
+                "ocr_languages": "eng+chi_sim",
+            },
+        },
+    )
+
+    options = _build_input_extraction_options(
+        run_dir=run_dir,
+        config=load_run_config(run_dir),
+        vision_fallback_enabled=None,
+        ocr_languages=None,
+    )
+
+    assert options.vision_model == "gpt-vision-test"
+    assert options.ocr_languages == "eng"
+    assert options.openai_api_key == "test-key"
 
 
 def test_cli_ingest_snapshots_explicit_run_config(tmp_path: Path) -> None:
@@ -570,4 +639,3 @@ def _fake_openai_urlopen_capture(messages: list[str], capture: dict[str, str]):
         return _Response(next(responses))
 
     return _urlopen
-
