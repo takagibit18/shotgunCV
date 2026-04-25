@@ -5,12 +5,7 @@
 ```bash
 cp ./.env.example ./.env
 python -m pip install -e .
-python -m shotguncv_cli.main ingest --run-dir ./runs/openai-demo --candidate-id cand-001 --candidate-resume ./fixtures/candidates/base_resume.md --jd-file ./fixtures/jds/sample_batch.txt
-python -m shotguncv_cli.main analyze --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main generate --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main evaluate --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main plan --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main report --run-dir ./runs/openai-demo
+python -m shotguncv_cli.main run --run-dir ./runs/openai-demo --candidate-id cand-001 --cv ./fixtures/candidates/base_resume.md --jd ./fixtures/jds/sample_batch.txt
 ```
 
 关键说明：

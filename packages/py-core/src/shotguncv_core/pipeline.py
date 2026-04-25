@@ -13,6 +13,7 @@ from shotguncv_agents.providers import (
     build_judge_provider,
     build_planner_provider,
 )
+from shotguncv_core.inputs import InputDocument, collect_input_documents
 from shotguncv_core.models import (
     ApplicationStrategy,
     CandidateProfile,
@@ -86,24 +87,31 @@ class _EvaluateTaskResult:
 def ingest_run(
     run_dir: Path,
     candidate_id: str,
-    candidate_resume_path: Path,
-    jd_sources: list[Path],
+    candidate_resume_path: Path | None = None,
+    jd_sources: list[Path] | None = None,
     config_path: Path | None = None,
+    candidate_sources: list[Path] | None = None,
+    jd_input_sources: list[Path] | None = None,
 ) -> Path:
     ingest_directory = stage_dir(run_dir, "ingest")
     snapshot_run_config(run_dir, config_path)
+    candidate_paths = _resolve_candidate_sources(candidate_resume_path, candidate_sources)
+    jd_paths = _resolve_jd_sources(jd_sources, jd_input_sources)
+    candidate_inputs = collect_input_documents(candidate_paths)
+    jd_inputs = collect_input_documents(jd_paths)
+    if not candidate_inputs:
+        raise ValueError("At least one CV input is required for ingest.")
+    if not jd_inputs:
+        raise ValueError("At least one JD input is required for ingest.")
+    candidate_resume_text = _join_input_text(candidate_inputs)
+    primary_resume_path = candidate_inputs[0].source_value
     manifest = {
         "candidate_id": candidate_id,
-        "candidate_resume_path": str(candidate_resume_path),
-        "candidate_resume_text": candidate_resume_path.read_text(encoding="utf-8"),
-        "jd_inputs": [
-            {
-                "source_type": "file",
-                "source_value": str(source),
-                "content": source.read_text(encoding="utf-8"),
-            }
-            for source in jd_sources
-        ],
+        "candidate_resume_path": primary_resume_path,
+        "candidate_resume_text": candidate_resume_text,
+        "candidate_inputs": [_input_document_to_manifest_item(document) for document in candidate_inputs],
+        "jd_inputs": [_input_document_to_jd_input(document) for document in jd_inputs],
+        "input_warnings": [],
     }
     return dump_json(ingest_directory / "manifest.json", manifest)
 
@@ -388,6 +396,49 @@ def _build_stretch_points(jd: JDProfile, candidate: CandidateProfile) -> list[st
     candidate_text = " ".join(candidate.experiences + candidate.projects + candidate.skills).lower()
     stretch_points = [keyword for keyword in jd.keywords if keyword.lower() not in candidate_text]
     return stretch_points[:3] or [jd.keywords[-1]]
+
+
+def _resolve_candidate_sources(
+    candidate_resume_path: Path | None,
+    candidate_sources: list[Path] | None,
+) -> list[Path]:
+    sources = list(candidate_sources or [])
+    if candidate_resume_path is not None:
+        sources.insert(0, candidate_resume_path)
+    return sources
+
+
+def _resolve_jd_sources(
+    jd_sources: list[Path] | None,
+    jd_input_sources: list[Path] | None,
+) -> list[Path]:
+    sources = list(jd_input_sources or [])
+    if jd_sources:
+        sources = list(jd_sources) + sources
+    return sources
+
+
+def _join_input_text(documents: list[InputDocument]) -> str:
+    chunks = []
+    for document in documents:
+        chunks.append(f"Source: {document.source_value}\n{document.text.strip()}")
+    return "\n\n".join(chunk for chunk in chunks if chunk.strip())
+
+
+def _input_document_to_manifest_item(document: InputDocument) -> dict[str, str]:
+    return {
+        "source_type": document.source_type,
+        "source_value": document.source_value,
+        "media_type": document.media_type,
+        "text": document.text,
+        "extraction_status": document.extraction_status,
+    }
+
+
+def _input_document_to_jd_input(document: InputDocument) -> dict[str, str]:
+    payload = _input_document_to_manifest_item(document)
+    payload["content"] = document.text
+    return payload
 
 
 def _build_scorecard(
