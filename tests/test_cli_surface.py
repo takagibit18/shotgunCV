@@ -9,6 +9,7 @@ def test_cli_exposes_v1_command_family() -> None:
     subcommands = parser._subparsers._group_actions[0].choices.keys()
 
     assert set(subcommands) == {
+        "run",
         "ingest",
         "analyze",
         "generate",
@@ -24,6 +25,7 @@ def test_cli_run_lists_commands() -> None:
     assert exit_code == 0
     assert "shotguncv" in output
     assert "ingest" in output
+    assert "run" in output
     assert "report" in output
 
 
@@ -38,3 +40,19 @@ def test_cli_command_descriptions_use_neutral_jd_specific_language() -> None:
     assert "cluster" not in generate_help.lower()
     assert "JD" in analyze_help
     assert "JD-specific" in generate_help
+
+
+def test_cli_ingest_accepts_multiform_input_flags() -> None:
+    parser = build_parser()
+    ingest = parser._subparsers._group_actions[0].choices["ingest"]
+    option_dests = {action.dest for action in ingest._actions}
+
+    assert {"cv_sources", "jd_input_sources", "candidate_resume", "jd_files"} <= option_dests
+
+
+def test_cli_run_accepts_multiform_input_flags() -> None:
+    parser = build_parser()
+    run_command = parser._subparsers._group_actions[0].choices["run"]
+    option_dests = {action.dest for action in run_command._actions}
+
+    assert {"cv_sources", "jd_input_sources", "candidate_id", "run_dir"} <= option_dests

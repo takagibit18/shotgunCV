@@ -58,6 +58,7 @@ class PlanArtifacts:
 
 RANKING_VERSION = "v0.3.0-llm-eval"
 EVALUATE_MAX_WORKERS = 4
+TEXT_INPUT_SUFFIXES = {".txt", ".md"}
 
 
 @dataclass(slots=True)
@@ -86,26 +87,73 @@ class _EvaluateTaskResult:
 def ingest_run(
     run_dir: Path,
     candidate_id: str,
-    candidate_resume_path: Path,
-    jd_sources: list[Path],
+    candidate_resume_path: Path | None = None,
+    jd_sources: list[Path] | None = None,
     config_path: Path | None = None,
+    candidate_sources: list[Path] | None = None,
 ) -> Path:
     ingest_directory = stage_dir(run_dir, "ingest")
     snapshot_run_config(run_dir, config_path)
+    candidate_inputs = _build_candidate_inputs(candidate_resume_path, candidate_sources or [])
+    jd_inputs = _build_jd_inputs(jd_sources or [])
+    if not candidate_inputs:
+        raise ValueError("At least one candidate input is required.")
+    if not jd_inputs:
+        raise ValueError("At least one JD input is required.")
     manifest = {
         "candidate_id": candidate_id,
-        "candidate_resume_path": str(candidate_resume_path),
-        "candidate_resume_text": candidate_resume_path.read_text(encoding="utf-8"),
-        "jd_inputs": [
-            {
-                "source_type": "file",
-                "source_value": str(source),
-                "content": source.read_text(encoding="utf-8"),
-            }
-            for source in jd_sources
-        ],
+        "candidate_resume_path": candidate_inputs[0]["source_value"],
+        "candidate_resume_text": "\n\n".join(item["content"] for item in candidate_inputs),
+        "candidate_inputs": candidate_inputs,
+        "jd_inputs": jd_inputs,
     }
     return dump_json(ingest_directory / "manifest.json", manifest)
+
+
+def _build_candidate_inputs(candidate_resume_path: Path | None, candidate_sources: list[Path]) -> list[dict[str, str]]:
+    sources: list[Path] = []
+    if candidate_resume_path is not None:
+        sources.append(candidate_resume_path)
+    sources.extend(candidate_sources)
+    return [_build_input_record(source) for source in _expand_input_sources(sources)]
+
+
+def _build_jd_inputs(jd_sources: list[Path]) -> list[dict[str, str]]:
+    return [_build_input_record(source) for source in _expand_input_sources(jd_sources)]
+
+
+def _expand_input_sources(sources: list[Path]) -> list[Path]:
+    files: list[Path] = []
+    for source in sources:
+        if source.is_dir():
+            files.extend(
+                sorted(
+                    (item for item in source.iterdir() if item.is_file() and item.suffix.lower() in TEXT_INPUT_SUFFIXES),
+                    key=_input_sort_key,
+                )
+            )
+            continue
+        if source.is_file():
+            if source.suffix.lower() not in TEXT_INPUT_SUFFIXES:
+                raise ValueError(f"Unsupported text input `{source}`. Supported extensions: .md, .txt.")
+            files.append(source)
+            continue
+        raise FileNotFoundError(f"Input path does not exist: `{source}`.")
+    return files
+
+
+def _build_input_record(source: Path) -> dict[str, str]:
+    return {
+        "source_type": "file",
+        "source_value": str(source),
+        "content": source.read_text(encoding="utf-8"),
+    }
+
+
+def _input_sort_key(source: Path) -> tuple[int, str]:
+    name = source.name.lower()
+    resume_priority = 0 if "resume" in name or "cv" in name else 1
+    return (resume_priority, name)
 
 
 def analyze_run(run_dir: Path) -> AnalysisArtifacts:

@@ -70,6 +70,33 @@ export default async function RunPage({ params }: PageProps) {
         </div>
       </section>
 
+      {detail.draft ? (
+        <section className="section">
+          <SectionHeading eyebrow="Draft run" title="上传草稿" action={detail.draftStatus} />
+          <div className="detail-grid">
+            <article className="detail-card">
+              <h3>{"输入文件"}</h3>
+              <ul>
+                {detail.draft.files.map((file) => (
+                  <li key={`${file.role}-${file.storedRelativePath}`}>
+                    <span className="mono">{file.role}</span>
+                    {" · "}
+                    {file.originalName}
+                    {" · "}
+                    <span className="mono">{file.storedRelativePath}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
+            <article className="detail-card">
+              <h3>{"下一步 CLI"}</h3>
+              <p>{"Web 只创建草稿，不触发 pipeline。确认输入后在本地执行："}</p>
+              <pre className="command-block">{detail.draft.nextCommand}</pre>
+            </article>
+          </div>
+        </section>
+      ) : null}
+
       <section className="section">
         <SectionHeading eyebrow="阶段分析" title="分析阶段" />
         {detail.analyze.isComplete && detail.analyze.candidate ? (

@@ -10,7 +10,9 @@ import type {
   RankingExplanation,
   ResumeVariant,
   RunConfig,
+  RunDraftStatus,
   ScoreCard,
+  UploadManifest,
 } from "./types";
 
 
@@ -25,6 +27,8 @@ type RunSummary = {
   judgeProvider: string;
   plannerProvider: string;
   label: string;
+  draftStatus: RunDraftStatus;
+  draft: UploadManifest | null;
 };
 
 type EvaluateTopVariant = {
@@ -70,6 +74,8 @@ type RunDetail = {
     isComplete: boolean;
     strategies: ApplicationStrategy[];
   };
+  draft: UploadManifest | null;
+  draftStatus: RunDraftStatus;
 };
 
 type RunReport = {
@@ -98,15 +104,19 @@ export async function listRuns(): Promise<RunSummary[]> {
         const runDir = path.join(runsDir, runId);
         const metadata = await stat(runDir);
         const config = await readJsonIfExists<RunConfig>(path.join(runDir, "config", "run_config.json"));
+        const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
+        const completedStages = await getCompletedStages(runDir);
         return {
           runId,
           lastModified: metadata.mtime.toISOString(),
-          completedStages: await getCompletedStages(runDir),
+          completedStages,
           analyzerProvider: config?.analyzer?.provider ?? "unknown",
           generatorProvider: config?.generator?.provider ?? "unknown",
           judgeProvider: config?.judge?.provider ?? "unknown",
           plannerProvider: config?.planner?.provider ?? "unknown",
-          label: config?.run_metadata.label ?? "",
+          label: config?.run_metadata.label || draft?.label || "",
+          draftStatus: buildDraftStatus(draft, completedStages),
+          draft,
         };
       }),
   );
@@ -114,10 +124,22 @@ export async function listRuns(): Promise<RunSummary[]> {
 }
 
 
+function buildDraftStatus(draft: UploadManifest | null, completedStages: StageName[]): RunDraftStatus {
+  if (completedStages.includes("report")) {
+    return "complete";
+  }
+  if (completedStages.length > 0) {
+    return "running";
+  }
+  return draft ? "draft" : "ingest-ready";
+}
+
+
 export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const runDir = path.join(getRunsDir(), runId);
   const config = await readJsonOrThrow<RunConfig>(path.join(runDir, "config", "run_config.json"));
   const completedStages = await getCompletedStages(runDir);
+  const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
   const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
   const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
   const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
@@ -180,6 +202,8 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       isComplete: completedStages.includes("plan"),
       strategies,
     },
+    draft,
+    draftStatus: buildDraftStatus(draft, completedStages),
   };
 }
 

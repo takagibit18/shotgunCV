@@ -1,5 +1,11 @@
 # ShotgunCV 决策日志
 
+## v0.4.0 Web 上传只创建本地 run 草稿
+
+Web 允许写入本地 `runs/`，但写入边界限制为创建上传草稿：保存原始 CV/JD 文件、写入 `ingest/upload_manifest.json` 和 `config/run_config.json`。Web 不执行 pipeline、不解析正文、不生成 `ingest/manifest.json`。
+
+原因：这样可以让用户从 Web 开始录入数据，同时继续保持 Python pipeline 是唯一业务真源。后续的文本提取、OCR、vision fallback、评分、排序和报告仍通过 CLI 显式执行，避免 Web 与 CLI 产生两套输入解释逻辑。
+
 ## 已生效决策
 
 ### 采用 Pipeline-first，而非 Agent-first

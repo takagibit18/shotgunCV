@@ -158,3 +158,23 @@ export type EvalSummaryItem = {
   gap_count: number;
   top_reasons: string[];
 };
+
+export type RunDraftStatus = "draft" | "ingest-ready" | "running" | "complete";
+
+export type UploadedInputFile = {
+  role: "cv" | "jd";
+  originalName: string;
+  storedRelativePath: string;
+  sizeBytes: number;
+  contentType: string;
+  uploadedAt: string;
+};
+
+export type UploadManifest = {
+  schemaVersion: "v0.4.0-upload-draft";
+  candidateId: string;
+  label: string;
+  createdAt: string;
+  files: UploadedInputFile[];
+  nextCommand: string;
+};

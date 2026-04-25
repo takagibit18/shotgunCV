@@ -1,5 +1,11 @@
 # ShotgunCV 系统设计
 
+## v0.4.0 Web 上传草稿边界
+
+Web 从只读 viewer 扩展为本地单用户上传入口，但仍不成为第二套业务执行入口。`/upload` 只负责把 CV/JD 原始文件保存到 `runs/<runId>/input_files/`，并写入 `ingest/upload_manifest.json` 与 `config/run_config.json`。
+
+`ingest/upload_manifest.json` 是 Web 草稿清单，只记录上传元数据、相对路径和下一步 CLI 命令；它不包含 `candidate_resume_text`，也不包含 `jd_inputs[].content`。真正的 `ingest/manifest.json` 仍由 Python CLI 生成，后续解析、OCR、vision fallback、评分、排序和报告继续以 Python pipeline 为唯一业务真源。
+
 ## 定位与目标
 
 系统采用固定批处理架构，以“多岗位输入、多版本生成、评估排序、策略输出”为主目标。设计优先保证可解释与可复现，而不是一次性生成质量。

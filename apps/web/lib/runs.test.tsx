@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,7 +8,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import HomePage from "../app/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
+import UploadPage from "../app/upload/page";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
+import { createRunDraft, DraftCreationError } from "./upload-drafts";
 
 
 describe("run viewer data loading", () => {
@@ -100,6 +102,137 @@ describe("run viewer data loading", () => {
     expect(missingReport).toBeNull();
     expect(existingReport?.markdown).toContain("# ShotgunCV v0.3.0 LLM Eval Summary");
   });
+
+  it("creates a draft run with uploaded files and a metadata-only manifest", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const result = await createRunDraft({
+      candidateId: "cand-001",
+      label: "April upload",
+      cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      runId: "april-upload-20260425-083000",
+      status: "draft",
+      uploadManifestPath: "ingest/upload_manifest.json",
+    });
+    expect(result.nextCommand).toContain("shotguncv run");
+    expect(result.nextCommand).toContain("--cv");
+    expect(result.nextCommand).toContain("--jd");
+
+    const manifest = JSON.parse(
+      await readFile(path.join(runsDir, result.runId, "ingest", "upload_manifest.json"), "utf-8"),
+    );
+    expect(manifest).toMatchObject({
+      schemaVersion: "v0.4.0-upload-draft",
+      candidateId: "cand-001",
+      label: "April upload",
+      nextCommand: result.nextCommand,
+    });
+    expect(manifest.files).toEqual([
+      expect.objectContaining({
+        role: "cv",
+        originalName: "resume.md",
+        storedRelativePath: "input_files/cv/resume.md",
+        sizeBytes: 11,
+      }),
+      expect.objectContaining({
+        role: "jd",
+        originalName: "jd.txt",
+        storedRelativePath: "input_files/jd/jd.txt",
+        sizeBytes: 7,
+      }),
+    ]);
+    expect(JSON.stringify(manifest)).not.toContain("resume text");
+    expect(JSON.stringify(manifest)).not.toContain("jd text");
+    expect(await readFile(path.join(runsDir, result.runId, "input_files", "cv", "resume.md"), "utf-8")).toBe(
+      "resume text",
+    );
+    expect(await readFile(path.join(runsDir, result.runId, "input_files", "jd", "jd.txt"), "utf-8")).toBe("jd text");
+  });
+
+  it("rejects invalid draft uploads with stable error codes", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    await expect(
+      createRunDraft({
+        candidateId: "cand-001",
+        cvFiles: [],
+        jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        now: new Date("2026-04-25T08:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "missing_cv" });
+
+    await expect(
+      createRunDraft({
+        candidateId: "cand-001",
+        cvFiles: [new File(["resume"], "../resume.md", { type: "text/markdown" })],
+        jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        now: new Date("2026-04-25T08:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "unsafe_filename" });
+
+    await expect(
+      createRunDraft({
+        candidateId: "cand-001",
+        cvFiles: [new File(["resume"], "resume.exe", { type: "application/octet-stream" })],
+        jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        now: new Date("2026-04-25T08:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_file_type" });
+  });
+
+  it("includes draft runs without marking ingest complete", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      label: "Draft upload",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    const runs = await listRuns();
+    const detail = await loadRunDetail(draft.runId);
+
+    expect(runs[0]).toMatchObject({
+      runId: draft.runId,
+      draftStatus: "draft",
+      completedStages: [],
+      label: "Draft upload",
+    });
+    expect(detail.draft?.nextCommand).toBe(draft.nextCommand);
+    expect(detail.completedStages).not.toContain("ingest");
+  });
+
+  it("rejects duplicate draft run ids", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const input = {
+      candidateId: "cand-001",
+      label: "Duplicate upload",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    };
+
+    await createRunDraft(input);
+
+    await expect(createRunDraft(input)).rejects.toMatchObject({ code: "run_exists" });
+  });
+
+  it("exposes stable draft creation errors", async () => {
+    const error = new DraftCreationError("missing_jd", "At least one JD file is required.");
+
+    expect(error.code).toBe("missing_jd");
+    expect(error.message).toBe("At least one JD file is required.");
+  });
 });
 
 
@@ -130,6 +263,44 @@ describe("run viewer pages", () => {
     expect(html).toContain("运行工作台");
     expect(html).toContain("只读 AI 决策视图");
     expect(html).toContain("阶段完成度");
+  });
+
+  it("renders the draft upload entry point on the run index page", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await HomePage());
+
+    expect(html).toContain("/upload");
+    expect(html).toContain("Create draft run");
+  });
+
+  it("renders draft run detail with the next CLI command", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      label: "Draft upload",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: draft.runId }) }));
+
+    expect(html).toContain("Draft run");
+    expect(html).toContain("shotguncv run");
+    expect(html).toContain("input_files/cv");
+  });
+
+  it("renders the upload page with local-only draft copy", () => {
+    const html = renderToStaticMarkup(UploadPage());
+
+    expect(html).toContain("Create draft run");
+    expect(html).toContain("Draft only");
+    expect(html).toContain("cvFiles");
+    expect(html).toContain("jdFiles");
+    expect(html).toContain("input_files/");
   });
 
   it("renders run detail page with incomplete-stage messaging", async () => {

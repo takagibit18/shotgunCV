@@ -46,6 +46,9 @@ export default async function HomePage() {
             <span className="metric-value">{latestRun ? latestRun.completedStages.length : 0}</span>
             <span className="metric-label">{"\u6700\u65b0\u8fdb\u5ea6"}</span>
           </div>
+          <Link href="/upload" className="primary-link">
+            {"Create draft run"}
+          </Link>
         </div>
       </section>
 
