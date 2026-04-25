@@ -1,9 +1,15 @@
 # CLI 最小闭环示例
 
-以下示例基于仓库内固定样本，从 `ingest` 运行到 `report`：
+以下示例基于仓库内固定样本，推荐使用 `run` 一次完成 `ingest -> analyze -> generate -> evaluate -> plan -> report`：
 
 ```bash
 python -m pip install -e .
+python -m shotguncv_cli.main run --run-dir ./runs/demo --candidate-id cand-001 --cv ./fixtures/candidates/base_resume.md --jd ./fixtures/jds/sample_batch.txt
+```
+
+如果需要调试单个阶段，旧的分阶段命令仍然可用：
+
+```bash
 python -m shotguncv_cli.main ingest --run-dir ./runs/demo --candidate-id cand-001 --candidate-resume ./fixtures/candidates/base_resume.md --jd-file ./fixtures/jds/sample_batch.txt
 python -m shotguncv_cli.main analyze --run-dir ./runs/demo
 python -m shotguncv_cli.main generate --run-dir ./runs/demo
@@ -11,6 +17,8 @@ python -m shotguncv_cli.main evaluate --run-dir ./runs/demo
 python -m shotguncv_cli.main plan --run-dir ./runs/demo
 python -m shotguncv_cli.main report --run-dir ./runs/demo
 ```
+
+`--cv` 与 `--jd` 可重复传入，也可指向文件或目录。支持 `.txt`、`.md`、文本型 `.pdf`，以及带同名 `.txt` / `.md` sidecar 的图片。当前版本不做 OCR；扫描 PDF 或无 sidecar 图片会返回可操作错误。
 
 生成后的关键文件：
 
@@ -24,9 +32,4 @@ python -m shotguncv_cli.main report --run-dir ./runs/demo
 - `runs/demo/plan/application_strategies.json`
 - `runs/demo/report/summary.md`
 
-该示例默认使用 deterministic generator/judge stub，不依赖外部模型或网络。
-
-补充说明：
-
-- 若不传 `--config`，`ingest` 会自动写入 deterministic `run config`
-- 快照路径固定为 `runs/demo/config/run_config.json`
+该示例默认使用 deterministic provider，不依赖外部模型或网络。

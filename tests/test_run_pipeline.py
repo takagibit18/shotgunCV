@@ -63,6 +63,43 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     assert "revise 3 resume items" in report_text
 
 
+def test_ingest_run_accepts_multiple_candidate_and_jd_sources(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "resume.md").write_text("- Built LLM workflow tools", encoding="utf-8")
+    (cv_dir / "extra.txt").write_text("- Added evidence-backed ranking reports", encoding="utf-8")
+    (jd_dir / "a.txt").write_text(
+        "Title: Applied AI Engineer\nCompany: Example\nBody:\n- Build Python automation",
+        encoding="utf-8",
+    )
+    (jd_dir / "b.txt").write_text(
+        "Title: LLM Product Engineer\nCompany: Example\nBody:\n- Own LLM product metrics",
+        encoding="utf-8",
+    )
+
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=None,
+        jd_sources=None,
+        config_path=config_path,
+        candidate_sources=[cv_dir],
+        jd_input_sources=[jd_dir],
+    )
+    analysis = analyze_run(run_dir)
+
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    assert len(manifest["candidate_inputs"]) == 2
+    assert "Added evidence-backed ranking reports" in manifest["candidate_resume_text"]
+    assert len(manifest["jd_inputs"]) == 2
+    assert len(analysis.jd_profiles) == 2
+    assert [jd.jd_id for jd in analysis.jd_profiles] == ["jd-001", "jd-002"]
+
+
 def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     config_path = _write_deterministic_config(tmp_path)

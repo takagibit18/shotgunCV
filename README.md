@@ -20,9 +20,26 @@
 
 ## 最小闭环运行
 
-### 1. Deterministic 回放
+### 1. 一键运行
 
-当前仓库已提供基于 `fixtures/` 的 deterministic v1 最小闭环，可按阶段执行：
+当前仓库已提供基于 `fixtures/` 的 deterministic 最小闭环，推荐用 `run` 一次完成全流程：
+
+```bash
+python -m pip install -e .
+python -m shotguncv_cli.main run --run-dir ./runs/demo --candidate-id cand-001 --cv ./fixtures/candidates/base_resume.md --jd ./fixtures/jds/sample_batch.txt
+```
+
+`--cv` 与 `--jd` 都可以重复传入，也可以指向文件或目录。当前输入模块支持：
+
+- `.txt` / `.md` / `.markdown`
+- 文本型 `.pdf`
+- 图片文件（`.png` / `.jpg` / `.jpeg` / `.webp` 等）+ 同名 `.txt` 或 `.md` sidecar
+
+图片和扫描 PDF 不做 OCR。若图片没有同名文本 sidecar，或 PDF 无法提取文本，系统会给出明确错误提示。
+
+### 2. 分阶段 Deterministic 回放
+
+如果需要调试某个阶段，也可以继续按阶段执行。旧参数仍然兼容：
 
 ```bash
 python -m pip install -e .
@@ -39,18 +56,13 @@ python -m shotguncv_cli.main report --run-dir ./runs/demo
 - 若不传 `--config`，`ingest` 会自动写入 deterministic `run config`
 - 快照路径固定为 `run_dir/config/run_config.json`
 
-### 2. OpenAI 配置运行
+### 3. OpenAI 配置运行
 
 若需要在 `generate/evaluate` 阶段启用 OpenAI 格式模型（含兼容端点），按下面步骤：
 
 ```bash
 cp ./.env.example ./.env
-python -m shotguncv_cli.main ingest --run-dir ./runs/openai-demo --candidate-id cand-001 --candidate-resume ./fixtures/candidates/base_resume.md --jd-file ./fixtures/jds/sample_batch.txt
-python -m shotguncv_cli.main analyze --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main generate --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main evaluate --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main plan --run-dir ./runs/openai-demo
-python -m shotguncv_cli.main report --run-dir ./runs/openai-demo
+python -m shotguncv_cli.main run --run-dir ./runs/openai-demo --candidate-id cand-001 --cv ./fixtures/candidates/base_resume.md --jd ./fixtures/jds/sample_batch.txt
 ```
 
 在 `.env` 中至少填写：
@@ -98,7 +110,7 @@ Web 只消费结构化产物，不发起运行，也不写回 `runs/`。
 ## v1 已定边界
 
 - 仅面向海投工作流。
-- 输入优先支持文本与 URL。
+- 输入优先支持文本、Markdown、文本型 PDF，以及带文本 sidecar 的图片。
 - 候选人画像来源于主简历与补充资料。
 - 生成策略采用岗位簇版本 + 高价值 JD 定制版本。
 - 从第一天内建评估系统。
@@ -108,7 +120,7 @@ Web 只消费结构化产物，不发起运行，也不写回 `runs/`。
 
 - 自动投递行为。
 - 招聘网站账号与页面自动化。
-- 截图/OCR 作为一等输入路径。
+- OCR、视觉模型解析和截图自动识别。
 - 泛化求职助手能力。
 
 ## Conventions

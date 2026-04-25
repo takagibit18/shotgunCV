@@ -9,7 +9,7 @@ description = "Pipeline-first AI Resume Ops system for sea-application workflows
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "ShotgunCV Contributors" }]
-dependencies = []
+dependencies = ["pypdf>=5.0"]
 
 [tool.setuptools]
 package-dir = {"" = "."}

@@ -15,6 +15,7 @@ def test_cli_exposes_v1_command_family() -> None:
         "evaluate",
         "plan",
         "report",
+        "run",
     }
 
 
@@ -25,6 +26,7 @@ def test_cli_run_lists_commands() -> None:
     assert "shotguncv" in output
     assert "ingest" in output
     assert "report" in output
+    assert "run" in output
 
 
 def test_cli_command_descriptions_use_neutral_jd_specific_language() -> None:
