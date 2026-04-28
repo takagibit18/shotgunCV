@@ -59,6 +59,9 @@ class PlanArtifacts:
 
 RANKING_VERSION = "v0.3.0-llm-eval"
 EVALUATE_MAX_WORKERS = 4
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+FIXTURES_ROOT = PROJECT_ROOT / "fixtures"
+UPLOAD_MANIFEST_PATH = Path("ingest") / "upload_manifest.json"
 
 
 @dataclass(slots=True)
@@ -82,6 +85,14 @@ class _EvaluateTaskResult:
     assessment_failure: LLMFailure | None
     status: str
     duration_ms: int
+
+
+@dataclass(slots=True)
+class _UploadInputMetadata:
+    role: str
+    original_name: str
+    relative_path: str
+    size_bytes: int
 
 
 def ingest_run(
@@ -113,6 +124,7 @@ def ingest_run(
     jd_paths = _resolve_jd_sources(jd_sources, jd_input_sources)
     candidate_inputs = collect_input_documents(candidate_paths, options=extraction_options)
     jd_inputs = collect_input_documents(jd_paths, options=extraction_options)
+    upload_metadata = _load_upload_manifest_metadata(run_dir)
     if not candidate_inputs:
         raise ValueError("At least one CV input is required for ingest.")
     if not jd_inputs:
@@ -123,8 +135,14 @@ def ingest_run(
         "candidate_id": candidate_id,
         "candidate_resume_path": primary_resume_path,
         "candidate_resume_text": candidate_resume_text,
-        "candidate_inputs": [_input_document_to_manifest_item(document) for document in candidate_inputs],
-        "jd_inputs": [_input_document_to_jd_input(document) for document in jd_inputs],
+        "candidate_inputs": [
+            _input_document_to_manifest_item(document, role="cv", run_dir=run_dir, upload_metadata=upload_metadata)
+            for document in candidate_inputs
+        ],
+        "jd_inputs": [
+            _input_document_to_jd_input(document, run_dir=run_dir, upload_metadata=upload_metadata)
+            for document in jd_inputs
+        ],
         "input_warnings": [],
     }
     return dump_json(ingest_directory / "manifest.json", manifest)
@@ -439,10 +457,24 @@ def _join_input_text(documents: list[InputDocument]) -> str:
     return "\n\n".join(chunk for chunk in chunks if chunk.strip())
 
 
-def _input_document_to_manifest_item(document: InputDocument) -> dict[str, str]:
+def _input_document_to_manifest_item(
+    document: InputDocument,
+    role: str,
+    run_dir: Path,
+    upload_metadata: dict[str, _UploadInputMetadata],
+) -> dict[str, object]:
+    source_path = Path(document.source_value)
+    upload_item = upload_metadata.get(_normalize_manifest_path(_relative_to_run_dir(source_path, run_dir)))
+    relative_path = upload_item.relative_path if upload_item is not None else _display_relative_path(source_path, run_dir)
+    source_origin = _resolve_source_origin(source_path=source_path, upload_item=upload_item)
     return {
+        "role": upload_item.role if upload_item is not None else role,
+        "source_origin": source_origin,
         "source_type": document.source_type,
         "source_value": document.source_value,
+        "original_name": upload_item.original_name if upload_item is not None else document.original_name or source_path.name,
+        "relative_path": relative_path,
+        "size_bytes": upload_item.size_bytes if upload_item is not None else document.size_bytes,
         "media_type": document.media_type,
         "text": document.text,
         "extraction_status": document.extraction_status,
@@ -451,10 +483,86 @@ def _input_document_to_manifest_item(document: InputDocument) -> dict[str, str]:
     }
 
 
-def _input_document_to_jd_input(document: InputDocument) -> dict[str, str]:
-    payload = _input_document_to_manifest_item(document)
+def _input_document_to_jd_input(
+    document: InputDocument,
+    run_dir: Path,
+    upload_metadata: dict[str, _UploadInputMetadata],
+) -> dict[str, object]:
+    payload = _input_document_to_manifest_item(document, role="jd", run_dir=run_dir, upload_metadata=upload_metadata)
     payload["content"] = document.text
     return payload
+
+
+def _load_upload_manifest_metadata(run_dir: Path) -> dict[str, _UploadInputMetadata]:
+    manifest_path = run_dir / UPLOAD_MANIFEST_PATH
+    if not manifest_path.exists():
+        return {}
+    payload = load_json(manifest_path)
+    if not isinstance(payload, dict):
+        return {}
+    files = payload.get("files")
+    if not isinstance(files, list):
+        return {}
+    metadata: dict[str, _UploadInputMetadata] = {}
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        relative_path = str(item.get("storedRelativePath", "")).replace("\\", "/").strip()
+        if not relative_path:
+            continue
+        metadata[_normalize_manifest_path(relative_path)] = _UploadInputMetadata(
+            role=str(item.get("role", "")),
+            original_name=str(item.get("originalName", "")),
+            relative_path=relative_path,
+            size_bytes=_coerce_int(item.get("sizeBytes")),
+        )
+    return metadata
+
+
+def _relative_to_run_dir(path: Path, run_dir: Path) -> str:
+    try:
+        return path.resolve().relative_to(run_dir.resolve()).as_posix()
+    except ValueError:
+        return str(path).replace("\\", "/")
+
+
+def _display_relative_path(path: Path, run_dir: Path) -> str:
+    if _is_under(path, FIXTURES_ROOT):
+        return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    try:
+        return path.resolve().relative_to(run_dir.resolve()).as_posix()
+    except ValueError:
+        try:
+            return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+        except ValueError:
+            return str(path)
+
+
+def _resolve_source_origin(source_path: Path, upload_item: _UploadInputMetadata | None) -> str:
+    if upload_item is not None:
+        return "upload"
+    if _is_under(source_path, FIXTURES_ROOT):
+        return "fixture"
+    return "cli"
+
+
+def _is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _normalize_manifest_path(value: str) -> str:
+    return value.replace("\\", "/").lstrip("./")
+
+
+def _coerce_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _build_input_extraction_options(

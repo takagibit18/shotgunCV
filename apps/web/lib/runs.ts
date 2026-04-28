@@ -46,6 +46,30 @@ type DisplayVariant = ResumeVariant & {
   variantTypeDisplay: string;
 };
 
+type InputSourceDisplay = {
+  role: "cv" | "jd";
+  sourceOrigin: string;
+  originalName: string;
+  relativePath: string;
+  sizeBytes: number;
+  extractionStatus: string;
+};
+
+type ManifestInputItem = {
+  role?: "cv" | "jd";
+  source_origin?: string;
+  original_name?: string;
+  relative_path?: string;
+  size_bytes?: number;
+  source_value?: string;
+  extraction_status?: string;
+};
+
+type IngestManifest = {
+  candidate_inputs?: ManifestInputItem[];
+  jd_inputs?: ManifestInputItem[];
+};
+
 type RunDetail = {
   runId: string;
   label: string;
@@ -76,6 +100,7 @@ type RunDetail = {
   };
   draft: UploadManifest | null;
   draftStatus: RunDraftStatus;
+  inputSources: InputSourceDisplay[];
 };
 
 type RunReport = {
@@ -140,6 +165,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const config = await readJsonOrThrow<RunConfig>(path.join(runDir, "config", "run_config.json"));
   const completedStages = await getCompletedStages(runDir);
   const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
+  const ingestManifest = await readJsonIfExists<IngestManifest>(path.join(runDir, "ingest", "manifest.json"));
   const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
   const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
   const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
@@ -204,6 +230,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     },
     draft,
     draftStatus: buildDraftStatus(draft, completedStages),
+    inputSources: buildInputSources(ingestManifest, draft),
   };
 }
 
@@ -260,6 +287,32 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 
 export type { RunDetail, RunReport, RunSummary };
+
+
+function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadManifest | null): InputSourceDisplay[] {
+  const manifestInputs = [
+    ...(ingestManifest?.candidate_inputs ?? []),
+    ...(ingestManifest?.jd_inputs ?? []),
+  ];
+  if (manifestInputs.length > 0) {
+    return manifestInputs.map((item) => ({
+      role: item.role ?? "cv",
+      sourceOrigin: item.source_origin ?? "cli",
+      originalName: item.original_name ?? path.basename(item.source_value ?? ""),
+      relativePath: item.relative_path ?? item.source_value ?? "",
+      sizeBytes: item.size_bytes ?? 0,
+      extractionStatus: item.extraction_status ?? "unknown",
+    }));
+  }
+  return (draft?.files ?? []).map((file) => ({
+    role: file.role,
+    sourceOrigin: "upload",
+    originalName: file.originalName,
+    relativePath: file.storedRelativePath,
+    sizeBytes: file.sizeBytes,
+    extractionStatus: "draft",
+  }));
+}
 
 
 function buildVariantTypeDisplay(variantType: string): string {

@@ -128,7 +128,7 @@ describe("run viewer data loading", () => {
       await readFile(path.join(runsDir, result.runId, "ingest", "upload_manifest.json"), "utf-8"),
     );
     expect(manifest).toMatchObject({
-      schemaVersion: "v0.4.0-upload-draft",
+      schemaVersion: "v0.5.1-upload-manifest",
       candidateId: "cand-001",
       label: "April upload",
       nextCommand: result.nextCommand,
@@ -149,6 +149,13 @@ describe("run viewer data loading", () => {
     ]);
     expect(JSON.stringify(manifest)).not.toContain("resume text");
     expect(JSON.stringify(manifest)).not.toContain("jd text");
+    const config = JSON.parse(await readFile(path.join(runsDir, result.runId, "config", "run_config.json"), "utf-8"));
+    expect(config.input_extraction).toMatchObject({
+      ocr_provider: "local_ocr",
+      vision_provider: "openai_vision",
+      vision_model: "",
+      ocr_languages: "eng+chi_sim",
+    });
     expect(await readFile(path.join(runsDir, result.runId, "input_files", "cv", "resume.md"), "utf-8")).toBe(
       "resume text",
     );
@@ -291,6 +298,43 @@ describe("run viewer pages", () => {
     expect(html).toContain("Draft run");
     expect(html).toContain("shotguncv run");
     expect(html).toContain("input_files/cv");
+    expect(html).toContain("输入来源");
+    expect(html).toContain("resume.md");
+    expect(html).toContain("draft");
+  });
+
+  it("renders ingested input source metadata on the run detail page", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const detail = await loadRunDetail("demo-full");
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(detail.inputSources).toEqual([
+      expect.objectContaining({
+        role: "cv",
+        sourceOrigin: "fixture",
+        originalName: "base_resume.md",
+        relativePath: "fixtures/candidates/base_resume.md",
+        sizeBytes: 1234,
+        extractionStatus: "extracted",
+      }),
+      expect.objectContaining({
+        role: "jd",
+        sourceOrigin: "fixture",
+        originalName: "sample_batch.txt",
+        relativePath: "fixtures/jds/sample_batch.txt",
+        sizeBytes: 2345,
+        extractionStatus: "extracted",
+      }),
+    ]);
+    expect(html).toContain("输入来源");
+    expect(html).toContain("fixture");
+    expect(html).toContain("base_resume.md");
+    expect(html).toContain("fixtures/candidates/base_resume.md");
+    expect(html).toContain("1.2 KB");
+    expect(html).toContain("extracted");
   });
 
   it("renders the upload page with local-only draft copy", () => {
@@ -431,7 +475,39 @@ async function createIncompleteRun(runsDir: string, runId: string): Promise<void
   });
   await writeJson(path.join(runDir, "ingest", "manifest.json"), {
     candidate_id: "cand-001",
-    jd_inputs: [{ source_type: "file", source_value: "fixtures/jds/sample_batch.txt" }],
+    candidate_inputs: [
+      {
+        role: "cv",
+        source_origin: "fixture",
+        source_type: "file",
+        source_value: "fixtures/candidates/base_resume.md",
+        original_name: "base_resume.md",
+        relative_path: "fixtures/candidates/base_resume.md",
+        size_bytes: 1234,
+        media_type: "text/markdown",
+        text: "resume text",
+        extraction_status: "extracted",
+        extraction_provider: "local_text",
+        extraction_error: "",
+      },
+    ],
+    jd_inputs: [
+      {
+        role: "jd",
+        source_origin: "fixture",
+        source_type: "file",
+        source_value: "fixtures/jds/sample_batch.txt",
+        original_name: "sample_batch.txt",
+        relative_path: "fixtures/jds/sample_batch.txt",
+        size_bytes: 2345,
+        media_type: "text/plain",
+        text: "jd text",
+        content: "jd text",
+        extraction_status: "extracted",
+        extraction_provider: "local_text",
+        extraction_error: "",
+      },
+    ],
   });
   await writeJson(path.join(runDir, "analyze", "candidate_profile.json"), {
     candidate_id: "cand-001",

@@ -81,7 +81,7 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
     ];
     const nextCommand = buildNextCommand(runId, candidateId);
     const manifest: UploadManifest = {
-      schemaVersion: "v0.4.0-upload-draft",
+      schemaVersion: "v0.5.1-upload-manifest",
       candidateId,
       label,
       createdAt: uploadedAt,
@@ -212,6 +212,12 @@ async function writeDefaultRunConfig(runDir: string, label: string): Promise<voi
     judge: { provider: "openai", model: "" },
     planner: { provider: "openai", model: "" },
     openai: { base_url: null, api_key_env: "OPENAI_API_KEY", env_file: ".env" },
+    input_extraction: {
+      ocr_provider: "local_ocr",
+      vision_provider: "openai_vision",
+      vision_model: "",
+      ocr_languages: "eng+chi_sim",
+    },
     run_metadata: { label },
   };
   const handle = await open(path.join(runDir, "config", "run_config.json"), "wx");

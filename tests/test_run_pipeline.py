@@ -55,6 +55,18 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     assert strategy.strategies[0].decision_drivers
     assert strategy.strategies[0].recommended_actions
 
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["candidate_inputs"][0]["role"] == "cv"
+    assert manifest["candidate_inputs"][0]["source_origin"] == "fixture"
+    assert manifest["candidate_inputs"][0]["original_name"] == "base_resume.md"
+    assert manifest["candidate_inputs"][0]["relative_path"].endswith("fixtures/candidates/base_resume.md")
+    assert manifest["candidate_inputs"][0]["size_bytes"] > 0
+    assert manifest["jd_inputs"][0]["role"] == "jd"
+    assert manifest["jd_inputs"][0]["source_origin"] == "fixture"
+    assert manifest["jd_inputs"][0]["original_name"] == "sample_batch.txt"
+    assert manifest["jd_inputs"][0]["relative_path"].endswith("fixtures/jds/sample_batch.txt")
+    assert manifest["jd_inputs"][0]["content"] == manifest["jd_inputs"][0]["text"]
+
     report_text = report_path.read_text(encoding="utf-8")
     assert "LLM Product Engineer" in report_text
     assert "Final score" in report_text
@@ -94,10 +106,91 @@ def test_ingest_run_accepts_multiple_candidate_and_jd_sources(tmp_path: Path) ->
 
     manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest["candidate_inputs"]) == 2
+    assert [item["role"] for item in manifest["candidate_inputs"]] == ["cv", "cv"]
+    assert [item["source_origin"] for item in manifest["candidate_inputs"]] == ["cli", "cli"]
+    assert [item["original_name"] for item in manifest["candidate_inputs"]] == ["extra.txt", "resume.md"]
+    assert [Path(item["relative_path"]).name for item in manifest["candidate_inputs"]] == ["extra.txt", "resume.md"]
+    assert all(item["size_bytes"] > 0 for item in manifest["candidate_inputs"])
     assert "Added evidence-backed ranking reports" in manifest["candidate_resume_text"]
     assert len(manifest["jd_inputs"]) == 2
+    assert [item["role"] for item in manifest["jd_inputs"]] == ["jd", "jd"]
+    assert [item["source_origin"] for item in manifest["jd_inputs"]] == ["cli", "cli"]
+    assert [item["original_name"] for item in manifest["jd_inputs"]] == ["a.txt", "b.txt"]
+    assert all(item["content"] == item["text"] for item in manifest["jd_inputs"])
     assert len(analysis.jd_profiles) == 2
     assert [jd.jd_id for jd in analysis.jd_profiles] == ["jd-001", "jd-002"]
+
+
+def test_ingest_run_matches_web_upload_manifest_metadata(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_dir = run_dir / "input_files" / "cv"
+    jd_dir = run_dir / "input_files" / "jd"
+    cv_dir.mkdir(parents=True)
+    jd_dir.mkdir(parents=True)
+    (cv_dir / "resume.md").write_text("- Built LLM workflow tools", encoding="utf-8")
+    (jd_dir / "jd.txt").write_text(
+        "Title: Applied AI Engineer\nCompany: Example\nBody:\n- Build Python automation",
+        encoding="utf-8",
+    )
+    ingest_dir = run_dir / "ingest"
+    ingest_dir.mkdir()
+    (ingest_dir / "upload_manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "v0.5.1-upload-manifest",
+                "candidateId": "cand-001",
+                "label": "Upload smoke",
+                "createdAt": "2026-04-25T08:30:00.000Z",
+                "files": [
+                    {
+                        "role": "cv",
+                        "originalName": "Original Resume.md",
+                        "storedRelativePath": "input_files/cv/resume.md",
+                        "sizeBytes": 26,
+                        "contentType": "text/markdown",
+                        "uploadedAt": "2026-04-25T08:30:00.000Z",
+                    },
+                    {
+                        "role": "jd",
+                        "originalName": "Original JD.txt",
+                        "storedRelativePath": "input_files/jd/jd.txt",
+                        "sizeBytes": 78,
+                        "contentType": "text/plain",
+                        "uploadedAt": "2026-04-25T08:30:00.000Z",
+                    },
+                ],
+                "nextCommand": "shotguncv run --run-dir ./runs/upload-smoke --candidate-id cand-001",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=None,
+        jd_sources=None,
+        config_path=config_path,
+        candidate_sources=[cv_dir],
+        jd_input_sources=[jd_dir],
+    )
+
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    candidate_item = manifest["candidate_inputs"][0]
+    jd_item = manifest["jd_inputs"][0]
+    assert candidate_item["role"] == "cv"
+    assert candidate_item["source_origin"] == "upload"
+    assert candidate_item["original_name"] == "Original Resume.md"
+    assert candidate_item["relative_path"] == "input_files/cv/resume.md"
+    assert candidate_item["size_bytes"] == 26
+    assert jd_item["role"] == "jd"
+    assert jd_item["source_origin"] == "upload"
+    assert jd_item["original_name"] == "Original JD.txt"
+    assert jd_item["relative_path"] == "input_files/jd/jd.txt"
+    assert jd_item["size_bytes"] == 78
+    assert jd_item["content"] == jd_item["text"]
 
 
 def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:

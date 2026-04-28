@@ -1,10 +1,12 @@
 # ShotgunCV 系统设计
 
-## v0.4.0 Web 上传草稿边界
+## v0.5.1 Web 上传与输入一致性边界
 
 Web 从只读 viewer 扩展为本地单用户上传入口，但仍不成为第二套业务执行入口。`/upload` 只负责把 CV/JD 原始文件保存到 `runs/<runId>/input_files/`，并写入 `ingest/upload_manifest.json` 与 `config/run_config.json`。
 
-`ingest/upload_manifest.json` 是 Web 草稿清单，只记录上传元数据、相对路径和下一步 CLI 命令；它不包含 `candidate_resume_text`，也不包含 `jd_inputs[].content`。真正的 `ingest/manifest.json` 仍由 Python CLI 生成，后续解析、OCR、vision fallback、评分、排序和报告继续以 Python pipeline 为唯一业务真源。
+`ingest/upload_manifest.json` 是 Web 草稿清单，当前 schema 为 `v0.5.1-upload-manifest`，只记录上传元数据、相对路径和下一步 CLI 命令；它不包含 `candidate_resume_text`，也不包含 `jd_inputs[].content`。真正的 `ingest/manifest.json` 仍由 Python CLI 生成，后续解析、OCR、vision fallback、评分、排序和报告继续以 Python pipeline 为唯一业务真源。
+
+Python ingest 会读取 Web 草稿清单并把上传元数据合并进统一业务 manifest。`candidate_inputs[]` 与 `jd_inputs[]` 共享 `role`、`source_origin`、`original_name`、`relative_path`、`size_bytes`、`source_type`、`source_value`、`media_type`、`text` 与抽取状态字段；`jd_inputs[]` 额外保留 `content` 兼容 analyzer。`source_origin` 固定用于区分 `upload`、`cli` 与 `fixture`，run 详情页只读取这些结构化产物展示输入来源，不反向解析原始文件。
 
 ## 定位与目标
 
