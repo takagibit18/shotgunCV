@@ -148,6 +148,12 @@ export type RunConfig = {
   judge: ProviderConfig;
   planner: ProviderConfig;
   openai: OpenAIConfig;
+  input_extraction?: {
+    ocr_provider: string;
+    vision_provider: string;
+    vision_model: string;
+    ocr_languages: string;
+  };
   run_metadata: RunMetadata;
 };
 
@@ -171,7 +177,7 @@ export type UploadedInputFile = {
 };
 
 export type UploadManifest = {
-  schemaVersion: "v0.4.0-upload-draft";
+  schemaVersion: "v0.5.1-upload-manifest";
   candidateId: string;
   label: string;
   createdAt: string;

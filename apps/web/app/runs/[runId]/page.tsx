@@ -98,6 +98,34 @@ export default async function RunPage({ params }: PageProps) {
       ) : null}
 
       <section className="section">
+        <SectionHeading eyebrow="Input sources" title="输入来源" />
+        {detail.inputSources.length > 0 ? (
+          <div className="input-source-table" role="table" aria-label="输入来源清单">
+            <div className="input-source-row header" role="row">
+              <span role="columnheader">{"角色"}</span>
+              <span role="columnheader">{"来源"}</span>
+              <span role="columnheader">{"原始文件名"}</span>
+              <span role="columnheader">{"相对路径"}</span>
+              <span role="columnheader">{"大小"}</span>
+              <span role="columnheader">{"抽取状态"}</span>
+            </div>
+            {detail.inputSources.map((source) => (
+              <div key={`${source.role}-${source.relativePath}-${source.originalName}`} className="input-source-row" role="row">
+                <span className="status-chip" role="cell">{source.role}</span>
+                <span role="cell">{source.sourceOrigin}</span>
+                <span role="cell">{source.originalName}</span>
+                <span className="mono" role="cell">{source.relativePath}</span>
+                <span role="cell">{formatBytes(source.sizeBytes)}</span>
+                <span role="cell">{source.extractionStatus}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">{"暂无输入来源"}</div>
+        )}
+      </section>
+
+      <section className="section">
         <SectionHeading eyebrow="阶段分析" title="分析阶段" />
         {detail.analyze.isComplete && detail.analyze.candidate ? (
           <div className="detail-grid">
@@ -357,4 +385,15 @@ function toPercent(value: number): number {
 
 function buildVariantAnchorId(variantId: string): string {
   return `variant-${variantId}`;
+}
+
+
+function formatBytes(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return "--";
+  }
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  return `${(sizeBytes / 1024).toFixed(1)} KB`;
 }

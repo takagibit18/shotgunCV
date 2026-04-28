@@ -250,6 +250,36 @@ main,
   border-top: 1px solid var(--border);
 }
 
+.input-source-table {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.input-source-row {
+  display: grid;
+  grid-template-columns: 72px 96px minmax(150px, 1fr) minmax(220px, 1.4fr) 84px 110px;
+  gap: 12px;
+  align-items: center;
+  min-width: 860px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.input-source-row:last-child {
+  border-bottom: 0;
+}
+
+.input-source-row.header {
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .run-row {
   display: grid;
   grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1fr) minmax(160px, 0.6fr);

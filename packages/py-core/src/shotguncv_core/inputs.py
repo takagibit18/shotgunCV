@@ -38,6 +38,8 @@ class InputDocument:
     extraction_status: str
     extraction_provider: str = ""
     extraction_error: str = ""
+    original_name: str = ""
+    size_bytes: int = 0
 
 
 @dataclass(slots=True)
@@ -92,6 +94,8 @@ def _extract_document(path: Path, options: InputExtractionOptions) -> InputDocum
             text=path.read_text(encoding="utf-8"),
             extraction_status="extracted",
             extraction_provider="local_text",
+            original_name=path.name,
+            size_bytes=path.stat().st_size,
         )
     if suffix in PDF_EXTENSIONS:
         text = _extract_pdf_text(path)
@@ -107,6 +111,8 @@ def _extract_document(path: Path, options: InputExtractionOptions) -> InputDocum
             text=text,
             extraction_status="extracted",
             extraction_provider="local_pdf",
+            original_name=path.name,
+            size_bytes=path.stat().st_size,
         )
     if suffix in IMAGE_EXTENSIONS:
         return _extract_image_document(path, suffix, options)
@@ -127,6 +133,8 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
                     text=ocr_text,
                     extraction_status="ocr",
                     extraction_provider=options.ocr_provider,
+                    original_name=path.name,
+                    size_bytes=path.stat().st_size,
                 )
             ocr_error = "OCR returned empty text."
         else:
@@ -146,6 +154,8 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
                     extraction_status="vision",
                     extraction_provider=options.vision_provider,
                     extraction_error=f"ocr: {ocr_error}",
+                    original_name=path.name,
+                    size_bytes=path.stat().st_size,
                 )
             vision_error = "Vision provider returned empty text."
         except Exception as exc:
@@ -162,6 +172,8 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
             extraction_status="sidecar",
             extraction_provider="sidecar",
             extraction_error=f"ocr: {ocr_error}; vision: {vision_error}",
+            original_name=path.name,
+            size_bytes=path.stat().st_size,
         )
 
     raise InputExtractionError(_format_image_extraction_error(path, ocr_error, vision_error))
