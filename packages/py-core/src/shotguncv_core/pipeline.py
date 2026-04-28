@@ -129,21 +129,27 @@ def ingest_run(
         raise ValueError("At least one CV input is required for ingest.")
     if not jd_inputs:
         raise ValueError("At least one JD input is required for ingest.")
+    if not _has_extractable_text(candidate_inputs):
+        raise ValueError("At least one CV input must contain extractable text.")
+    if not _has_extractable_text(jd_inputs):
+        raise ValueError("At least one JD input must contain extractable text.")
     candidate_resume_text = _join_input_text(candidate_inputs)
     primary_resume_path = candidate_inputs[0].source_value
+    candidate_manifest_items = [
+        _input_document_to_manifest_item(document, role="cv", run_dir=run_dir, upload_metadata=upload_metadata)
+        for document in candidate_inputs
+    ]
+    jd_manifest_items = [
+        _input_document_to_jd_input(document, run_dir=run_dir, upload_metadata=upload_metadata)
+        for document in jd_inputs
+    ]
     manifest = {
         "candidate_id": candidate_id,
         "candidate_resume_path": primary_resume_path,
         "candidate_resume_text": candidate_resume_text,
-        "candidate_inputs": [
-            _input_document_to_manifest_item(document, role="cv", run_dir=run_dir, upload_metadata=upload_metadata)
-            for document in candidate_inputs
-        ],
-        "jd_inputs": [
-            _input_document_to_jd_input(document, run_dir=run_dir, upload_metadata=upload_metadata)
-            for document in jd_inputs
-        ],
-        "input_warnings": [],
+        "candidate_inputs": candidate_manifest_items,
+        "jd_inputs": jd_manifest_items,
+        "input_warnings": _build_input_warnings([*candidate_manifest_items, *jd_manifest_items]),
     }
     return dump_json(ingest_directory / "manifest.json", manifest)
 
@@ -453,8 +459,30 @@ def _resolve_jd_sources(
 def _join_input_text(documents: list[InputDocument]) -> str:
     chunks = []
     for document in documents:
-        chunks.append(f"Source: {document.source_value}\n{document.text.strip()}")
+        text = document.text.strip()
+        if text:
+            chunks.append(f"Source: {document.source_value}\n{text}")
     return "\n\n".join(chunk for chunk in chunks if chunk.strip())
+
+
+def _has_extractable_text(documents: list[InputDocument]) -> bool:
+    return any(document.text.strip() for document in documents)
+
+
+def _build_input_warnings(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    warnings: list[dict[str, object]] = []
+    for item in items:
+        if item.get("extraction_status") != "unparseable":
+            continue
+        warnings.append(
+            {
+                "role": item.get("role", ""),
+                "relative_path": item.get("relative_path", ""),
+                "original_name": item.get("original_name", ""),
+                "extraction_error": item.get("extraction_error", ""),
+            }
+        )
+    return warnings
 
 
 def _input_document_to_manifest_item(

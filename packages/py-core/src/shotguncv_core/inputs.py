@@ -66,9 +66,14 @@ def collect_input_documents(
 
 def _collect_from_source(source: Path, options: InputExtractionOptions) -> list[InputDocument]:
     if source.is_dir():
-        return [_extract_document(path, options) for path in _iter_supported_files(source)]
+        paths = _iter_supported_files(source)
+        if not paths:
+            raise InputExtractionError(f"Input directory `{source}` does not contain supported input files.")
+        return [_safe_extract_document(path, options) for path in paths]
     if source.is_file():
-        return [_extract_document(source, options)]
+        if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            raise InputExtractionError(f"Unsupported input type `{source.suffix}` for `{source}`.")
+        return [_safe_extract_document(source, options)]
     raise InputExtractionError(f"Input source `{source}` does not exist.")
 
 
@@ -117,6 +122,40 @@ def _extract_document(path: Path, options: InputExtractionOptions) -> InputDocum
     if suffix in IMAGE_EXTENSIONS:
         return _extract_image_document(path, suffix, options)
     raise InputExtractionError(f"Unsupported input type `{path.suffix}` for `{path}`.")
+
+
+def _safe_extract_document(path: Path, options: InputExtractionOptions) -> InputDocument:
+    try:
+        return _extract_document(path, options)
+    except InputExtractionError as exc:
+        return _unparseable_document(path, str(exc))
+
+
+def _unparseable_document(path: Path, error: str) -> InputDocument:
+    suffix = path.suffix.lower()
+    if suffix in TEXT_EXTENSIONS:
+        media_type = _text_media_type(suffix)
+        provider = "local_text"
+    elif suffix in PDF_EXTENSIONS:
+        media_type = "application/pdf"
+        provider = "local_pdf"
+    elif suffix in IMAGE_EXTENSIONS:
+        media_type = _image_media_type(suffix)
+        provider = "local_ocr"
+    else:
+        media_type = "application/octet-stream"
+        provider = ""
+    return InputDocument(
+        source_type="file",
+        source_value=str(path),
+        media_type=media_type,
+        text="",
+        extraction_status="unparseable",
+        extraction_provider=provider,
+        extraction_error=error,
+        original_name=path.name,
+        size_bytes=path.stat().st_size,
+    )
 
 
 def _extract_image_document(path: Path, suffix: str, options: InputExtractionOptions) -> InputDocument:

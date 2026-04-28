@@ -51,12 +51,30 @@ def test_collects_image_with_text_sidecar(tmp_path: Path) -> None:
     assert documents[0].text.startswith("Title: AI PM")
 
 
-def test_image_without_sidecar_raises_actionable_error(tmp_path: Path) -> None:
+def test_image_without_sidecar_records_unparseable_document(tmp_path: Path) -> None:
     image_path = tmp_path / "resume.jpg"
     image_path.write_bytes(b"not a real image")
 
-    with pytest.raises(InputExtractionError, match="Tesseract"):
-        collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].extraction_status == "unparseable"
+    assert documents[0].text == ""
+    assert "Tesseract" in documents[0].extraction_error
+
+
+def test_directory_collection_keeps_unparseable_image_without_blocking_valid_inputs(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "resume.md").write_text("- Built workflow tools", encoding="utf-8")
+    (input_dir / "scan.jpg").write_bytes(b"not a real image")
+
+    documents = collect_input_documents([input_dir], options=InputExtractionOptions(vision_enabled=False))
+
+    assert [Path(document.source_value).name for document in documents] == ["resume.md", "scan.jpg"]
+    assert documents[0].extraction_status == "extracted"
+    assert documents[1].extraction_status == "unparseable"
+    assert documents[1].text == ""
+    assert documents[1].extraction_error
 
 
 def test_directory_collection_filters_supported_inputs(tmp_path: Path) -> None:
@@ -127,10 +145,10 @@ def test_image_failure_reports_ocr_and_vision_guidance(monkeypatch: pytest.Monke
         lambda path, options, ocr_error: (_ for _ in ()).throw(RuntimeError("missing OPENAI_API_KEY")),
     )
 
-    with pytest.raises(InputExtractionError) as excinfo:
-        collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=True))
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=True))
 
-    message = str(excinfo.value)
+    message = documents[0].extraction_error
+    assert documents[0].extraction_status == "unparseable"
     assert str(image_path) in message
     assert "tesseract missing" in message
     assert "missing OPENAI_API_KEY" in message
@@ -147,5 +165,7 @@ def test_no_vision_fallback_does_not_call_vision(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_vision", _unexpected_vision_call)
 
-    with pytest.raises(InputExtractionError, match="Vision fallback is disabled"):
-        collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].extraction_status == "unparseable"
+    assert "Vision fallback is disabled" in documents[0].extraction_error

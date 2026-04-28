@@ -193,6 +193,102 @@ def test_ingest_run_matches_web_upload_manifest_metadata(tmp_path: Path) -> None
     assert jd_item["content"] == jd_item["text"]
 
 
+def test_ingest_run_records_unparseable_inputs_as_warnings(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "resume.md").write_text("- Built LLM workflow tools", encoding="utf-8")
+    (cv_dir / "scan.jpg").write_bytes(b"not a real image")
+    (jd_dir / "jd.txt").write_text(
+        "Title: Applied AI Engineer\nCompany: Example\nBody:\n- Build Python automation",
+        encoding="utf-8",
+    )
+
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=None,
+        jd_sources=None,
+        config_path=config_path,
+        candidate_sources=[cv_dir],
+        jd_input_sources=[jd_dir],
+        vision_fallback_enabled=False,
+    )
+
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    unparseable = manifest["candidate_inputs"][1]
+    assert unparseable["original_name"] == "scan.jpg"
+    assert unparseable["text"] == ""
+    assert unparseable["extraction_status"] == "unparseable"
+    assert unparseable["extraction_error"]
+    assert manifest["candidate_resume_text"].strip().endswith("- Built LLM workflow tools")
+    assert manifest["input_warnings"] == [
+        {
+            "role": "cv",
+            "relative_path": unparseable["relative_path"],
+            "original_name": "scan.jpg",
+            "extraction_error": unparseable["extraction_error"],
+        }
+    ]
+
+
+def test_ingest_run_fails_when_all_cv_inputs_are_unparseable(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "scan.jpg").write_bytes(b"not a real image")
+    (jd_dir / "jd.txt").write_text("Title: AI Engineer\nBody:\n- Build automation", encoding="utf-8")
+
+    try:
+        ingest_run(
+            run_dir=run_dir,
+            candidate_id="cand-001",
+            candidate_resume_path=None,
+            jd_sources=None,
+            config_path=config_path,
+            candidate_sources=[cv_dir],
+            jd_input_sources=[jd_dir],
+            vision_fallback_enabled=False,
+        )
+    except ValueError as exc:
+        assert "At least one CV input must contain extractable text." in str(exc)
+    else:
+        raise AssertionError("ingest_run should fail when all CV inputs are unparseable")
+
+
+def test_ingest_run_fails_when_all_jd_inputs_are_unparseable(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "resume.md").write_text("- Built LLM workflow tools", encoding="utf-8")
+    (jd_dir / "scan.jpg").write_bytes(b"not a real image")
+
+    try:
+        ingest_run(
+            run_dir=run_dir,
+            candidate_id="cand-001",
+            candidate_resume_path=None,
+            jd_sources=None,
+            config_path=config_path,
+            candidate_sources=[cv_dir],
+            jd_input_sources=[jd_dir],
+            vision_fallback_enabled=False,
+        )
+    except ValueError as exc:
+        assert "At least one JD input must contain extractable text." in str(exc)
+    else:
+        raise AssertionError("ingest_run should fail when all JD inputs are unparseable")
+
+
 def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     config_path = _write_deterministic_config(tmp_path)

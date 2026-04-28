@@ -143,6 +143,65 @@ def test_cli_ingest_accepts_cv_and_jd_directories_from_web_draft(tmp_path: Path)
     assert all(item["source_value"].startswith(str(jd_dir)) for item in manifest["jd_inputs"])
 
 
+def test_cli_ingest_keeps_unparseable_file_warnings_when_other_inputs_are_valid(tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "resume.md").write_text("- Built workflow tools", encoding="utf-8")
+    (cv_dir / "scan.jpg").write_bytes(b"not a real image")
+    (jd_dir / "jd.txt").write_text("Title: AI Engineer\nBody:\n- Build automation", encoding="utf-8")
+
+    exit_code, output = run(
+        [
+            "ingest",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(cv_dir),
+            "--jd",
+            str(jd_dir),
+            "--no-vision-fallback",
+        ]
+    )
+
+    assert exit_code == 0, output
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["candidate_inputs"][1]["extraction_status"] == "unparseable"
+    assert manifest["input_warnings"][0]["original_name"] == "scan.jpg"
+
+
+def test_cli_ingest_fails_when_role_has_no_extractable_text(tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "scan.jpg").write_bytes(b"not a real image")
+    (jd_dir / "jd.txt").write_text("Title: AI Engineer\nBody:\n- Build automation", encoding="utf-8")
+
+    exit_code, output = run(
+        [
+            "ingest",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(cv_dir),
+            "--jd",
+            str(jd_dir),
+            "--no-vision-fallback",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "At least one CV input must contain extractable text." in output
+
+
 def test_cli_run_command_executes_full_pipeline_from_multiform_inputs(tmp_path: Path) -> None:
     run_dir = tmp_path / "cli-run"
     resume_path = ROOT / "fixtures" / "candidates" / "base_resume.md"
