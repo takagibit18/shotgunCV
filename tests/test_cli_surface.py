@@ -29,6 +29,14 @@ def test_cli_run_lists_commands() -> None:
     assert "report" in output
 
 
+def test_cli_run_help_lists_image_extraction_options() -> None:
+    exit_code, output = run(["run", "--help"])
+
+    assert exit_code == 0
+    assert "--no-vision-fallback" in output
+    assert "--ocr-languages" in output
+
+
 def test_cli_command_descriptions_use_neutral_jd_specific_language() -> None:
     parser = build_parser()
     subcommands = parser._subparsers._group_actions[0].choices

@@ -172,11 +172,13 @@ class DeterministicAnalyzeProvider:
         )
         jd_profiles: list[JDProfile] = []
         evidence_map: dict[str, object] = {"candidate": {}, "jds": {}, "risks": []}
+        jd_counter = 0
         for jd_input in jd_inputs:
             source_type = jd_input["source_type"]
             source_value = jd_input["source_value"]
             blocks = [block.strip() for block in jd_input["content"].split("=== JD ===") if block.strip()]
-            for index, block in enumerate(blocks, start=1):
+            for block in blocks:
+                jd_counter += 1
                 title = _extract_header(block, "Title")
                 company = _extract_header(block, "Company")
                 body_lines = _extract_body_lines(block)
@@ -185,7 +187,7 @@ class DeterministicAnalyzeProvider:
                 must_have = body_lines[:2]
                 nice_to_have = bonuses[:2]
                 profile = JDProfile(
-                    jd_id=f"jd-{index:03d}",
+                    jd_id=f"jd-{jd_counter:03d}",
                     title=title,
                     company=company,
                     cluster=_classify_cluster(title, body_lines),

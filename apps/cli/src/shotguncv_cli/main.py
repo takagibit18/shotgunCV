@@ -20,7 +20,7 @@ from shotguncv_core.pipeline import (
 
 
 COMMAND_DESCRIPTIONS = {
-    "run": "Run ingest through report from candidate and JD inputs.",
+    "run": "Run the full pipeline from CV and JD inputs to report output.",
     "ingest": "Load candidate material and job descriptions into a run workspace.",
     "analyze": "Parse JDs and build candidate and JD profiles.",
     "generate": "Create JD-specific resume variants.",
@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
                 action="append",
                 type=Path,
                 default=[],
-                help="CV file or directory. May be passed multiple times.",
+                help="CV file or directory. Supports text, markdown, text PDFs, and images with text sidecars.",
             )
             subparser.add_argument(
                 "--jd",
@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
                 action="append",
                 type=Path,
                 default=[],
-                help="JD file or directory. May be passed multiple times.",
+                help="JD file or directory. Supports text, markdown, text PDFs, and images with text sidecars.",
             )
             subparser.add_argument("--candidate-resume", type=Path, required=False, help="Legacy path to the base resume markdown.")
             subparser.add_argument(
@@ -73,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
                 type=Path,
                 required=False,
                 help="Optional run config JSON to snapshot into the run workspace.",
+            )
+            subparser.add_argument(
+                "--no-vision-fallback",
+                action="store_true",
+                help="Disable OpenAI-compatible vision fallback for image extraction.",
+            )
+            subparser.add_argument(
+                "--ocr-languages",
+                required=False,
+                help="Override OCR languages, for example `eng` or `eng+chi_sim`.",
             )
 
     return parser
@@ -109,7 +119,7 @@ def main() -> int:
 
 def _execute_command(command_name: str, args: argparse.Namespace) -> None:
     handlers: dict[str, Callable[[argparse.Namespace], str]] = {
-        "run": _run_all,
+        "run": _run_full_pipeline,
         "ingest": _run_ingest,
         "analyze": _run_analyze,
         "generate": _run_generate,
@@ -121,24 +131,29 @@ def _execute_command(command_name: str, args: argparse.Namespace) -> None:
 
 
 def _run_ingest(args: argparse.Namespace) -> str:
+    candidate_resume = getattr(args, "candidate_resume", None)
     cv_sources = getattr(args, "cv_sources", [])
-    jd_sources = [*getattr(args, "jd_input_sources", []), *getattr(args, "jd_files", [])]
-    if args.candidate_resume is None and not cv_sources:
+    jd_files = getattr(args, "jd_files", [])
+    jd_input_sources = getattr(args, "jd_input_sources", [])
+    if candidate_resume is None and not cv_sources:
         raise ValueError("At least one --cv or --candidate-resume input is required for ingest.")
-    if not jd_sources:
+    if not jd_files and not jd_input_sources:
         raise ValueError("At least one --jd or --jd-file input is required for ingest.")
     manifest_path = ingest_run(
         run_dir=args.run_dir,
         candidate_id=args.candidate_id,
-        candidate_resume_path=args.candidate_resume,
-        candidate_sources=cv_sources,
-        jd_sources=jd_sources,
+        candidate_resume_path=candidate_resume,
+        jd_sources=jd_files,
         config_path=args.config,
+        candidate_sources=cv_sources,
+        jd_input_sources=jd_input_sources,
+        vision_fallback_enabled=False if getattr(args, "no_vision_fallback", False) else None,
+        ocr_languages=getattr(args, "ocr_languages", None),
     )
     return f"Ingest completed: `{manifest_path}`"
 
 
-def _run_all(args: argparse.Namespace) -> str:
+def _run_full_pipeline(args: argparse.Namespace) -> str:
     _run_ingest(args)
     analyze_run(args.run_dir)
     generate_run(args.run_dir)
