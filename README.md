@@ -2,8 +2,6 @@
 
 `ShotgunCV` 是一个面向海投场景的 `Pipeline-first` AI Resume Ops 系统，围绕批量岗位输入执行解析、生成、评分、排序与投递策略输出。
 
-当前版本：`v0.3.1`，重点补全多格式输入与图片解析闭环。
-
 主流程：
 
 `multiple JD inputs -> analysis -> resume variants -> scoring -> ranking -> strategy`
@@ -11,12 +9,12 @@
 ## 仓库重点
 
 - `docs/`：产品、系统、评估与仓库决策文档。
-- `apps/cli/`：v1 首要交互入口。
-- `apps/web/`：只读 Run Viewer。
+- `apps/cli/`：主交互入口。
+- `apps/web/`：Run Viewer + 草稿上传入口。
 - `packages/py-core/`：领域模型与流水线原语。
 - `packages/py-evals/`：规则评估与 LLM 判分能力。
 - `packages/py-agents/`：编排与提示词资产。
-- `packages/ts-shared/`：Web 只读解析所用的 TypeScript 共享契约。
+- `packages/ts-shared/`：Web 解析与展示所用的 TypeScript 共享契约。
 
 ## 最小闭环运行
 
@@ -101,9 +99,9 @@ SHOTGUNCV_OCR_LANGUAGES=eng+chi_sim
 - `plan/application_strategies.json`
 - `report/summary.md`
 
-## Web Viewer
+## Web Viewer 与草稿上传
 
-仓库现已提供只读 Web Viewer，用于浏览本地 `runs/` 目录中的产物：
+仓库现已提供 Web Viewer 与草稿上传页面，用于浏览本地 `runs/` 目录中的产物并创建草稿：
 
 ```bash
 cd ./apps/web
@@ -112,18 +110,20 @@ set SHOTGUNCV_RUNS_DIR=../../runs
 npm run dev
 ```
 
-Web 只消费结构化产物，不发起运行，也不写回 `runs/`。
+访问 `http://localhost:3000/upload` 上传后，会写入 `runs/<runId>/input_files/`，并生成 `ingest/upload_manifest.json` 与 `config/run_config.json`。
 
-## v1 已定边界
+Web 不执行 pipeline，完整运行仍由 CLI 触发。
+
+## 产品边界（当前阶段）
 
 - 仅面向海投工作流。
-- 输入优先支持文本、Markdown、文本型 PDF，以及带文本 sidecar 的图片。
+- 输入支持文本、Markdown、文本型 PDF，以及图片（OCR/vision 兜底由 CLI 完成）。
 - 候选人画像来源于主简历与补充资料。
 - 生成策略采用岗位簇版本 + 高价值 JD 定制版本。
 - 从第一天内建评估系统。
-- Python pipeline 仍是唯一业务真源，Web 仅做只读查看。
+- Python pipeline 仍是唯一业务真源，Web 只做草稿创建与查看，不执行 pipeline。
 
-## v1 明确不做
+## 当前阶段不做
 
 - 自动投递行为。
 - 招聘网站账号与页面自动化。
