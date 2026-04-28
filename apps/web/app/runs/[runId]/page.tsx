@@ -116,7 +116,10 @@ export default async function RunPage({ params }: PageProps) {
                 <span role="cell">{source.originalName}</span>
                 <span className="mono" role="cell">{source.relativePath}</span>
                 <span role="cell">{formatBytes(source.sizeBytes)}</span>
-                <span role="cell">{source.extractionStatus}</span>
+                <span role="cell">
+                  {source.extractionStatus}
+                  {source.extractionError ? `: ${source.extractionError}` : ""}
+                </span>
               </div>
             ))}
           </div>

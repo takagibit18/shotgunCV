@@ -337,6 +337,47 @@ describe("run viewer pages", () => {
     expect(html).toContain("extracted");
   });
 
+  it("renders unparseable input source metadata on the run detail page", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const manifestPath = path.join(runsDir, "demo-full", "ingest", "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+    manifest.candidate_inputs.push({
+      role: "cv",
+      source_origin: "upload",
+      source_type: "file",
+      source_value: path.join(runsDir, "demo-full", "input_files", "cv", "scan.jpg"),
+      original_name: "Original Scan.jpg",
+      relative_path: "input_files/cv/scan.jpg",
+      size_bytes: 3456,
+      media_type: "image/jpeg",
+      text: "",
+      extraction_status: "unparseable",
+      extraction_provider: "local_ocr",
+      extraction_error: "Tesseract is not installed.",
+    });
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+
+    const detail = await loadRunDetail("demo-full");
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(detail.inputSources).toContainEqual(
+      expect.objectContaining({
+        role: "cv",
+        sourceOrigin: "upload",
+        originalName: "Original Scan.jpg",
+        relativePath: "input_files/cv/scan.jpg",
+        sizeBytes: 3456,
+        extractionStatus: "unparseable",
+        extractionError: "Tesseract is not installed.",
+      }),
+    );
+    expect(html).toContain("Original Scan.jpg");
+    expect(html).toContain("unparseable");
+    expect(html).toContain("Tesseract is not installed.");
+  });
+
   it("renders the upload page with local-only draft copy", () => {
     const html = renderToStaticMarkup(UploadPage());
 

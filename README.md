@@ -114,6 +114,8 @@ npm run dev
 
 Web 不执行 pipeline，完整运行仍由 CLI 触发。
 
+v0.5.2 起，PDF、图片 OCR/vision fallback 与文本抽取统一由 Python ingest 执行。Web 仍只写入原始上传文件和 `ingest/upload_manifest.json`，不写正文解析结果。单个文件不可解析时，Python manifest 会将该输入记录为 `extraction_status: "unparseable"` 并写入 `input_warnings[]`；只有 CV 或 JD 角色最终没有任何有效文本时，ingest 阶段才失败。
+
 ## 产品边界（当前阶段）
 
 - 仅面向海投工作流。

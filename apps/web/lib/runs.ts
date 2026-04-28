@@ -53,6 +53,7 @@ type InputSourceDisplay = {
   relativePath: string;
   sizeBytes: number;
   extractionStatus: string;
+  extractionError: string;
 };
 
 type ManifestInputItem = {
@@ -63,6 +64,7 @@ type ManifestInputItem = {
   size_bytes?: number;
   source_value?: string;
   extraction_status?: string;
+  extraction_error?: string;
 };
 
 type IngestManifest = {
@@ -302,6 +304,7 @@ function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadM
       relativePath: item.relative_path ?? item.source_value ?? "",
       sizeBytes: item.size_bytes ?? 0,
       extractionStatus: item.extraction_status ?? "unknown",
+      extractionError: item.extraction_error ?? "",
     }));
   }
   return (draft?.files ?? []).map((file) => ({
@@ -311,6 +314,7 @@ function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadM
     relativePath: file.storedRelativePath,
     sizeBytes: file.sizeBytes,
     extractionStatus: "draft",
+    extractionError: "",
   }));
 }
 
