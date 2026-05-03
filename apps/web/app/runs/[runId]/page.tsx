@@ -81,6 +81,8 @@ export default async function RunPage({ params }: PageProps) {
                   <li key={`${file.role}-${file.storedRelativePath}`}>
                     <span className="mono">{file.role}</span>
                     {" · "}
+                    {file.displayName || file.originalName}
+                    {" · "}
                     {file.originalName}
                     {" · "}
                     <span className="mono">{file.storedRelativePath}</span>
@@ -104,6 +106,7 @@ export default async function RunPage({ params }: PageProps) {
             <div className="input-source-row header" role="row">
               <span role="columnheader">{"角色"}</span>
               <span role="columnheader">{"来源"}</span>
+              <span role="columnheader">{"显示名"}</span>
               <span role="columnheader">{"原始文件名"}</span>
               <span role="columnheader">{"相对路径"}</span>
               <span role="columnheader">{"大小"}</span>
@@ -113,6 +116,7 @@ export default async function RunPage({ params }: PageProps) {
               <div key={`${source.role}-${source.relativePath}-${source.originalName}`} className="input-source-row" role="row">
                 <span className="status-chip" role="cell">{source.role}</span>
                 <span role="cell">{source.sourceOrigin}</span>
+                <span role="cell">{source.displayName || source.originalName}</span>
                 <span role="cell">{source.originalName}</span>
                 <span className="mono" role="cell">{source.relativePath}</span>
                 <span role="cell">{formatBytes(source.sizeBytes)}</span>

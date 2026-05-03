@@ -49,6 +49,7 @@ type DisplayVariant = ResumeVariant & {
 type InputSourceDisplay = {
   role: "cv" | "jd";
   sourceOrigin: string;
+  displayName: string;
   originalName: string;
   relativePath: string;
   sizeBytes: number;
@@ -59,6 +60,7 @@ type InputSourceDisplay = {
 type ManifestInputItem = {
   role?: "cv" | "jd";
   source_origin?: string;
+  display_name?: string;
   original_name?: string;
   relative_path?: string;
   size_bytes?: number;
@@ -186,14 +188,16 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
 
   const gapCounts = new Map(gapMaps.map((gapMap) => [gapMap.jd_id, gapMap.items.length]));
   const jdIndex = new Map(jdProfiles.map((jd) => [jd.jd_id, jd]));
+  const jdDisplayNameIndex = buildJdDisplayNameIndex(ingestManifest);
   const topVariants = evalSummary.map((item) => {
     const scorecard = scorecards.find(
       (candidateScorecard) =>
         candidateScorecard.jd_id === item.jd_id && candidateScorecard.variant_id === item.top_variant_id,
     );
+    const jd = jdIndex.get(item.jd_id);
     return {
       jdId: item.jd_id,
-      title: item.title || jdIndex.get(item.jd_id)?.title || item.jd_id,
+      title: item.title || jd?.title || jdDisplayNameIndex.get(item.jd_id) || item.jd_id,
       variantId: item.top_variant_id,
       variantDisplayName: buildVariantDisplayName(item.top_variant_id),
       overallScore: scorecard?.final_overall_score ?? scorecard?.overall_score ?? 0,
@@ -300,6 +304,7 @@ function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadM
     return manifestInputs.map((item) => ({
       role: item.role ?? "cv",
       sourceOrigin: item.source_origin ?? "cli",
+      displayName: item.display_name ?? "",
       originalName: item.original_name ?? path.basename(item.source_value ?? ""),
       relativePath: item.relative_path ?? item.source_value ?? "",
       sizeBytes: item.size_bytes ?? 0,
@@ -310,12 +315,25 @@ function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadM
   return (draft?.files ?? []).map((file) => ({
     role: file.role,
     sourceOrigin: "upload",
+    displayName: file.displayName ?? "",
     originalName: file.originalName,
     relativePath: file.storedRelativePath,
     sizeBytes: file.sizeBytes,
     extractionStatus: "draft",
     extractionError: "",
   }));
+}
+
+
+function buildJdDisplayNameIndex(ingestManifest: IngestManifest | null): Map<string, string> {
+  const index = new Map<string, string>();
+  (ingestManifest?.jd_inputs ?? []).forEach((item, itemIndex) => {
+    const displayName = item.display_name?.trim();
+    if (displayName) {
+      index.set(`jd-${String(itemIndex + 1).padStart(3, "0")}`, displayName);
+    }
+  });
+  return index;
 }
 
 

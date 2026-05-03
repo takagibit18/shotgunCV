@@ -6,15 +6,21 @@ import { createRunDraft, DraftCreationError } from "../../../../lib/upload-draft
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const candidateId = String(formData.get("candidateId") ?? "");
-    const labelValue = formData.get("label");
     const cvFiles = formData.getAll("cvFiles").filter((item): item is File => item instanceof File);
     const jdFiles = formData.getAll("jdFiles").filter((item): item is File => item instanceof File);
+    const jdFileDisplayNames = formData
+      .getAll("jdFileDisplayNames")
+      .filter((item): item is string => typeof item === "string");
+    const jdTexts = formData.getAll("jdTexts").filter((item): item is string => typeof item === "string");
+    const jdTextDisplayNames = formData
+      .getAll("jdTextDisplayNames")
+      .filter((item): item is string => typeof item === "string");
     const result = await createRunDraft({
-      candidateId,
-      label: typeof labelValue === "string" ? labelValue : "",
       cvFiles,
       jdFiles,
+      jdFileDisplayNames,
+      jdTexts,
+      jdTextDisplayNames,
     });
     return NextResponse.json(result);
   } catch (error) {

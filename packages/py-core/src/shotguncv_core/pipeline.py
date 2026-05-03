@@ -91,6 +91,7 @@ class _EvaluateTaskResult:
 class _UploadInputMetadata:
     role: str
     original_name: str
+    display_name: str
     relative_path: str
     size_bytes: int
 
@@ -501,6 +502,7 @@ def _input_document_to_manifest_item(
         "source_type": document.source_type,
         "source_value": document.source_value,
         "original_name": upload_item.original_name if upload_item is not None else document.original_name or source_path.name,
+        "display_name": upload_item.display_name if upload_item is not None else "",
         "relative_path": relative_path,
         "size_bytes": upload_item.size_bytes if upload_item is not None else document.size_bytes,
         "media_type": document.media_type,
@@ -541,6 +543,7 @@ def _load_upload_manifest_metadata(run_dir: Path) -> dict[str, _UploadInputMetad
         metadata[_normalize_manifest_path(relative_path)] = _UploadInputMetadata(
             role=str(item.get("role", "")),
             original_name=str(item.get("originalName", "")),
+            display_name=str(item.get("displayName", "")),
             relative_path=relative_path,
             size_bytes=_coerce_int(item.get("sizeBytes")),
         )

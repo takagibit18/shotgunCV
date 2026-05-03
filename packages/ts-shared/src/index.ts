@@ -170,6 +170,7 @@ export type RunDraftStatus = "draft" | "ingest-ready" | "running" | "complete";
 export type UploadedInputFile = {
   role: "cv" | "jd";
   originalName: string;
+  displayName?: string;
   storedRelativePath: string;
   sizeBytes: number;
   contentType: string;

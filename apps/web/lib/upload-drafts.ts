@@ -8,10 +8,13 @@ import { getRunsDir } from "./runs";
 type DraftFile = File;
 
 type CreateRunDraftInput = {
-  candidateId: string;
+  candidateId?: string;
   label?: string;
   cvFiles: DraftFile[];
   jdFiles: DraftFile[];
+  jdFileDisplayNames?: string[];
+  jdTexts?: string[];
+  jdTextDisplayNames?: string[];
   now?: Date;
 };
 
@@ -26,6 +29,7 @@ type DraftErrorCode =
   | "missing_candidate_id"
   | "missing_cv"
   | "missing_jd"
+  | "missing_jd_display_name"
   | "empty_file"
   | "file_too_large"
   | "unsupported_file_type"
@@ -50,22 +54,24 @@ export class DraftCreationError extends Error {
 
 
 export async function createRunDraft(input: CreateRunDraftInput): Promise<CreateRunDraftResult> {
-  const candidateId = input.candidateId.trim();
-  if (!candidateId) {
-    throw new DraftCreationError("missing_candidate_id", "Candidate id is required.");
-  }
+  const now = input.now ?? new Date();
+  const candidateId = input.candidateId?.trim() || buildCandidateId(now);
+  const jdFileDisplayNames = normalizeJdFileDisplayNames(input.jdFiles, input.jdFileDisplayNames ?? []);
+  const jdTextEntries = normalizeJdTextEntries(input.jdTexts ?? [], input.jdTextDisplayNames ?? []);
   if (input.cvFiles.length === 0) {
     throw new DraftCreationError("missing_cv", "At least one CV file is required.");
   }
-  if (input.jdFiles.length === 0) {
+  if (input.jdFiles.length === 0 && jdTextEntries.length === 0) {
     throw new DraftCreationError("missing_jd", "At least one JD file is required.");
   }
   [...input.cvFiles, ...input.jdFiles].forEach((file) => {
     validateUploadFile(file);
     sanitizeFileName(file.name);
   });
+  jdTextEntries.forEach((text, index) => {
+    validatePastedJdText(text, index + 1);
+  });
 
-  const now = input.now ?? new Date();
   const label = input.label?.trim() ?? "";
   const runId = buildRunId(label || candidateId, now);
   const runsDir = getRunsDir();
@@ -75,9 +81,11 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
 
   try {
     const uploadedAt = now.toISOString();
+    const jdUsedNames = new Set<string>();
     const files: UploadedInputFile[] = [
       ...(await writeRoleFiles(runDir, "cv", input.cvFiles, uploadedAt)),
-      ...(await writeRoleFiles(runDir, "jd", input.jdFiles, uploadedAt)),
+      ...(await writeRoleFiles(runDir, "jd", input.jdFiles, uploadedAt, jdUsedNames, jdFileDisplayNames)),
+      ...(await writePastedJdTexts(runDir, jdTextEntries, uploadedAt, jdUsedNames)),
     ];
     const nextCommand = buildNextCommand(runId, candidateId);
     const manifest: UploadManifest = {
@@ -116,6 +124,12 @@ function buildRunId(label: string, now: Date): string {
 }
 
 
+function buildCandidateId(now: Date): string {
+  const stamp = now.toISOString().replace(/[-:]/g, "").replace("T", "-").replace(".", "").replace("Z", "");
+  return `cand-${stamp}`;
+}
+
+
 async function reserveRunDirectory(runDir: string): Promise<void> {
   try {
     await stat(runDir);
@@ -135,23 +149,59 @@ async function writeRoleFiles(
   role: "cv" | "jd",
   files: DraftFile[],
   uploadedAt: string,
+  usedNames = new Set<string>(),
+  displayNames: string[] = [],
 ): Promise<UploadedInputFile[]> {
   const outputDir = path.join(runDir, "input_files", role);
   await mkdir(outputDir, { recursive: true });
 
   const records: UploadedInputFile[] = [];
   for (const file of files) {
-    const safeName = sanitizeFileName(file.name);
+    const safeName = reserveUniqueFileName(sanitizeFileName(file.name), usedNames);
     const bytes = Buffer.from(await file.arrayBuffer());
     const outputPath = path.join(outputDir, safeName);
     assertInside(outputDir, outputPath);
     await writeFile(outputPath, bytes);
-    records.push({
+    const record: UploadedInputFile = {
       role,
       originalName: file.name,
       storedRelativePath: path.posix.join("input_files", role, safeName),
       sizeBytes: file.size,
       contentType: file.type || "application/octet-stream",
+      uploadedAt,
+    };
+    if (role === "jd") {
+      record.displayName = displayNames[records.length];
+    }
+    records.push(record);
+  }
+  return records;
+}
+
+
+async function writePastedJdTexts(
+  runDir: string,
+  texts: { text: string; displayName: string }[],
+  uploadedAt: string,
+  usedNames: Set<string>,
+): Promise<UploadedInputFile[]> {
+  const outputDir = path.join(runDir, "input_files", "jd");
+  await mkdir(outputDir, { recursive: true });
+
+  const records: UploadedInputFile[] = [];
+  for (const [index, entry] of texts.entries()) {
+    const safeName = reserveUniqueFileName(`pasted-jd-${String(index + 1).padStart(3, "0")}.txt`, usedNames);
+    const bytes = Buffer.from(entry.text, "utf-8");
+    const outputPath = path.join(outputDir, safeName);
+    assertInside(outputDir, outputPath);
+    await writeFile(outputPath, bytes);
+    records.push({
+      role: "jd",
+      originalName: safeName,
+      displayName: entry.displayName,
+      storedRelativePath: path.posix.join("input_files", "jd", safeName),
+      sizeBytes: bytes.byteLength,
+      contentType: "text/plain",
       uploadedAt,
     });
   }
@@ -173,6 +223,42 @@ function validateUploadFile(file: DraftFile): void {
 }
 
 
+function normalizeJdFileDisplayNames(files: DraftFile[], displayNames: string[]): string[] {
+  return files.map((file, index) => {
+    const displayName = displayNames[index]?.trim() ?? "";
+    if (!displayName) {
+      throw new DraftCreationError("missing_jd_display_name", `Display name is required for JD file ${file.name}.`);
+    }
+    return displayName;
+  });
+}
+
+
+function normalizeJdTextEntries(texts: string[], displayNames: string[]): { text: string; displayName: string }[] {
+  const entries: { text: string; displayName: string }[] = [];
+  texts.forEach((text, index) => {
+    const normalizedText = text.trim();
+    if (!normalizedText) {
+      return;
+    }
+    const displayName = displayNames[index]?.trim() ?? "";
+    if (!displayName) {
+      throw new DraftCreationError("missing_jd_display_name", `Display name is required for pasted JD ${index + 1}.`);
+    }
+    entries.push({ text: normalizedText, displayName });
+  });
+  return entries;
+}
+
+
+function validatePastedJdText(entry: { text: string }, index: number): void {
+  const size = Buffer.byteLength(entry.text, "utf-8");
+  if (size > MAX_FILE_BYTES) {
+    throw new DraftCreationError("file_too_large", `Pasted JD ${index} exceeds the 10MB limit.`);
+  }
+}
+
+
 function sanitizeFileName(name: string): string {
   const normalized = name.replaceAll("\\", "/");
   if (normalized.includes("/") || normalized.includes("..")) {
@@ -183,6 +269,20 @@ function sanitizeFileName(name: string): string {
     throw new DraftCreationError("unsafe_filename", "Uploaded filename is invalid.");
   }
   return safeName;
+}
+
+
+function reserveUniqueFileName(name: string, usedNames: Set<string>): string {
+  const extension = path.extname(name);
+  const base = name.slice(0, name.length - extension.length);
+  let candidate = name;
+  let index = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${base}-${index}${extension}`;
+    index += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
 }
 
 

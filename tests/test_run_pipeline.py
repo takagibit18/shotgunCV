@@ -154,6 +154,7 @@ def test_ingest_run_matches_web_upload_manifest_metadata(tmp_path: Path) -> None
                     {
                         "role": "jd",
                         "originalName": "Original JD.txt",
+                        "displayName": "Example - Applied AI Engineer",
                         "storedRelativePath": "input_files/jd/jd.txt",
                         "sizeBytes": 78,
                         "contentType": "text/plain",
@@ -188,6 +189,7 @@ def test_ingest_run_matches_web_upload_manifest_metadata(tmp_path: Path) -> None
     assert jd_item["role"] == "jd"
     assert jd_item["source_origin"] == "upload"
     assert jd_item["original_name"] == "Original JD.txt"
+    assert jd_item["display_name"] == "Example - Applied AI Engineer"
     assert jd_item["relative_path"] == "input_files/jd/jd.txt"
     assert jd_item["size_bytes"] == 78
     assert jd_item["content"] == jd_item["text"]
