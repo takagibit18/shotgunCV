@@ -168,8 +168,11 @@ def _execute_command(command_name: str, args: argparse.Namespace, argv: list[str
 
 
 def _run_ingest(args: argparse.Namespace) -> str:
-    started_at = now_iso()
-    mark_running(args.run_dir, "ingest", started_at=started_at, action="run")
+    manifest_path = _execute_single_stage(args.run_dir, "ingest", lambda: _execute_ingest(args))
+    return f"Ingest completed: `{manifest_path}`"
+
+
+def _execute_ingest(args: argparse.Namespace) -> Path:
     try:
         if not getattr(args, "candidate_id", None):
             raise ValueError("`--candidate-id` is required for ingest.")
@@ -192,11 +195,9 @@ def _run_ingest(args: argparse.Namespace) -> str:
             vision_fallback_enabled=False if getattr(args, "no_vision_fallback", False) else None,
             ocr_languages=getattr(args, "ocr_languages", None),
         )
-    except Exception as exc:
-        mark_failed(args.run_dir, "ingest", exc, started_at=started_at, action="run")
-        raise
-    mark_done(args.run_dir, "ingest", started_at=started_at, action="run")
-    return f"Ingest completed: `{manifest_path}`"
+    except AttributeError as exc:
+        raise ValueError("Invalid ingest arguments.") from exc
+    return manifest_path
 
 
 def _run_full_pipeline(args: argparse.Namespace, argv: list[str] | None = None) -> str:
@@ -226,7 +227,7 @@ def _run_full_pipeline(args: argparse.Namespace, argv: list[str] | None = None) 
             mark_running(args.run_dir, stage_name, started_at=started_at, action=action)
             stage_started = log_stage_started(args.run_dir, stage_name)
             if stage_name == "ingest":
-                _run_ingest(args)
+                _execute_ingest(args)
             elif stage_name == "analyze":
                 analyze_run(args.run_dir)
             elif stage_name == "generate":

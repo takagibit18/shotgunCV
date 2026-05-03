@@ -187,7 +187,7 @@ function buildDraftStatus(
 
 export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const runDir = path.join(getRunsDir(), runId);
-  const config = await readJsonOrThrow<RunConfig>(path.join(runDir, "config", "run_config.json"));
+  const config = await readJsonIfExists<RunConfig>(path.join(runDir, "config", "run_config.json"));
   const completedStages = await getCompletedStages(runDir);
   const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
   const runStatus = await readJsonIfExists<RunStatusFile>(path.join(runDir, "run_status.json"));
@@ -231,11 +231,11 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
 
   return {
     runId,
-    label: config.run_metadata?.label ?? "",
-    analyzerProvider: config.analyzer?.provider ?? "unknown",
-    generatorProvider: config.generator?.provider ?? "unknown",
-    judgeProvider: config.judge?.provider ?? "unknown",
-    plannerProvider: config.planner?.provider ?? "unknown",
+    label: config?.run_metadata?.label ?? draft?.label ?? "",
+    analyzerProvider: config?.analyzer?.provider ?? "unknown",
+    generatorProvider: config?.generator?.provider ?? "unknown",
+    judgeProvider: config?.judge?.provider ?? "unknown",
+    plannerProvider: config?.planner?.provider ?? "unknown",
     completedStages,
     analyze: {
       isComplete: completedStages.includes("analyze"),
@@ -341,7 +341,11 @@ async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
   if (!(await pathExists(filePath))) {
     return null;
   }
-  return readJsonOrThrow<T>(filePath);
+  try {
+    return await readJsonOrThrow<T>(filePath);
+  } catch {
+    return null;
+  }
 }
 
 
