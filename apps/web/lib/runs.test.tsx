@@ -50,6 +50,101 @@ describe("run viewer data loading", () => {
     expect(detail.analyze.candidate?.candidate_id).toBe("cand-001");
   });
 
+  it("loads legacy artifact-only run detail without config", async () => {
+    const runsDir = await createTempRunsDir();
+    const runDir = path.join(runsDir, "artifact-only");
+    await mkdir(path.join(runDir, "report"), { recursive: true });
+    await writeFile(path.join(runDir, "report", "summary.md"), "# Legacy report\n", "utf-8");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const detail = await loadRunDetail("artifact-only");
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "artifact-only" }) }));
+
+    expect(detail.runId).toBe("artifact-only");
+    expect(detail.analyzerProvider).toBe("unknown");
+    expect(detail.completedStages).toEqual(["report"]);
+    expect(html).toContain("artifact-only");
+    expect(html).toContain("Run status");
+  });
+
+  it("renders legacy partial run with downstream artifacts but no config or analyze output", async () => {
+    const runsDir = await createTempRunsDir();
+    const runId = "legacy-partial";
+    const runDir = path.join(runsDir, runId);
+    await mkdir(path.join(runDir, "generate"), { recursive: true });
+    await mkdir(path.join(runDir, "evaluate"), { recursive: true });
+    await mkdir(path.join(runDir, "plan"), { recursive: true });
+    await mkdir(path.join(runDir, "report"), { recursive: true });
+    await writeJson(path.join(runDir, "generate", "resume_variants.json"), [
+      {
+        variant_id: "variant-jd-jd-001",
+        variant_type: "jd-specific",
+        cluster: "legacy",
+        target_jd_ids: ["jd-001"],
+        summary: "legacy variant",
+        emphasized_strengths: [],
+        stretch_points: [],
+        source_resume_path: "legacy.md",
+      },
+    ]);
+    await writeJson(path.join(runDir, "evaluate", "scorecards.json"), [
+      {
+        jd_id: "jd-001",
+        variant_id: "variant-jd-jd-001",
+        fit_score: 0.7,
+        ats_score: 0.7,
+        evidence_score: 0.7,
+        stretch_score: 0.5,
+        gap_risk_score: 0.4,
+        rewrite_cost_score: 0.2,
+        overall_score: 0.7,
+        ranking_version: "legacy",
+        judge_rationale: "legacy",
+        llm_role_fit_score: 0,
+        llm_evidence_score: 0,
+        llm_persuasion_score: 0,
+        llm_risk_score: 0,
+        llm_overall_score: 0,
+        final_overall_score: 0.7,
+        final_decision_source: "legacy",
+        guardrail_flags: [],
+        provider: "unknown",
+        model: "",
+      },
+    ]);
+    await writeJson(path.join(runDir, "evaluate", "gap_maps.json"), [{ jd_id: "jd-001", candidate_id: "cand", items: [] }]);
+    await writeJson(path.join(runDir, "evaluate", "eval_summary.json"), [
+      { jd_id: "jd-001", title: "Legacy role", top_variant_id: "variant-jd-jd-001", gap_count: 0, top_reasons: [] },
+    ]);
+    await writeJson(path.join(runDir, "plan", "application_strategies.json"), []);
+    await writeFile(path.join(runDir, "report", "summary.md"), "# Legacy report\n", "utf-8");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId }) }));
+
+    expect(html).toContain("legacy-partial");
+    expect(html).toContain("Legacy role");
+    expect(html).toContain("Run status");
+  });
+
+  it("renders run detail when one optional artifact contains malformed json", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "malformed-artifact");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeFile(
+      path.join(runsDir, "malformed-artifact", "analyze", "candidate_profile.json"),
+      '{"candidate_id": "broken"',
+      "utf-8",
+    );
+
+    const detail = await loadRunDetail("malformed-artifact");
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "malformed-artifact" }) }));
+
+    expect(detail.analyze.candidate).toBeNull();
+    expect(html).toContain("malformed-artifact");
+    expect(html).toContain("阶段状态");
+  });
+
   it("loads completed run detail with score and strategy summaries", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");

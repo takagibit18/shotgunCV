@@ -29,6 +29,8 @@ node_modules/
 .next/
 .turbo/
 coverage-final.json
+*.tsbuildinfo
+next-dev.*.log
 
 # IDE and editor files
 .idea/
