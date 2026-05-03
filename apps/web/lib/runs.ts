@@ -11,7 +11,10 @@ import type {
   ResumeVariant,
   RunConfig,
   RunDraftStatus,
+  RunStatusFile,
+  RunTimelineEvent,
   ScoreCard,
+  StageStatus,
   UploadManifest,
 } from "./types";
 
@@ -28,6 +31,9 @@ type RunSummary = {
   plannerProvider: string;
   label: string;
   draftStatus: RunDraftStatus;
+  runStatus: RunStatusFile | null;
+  stageStatuses: StageStatus[];
+  timeline: RunTimelineEvent[];
   draft: UploadManifest | null;
 };
 
@@ -104,6 +110,9 @@ type RunDetail = {
   };
   draft: UploadManifest | null;
   draftStatus: RunDraftStatus;
+  runStatus: RunStatusFile | null;
+  stageStatuses: StageStatus[];
+  timeline: RunTimelineEvent[];
   inputSources: InputSourceDisplay[];
 };
 
@@ -134,7 +143,9 @@ export async function listRuns(): Promise<RunSummary[]> {
         const metadata = await stat(runDir);
         const config = await readJsonIfExists<RunConfig>(path.join(runDir, "config", "run_config.json"));
         const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
+        const runStatus = await readJsonIfExists<RunStatusFile>(path.join(runDir, "run_status.json"));
         const completedStages = await getCompletedStages(runDir);
+        const timeline = await readTimeline(runDir);
         return {
           runId,
           lastModified: metadata.mtime.toISOString(),
@@ -144,7 +155,10 @@ export async function listRuns(): Promise<RunSummary[]> {
           judgeProvider: config?.judge?.provider ?? "unknown",
           plannerProvider: config?.planner?.provider ?? "unknown",
           label: config?.run_metadata.label || draft?.label || "",
-          draftStatus: buildDraftStatus(draft, completedStages),
+          draftStatus: buildDraftStatus(draft, completedStages, runStatus),
+          runStatus,
+          stageStatuses: buildStageStatuses(completedStages, runStatus),
+          timeline,
           draft,
         };
       }),
@@ -153,9 +167,16 @@ export async function listRuns(): Promise<RunSummary[]> {
 }
 
 
-function buildDraftStatus(draft: UploadManifest | null, completedStages: StageName[]): RunDraftStatus {
+function buildDraftStatus(
+  draft: UploadManifest | null,
+  completedStages: StageName[],
+  runStatus: RunStatusFile | null = null,
+): RunDraftStatus {
+  if (runStatus?.status) {
+    return runStatus.status;
+  }
   if (completedStages.includes("report")) {
-    return "complete";
+    return "done";
   }
   if (completedStages.length > 0) {
     return "running";
@@ -169,6 +190,8 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const config = await readJsonOrThrow<RunConfig>(path.join(runDir, "config", "run_config.json"));
   const completedStages = await getCompletedStages(runDir);
   const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
+  const runStatus = await readJsonIfExists<RunStatusFile>(path.join(runDir, "run_status.json"));
+  const timeline = await readTimeline(runDir);
   const ingestManifest = await readJsonIfExists<IngestManifest>(path.join(runDir, "ingest", "manifest.json"));
   const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
   const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
@@ -235,7 +258,10 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       strategies,
     },
     draft,
-    draftStatus: buildDraftStatus(draft, completedStages),
+    draftStatus: buildDraftStatus(draft, completedStages, runStatus),
+    runStatus,
+    stageStatuses: buildStageStatuses(completedStages, runStatus),
+    timeline,
     inputSources: buildInputSources(ingestManifest, draft),
   };
 }
@@ -266,6 +292,43 @@ async function getCompletedStages(runDir: string): Promise<StageName[]> {
     }),
   );
   return stages.filter((stage): stage is StageName => stage !== null);
+}
+
+
+function buildStageStatuses(completedStages: StageName[], runStatus: RunStatusFile | null): StageStatus[] {
+  return (Object.keys(REQUIRED_STAGE_FILES) as StageName[]).map((stage) => {
+    if (runStatus?.status === "failed" && runStatus.error_stage === stage) {
+      return { stage, status: "failed" };
+    }
+    if (runStatus?.status === "running" && runStatus.current_stage === stage) {
+      return { stage, status: "running" };
+    }
+    if (completedStages.includes(stage)) {
+      return { stage, status: "complete" };
+    }
+    return { stage, status: "pending" };
+  });
+}
+
+
+async function readTimeline(runDir: string): Promise<RunTimelineEvent[]> {
+  const pathToLog = path.join(runDir, "logs", "run_events.jsonl");
+  if (!(await pathExists(pathToLog))) {
+    return [];
+  }
+  const lines = (await readFile(pathToLog, "utf-8")).split(/\r?\n/).filter((line) => line.trim());
+  const events: RunTimelineEvent[] = [];
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line) as RunTimelineEvent;
+      if (typeof event.timestamp === "string" && typeof event.event === "string") {
+        events.push(event);
+      }
+    } catch {
+      // Ignore malformed legacy log lines so one bad event cannot break a run page.
+    }
+  }
+  return events;
 }
 
 

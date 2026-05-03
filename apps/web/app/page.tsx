@@ -24,11 +24,11 @@ export default async function HomePage() {
     <main className="app-shell">
       <section className="workspace-hero">
         <div>
-          <p className="eyebrow">{"\u53ea\u8bfb AI \u51b3\u7b56\u89c6\u56fe"}</p>
+          <p className="eyebrow">{"\u672c\u673a AI \u8fd0\u884c\u5de5\u4f5c\u53f0"}</p>
           <h1>{"ShotgunCV \u8fd0\u884c\u5de5\u4f5c\u53f0"}</h1>
           <p className="hero-copy">
             {
-              "\u6d4f\u89c8\u672c\u5730 runs \u76ee\u5f55\u4e2d\u7684\u9636\u6bb5\u4ea7\u7269\u3001\u8bc4\u4f30\u7ed3\u679c\u4e0e\u6295\u9012\u7b56\u7565\uff0c\u4fdd\u6301\u53ea\u8bfb\uff0c\u4e0d\u89e6\u53d1\u4efb\u4f55 pipeline \u5199\u5165\u3002"
+              "\u6d4f\u89c8\u672c\u5730 runs \u76ee\u5f55\u4e2d\u7684\u9636\u6bb5\u4ea7\u7269\u3001\u8bc4\u4f30\u7ed3\u679c\u4e0e\u6295\u9012\u7b56\u7565\uff0c\u5e76\u901a\u8fc7\u672c\u673a CLI \u89e6\u53d1\u8349\u7a3f\u8fd0\u884c\u3001\u5931\u8d25\u91cd\u8bd5\u548c\u9636\u6bb5\u7eed\u8dd1\u3002"
             }
           </p>
           <p className="sr-only">{"ShotgunCV \u8fd0\u884c\u67e5\u770b\u5668"}</p>
@@ -58,7 +58,7 @@ export default async function HomePage() {
             <p className="eyebrow">{"运行队列"}</p>
             <h2>{"\u8fd0\u884c\u5217\u8868"}</h2>
           </div>
-          <span className="status-chip">{"\u53ea\u8bfb\u6a21\u5f0f"}</span>
+          <span className="status-chip">{"\u672c\u673a\u8fd0\u884c\u7ba1\u7406"}</span>
         </div>
 
         <div className="run-table" role="list">
@@ -94,6 +94,10 @@ export default async function HomePage() {
               </div>
             </div>
             <div className="provider-stack">
+              <span>
+                {"状态 "}
+                <strong>{run.draftStatus}</strong>
+              </span>
               <span>
                 {"\u751f\u6210 "}
                 <strong>{run.generatorProvider}</strong>

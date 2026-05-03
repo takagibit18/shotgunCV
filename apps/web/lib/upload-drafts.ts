@@ -98,6 +98,23 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
     };
     await writeDefaultRunConfig(runDir, label);
     await writeFile(path.join(runDir, UPLOAD_MANIFEST_PATH), JSON.stringify(manifest, null, 2), "utf-8");
+    await writeFile(
+      path.join(runDir, "run_status.json"),
+      JSON.stringify(
+        {
+          status: "draft",
+          current_stage: null,
+          started_at: null,
+          finished_at: null,
+          error_stage: null,
+          error_summary: null,
+          last_action: "draft_update",
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
     return {
       runId,
       status: "draft",

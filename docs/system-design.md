@@ -78,3 +78,20 @@ Python ingest 是 PDF、图片 OCR、vision fallback 与文本抽取的唯一执
 - Web Viewer 为只读界面，不触发 pipeline，也不写入 `runs/`。
 - v1 不实现自动投递、浏览器自动化和 CRM。
 - v1 不做截图/OCR 主链路，仅保留后续接口扩展能力。
+## v0.5.3 运行管理边界
+
+`run_dir/run_status.json` 是 Web 与 CLI 共享的最小运行状态文件，记录 `draft/queued/running/done/failed`、当前阶段、开始/结束时间、失败阶段、失败摘要和最近动作。阶段是否完成仍以 `run_dir` 中的结构化产物为准，状态文件只承载运行观测和操作反馈，不替代阶段产物判断。
+
+Web 可以触发本机 `shotguncv` CLI，但不直接调用 Python 内部函数，也不复制 ingest/analyze/generate/evaluate/plan/report 业务逻辑。Web 的写入范围限定为草稿输入文件、`ingest/upload_manifest.json`、`config/run_config.json`、`run_status.json`，以及删除允许删除的 `draft/failed` run 目录。`running/queued` run 禁止删除。
+
+失败后支持两种恢复路径：`retry_full` 清理 `analyze` 及之后阶段产物并重新从 ingest 执行；`resume_failed` 根据现有阶段产物定位第一个未完成阶段，只清理该阶段及后续阶段。两种路径都以 CLI 为执行入口，并在失败时把错误摘要写回 `run_status.json`。
+
+## v0.5.4 观测与审计边界
+
+CLI 在 `run_dir/logs/run_events.jsonl` 写入结构化 JSONL 事件：`run_started`、`run_finished`、`stage_started`、`stage_finished`、`stage_failed`。每条事件包含时间戳；阶段结束和失败事件记录耗时；失败事件记录错误类型和短摘要。日志不写入 CV/JD 原文，只记录输入数量、provider/model 摘要和脱敏后的 CLI 参数摘要。
+
+Web 只读取 `logs/run_events.jsonl` 并渲染 run timeline，不引入集中式监控、远程队列或数据库。日志文件损坏的单行会被忽略，避免一个坏事件阻断整个 run detail 页面。
+
+## v0.5.5 稳定性与回归边界
+
+v0.5.5 的稳定性基线由 targeted Python/Web 测试承担：CLI 覆盖状态文件、失败记录和结构化日志；Web 覆盖草稿编辑、删除、run action、状态读取、timeline 读取和报告展示。文档表述保持本地单用户边界，不承诺自动投递、CRM、远程队列或多用户协作。

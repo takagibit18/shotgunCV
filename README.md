@@ -1,5 +1,13 @@
 # ShotgunCV
 
+## v0.5.3 本机运行管理
+
+Web 现在可以在本机触发 `shotguncv` CLI，将草稿推进为 run，并支持 failed run 的 full retry 与 resume。状态写入 `run_dir/run_status.json`，包含 `draft/queued/running/done/failed`、当前阶段和失败摘要；阶段完成度仍以 `run_dir` 下的阶段产物为准。
+
+Web 仍不是第二套业务真源：它只写入草稿文件、upload manifest、run config 和 run status，并通过 CLI 启动 pipeline。`running/queued` run 禁止删除；`draft/failed` run 可从 Web 删除。
+
+v0.5.4 起，每个 run 会写入 `run_dir/logs/run_events.jsonl`，记录 run/stage 开始、完成、失败、耗时、失败摘要、输入数量和 provider/model 摘要。Web run detail 会读取该文件展示 timeline；日志不包含 CV/JD 全文。v0.5.5 将这些状态、日志、草稿和报告读取路径纳入 targeted 回归测试。
+
 `ShotgunCV` 是一个面向海投场景的 `Pipeline-first` AI Resume Ops 系统，围绕批量岗位输入执行解析、生成、评分、排序与投递策略输出。
 
 主流程：

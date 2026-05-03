@@ -6,9 +6,13 @@ export type {
   JDProfile,
   RankingExplanation,
   ResumeVariant,
+  RunStatusFile,
+  RunTimelineEvent,
   RunDraftStatus,
   RunConfig,
   ScoreCard,
+  StageName,
+  StageStatus,
   UploadedInputFile,
   UploadManifest,
 } from "../../../packages/ts-shared/src/index";

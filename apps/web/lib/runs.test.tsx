@@ -10,6 +10,7 @@ import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
 import UploadPage from "../app/upload/page";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
+import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
 import { createRunDraft, DraftCreationError } from "./upload-drafts";
 
 
@@ -351,6 +352,185 @@ describe("run viewer data loading", () => {
     expect(detail.completedStages).not.toContain("ingest");
   });
 
+  it("loads run status file and builds stage statuses", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "demo");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeJson(path.join(runsDir, "demo", "run_status.json"), {
+      status: "failed",
+      current_stage: "generate",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:01:00.000Z",
+      error_stage: "generate",
+      error_summary: "simulated generate failure",
+      last_action: "run",
+    });
+
+    const detail = await loadRunDetail("demo");
+    const runs = await listRuns();
+
+    expect(detail.draftStatus).toBe("failed");
+    expect(detail.runStatus?.error_summary).toBe("simulated generate failure");
+    expect(detail.stageStatuses).toContainEqual({ stage: "analyze", status: "complete" });
+    expect(detail.stageStatuses).toContainEqual({ stage: "generate", status: "failed" });
+    expect(runs[0].draftStatus).toBe("failed");
+  });
+
+  it("loads structured timeline events from logs without requiring report artifacts", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "timeline-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await mkdir(path.join(runsDir, "timeline-run", "logs"), { recursive: true });
+    await writeFile(
+      path.join(runsDir, "timeline-run", "logs", "run_events.jsonl"),
+      [
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:00Z",
+          event: "run_started",
+          trigger_entrypoint: "web",
+          input_scale: { cv_sources: 1, jd_sources: 2 },
+          model_config: { analyzer: { provider: "deterministic", model: "" } },
+          cli_command_summary: ["shotguncv", "run", "--run-dir", "<run_dir>"],
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:01Z",
+          event: "stage_started",
+          stage: "analyze",
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:02Z",
+          event: "stage_failed",
+          stage: "analyze",
+          duration_ms: 1000,
+          error_code: "RuntimeError",
+          error_summary: "simulated failure",
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const detail = await loadRunDetail("timeline-run");
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "timeline-run" }) }));
+
+    expect(detail.timeline).toHaveLength(3);
+    expect(detail.timeline[0]).toMatchObject({
+      event: "run_started",
+      trigger_entrypoint: "web",
+      input_scale: { cv_sources: 1, jd_sources: 2 },
+    });
+    expect(html).toContain("Run timeline");
+    expect(html).toContain("stage_failed");
+    expect(html).toContain("simulated failure");
+  });
+
+  it("updates draft metadata, replaces CV files, and appends JD inputs", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      label: "Draft upload",
+      cvFiles: [new File(["old resume"], "old-resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["old jd"], "old-jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Old JD"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    await patchRunDraft(draft.runId, {
+      candidateId: "cand-002",
+      label: "Updated draft",
+      cvFiles: [new File(["new resume"], "new-resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["new jd"], "new-jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Renamed old JD", "New JD"],
+      jdTexts: ["Title: Added JD\nBody:\n- Build workflows"],
+      jdTextDisplayNames: ["Pasted JD"],
+      now: new Date("2026-04-25T09:00:00.000Z"),
+    });
+
+    const runDir = path.join(runsDir, draft.runId);
+    const manifest = JSON.parse(await readFile(path.join(runDir, "ingest", "upload_manifest.json"), "utf-8"));
+    const config = JSON.parse(await readFile(path.join(runDir, "config", "run_config.json"), "utf-8"));
+    const status = JSON.parse(await readFile(path.join(runDir, "run_status.json"), "utf-8"));
+
+    expect(manifest.candidateId).toBe("cand-002");
+    expect(manifest.label).toBe("Updated draft");
+    expect(manifest.nextCommand).toContain("--candidate-id cand-002");
+    expect(config.run_metadata.label).toBe("Updated draft");
+    expect(manifest.files.filter((file: { role: string }) => file.role === "cv")).toEqual([
+      expect.objectContaining({ originalName: "new-resume.md", storedRelativePath: "input_files/cv/new-resume.md" }),
+    ]);
+    expect(manifest.files.filter((file: { role: string }) => file.role === "jd")).toEqual([
+      expect.objectContaining({ originalName: "old-jd.md", displayName: "Renamed old JD" }),
+      expect.objectContaining({ originalName: "new-jd.md", displayName: "New JD" }),
+      expect.objectContaining({ originalName: "pasted-jd-001.txt", displayName: "Pasted JD" }),
+    ]);
+    expect(await readFile(path.join(runDir, "input_files", "cv", "new-resume.md"), "utf-8")).toBe("new resume");
+    expect(status).toMatchObject({ status: "draft", last_action: "draft_update" });
+  });
+
+  it("deletes draft and failed runs but rejects running runs", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+    await createIncompleteRun(runsDir, "failed-run");
+    await writeJson(path.join(runsDir, "failed-run", "run_status.json"), {
+      status: "failed",
+      current_stage: "generate",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:01:00.000Z",
+      error_stage: "generate",
+      error_summary: "simulated failure",
+      last_action: "run",
+    });
+    await createIncompleteRun(runsDir, "running-run");
+    await writeJson(path.join(runsDir, "running-run", "run_status.json"), {
+      status: "running",
+      current_stage: "generate",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: null,
+      error_stage: null,
+      error_summary: null,
+      last_action: "run",
+    });
+
+    await deleteRun(draft.runId);
+    await deleteRun("failed-run");
+    await expect(deleteRun("running-run")).rejects.toMatchObject({ code: "run_busy" });
+
+    await expect(readFile(path.join(runsDir, draft.runId, "ingest", "upload_manifest.json"), "utf-8")).rejects.toThrow();
+    await expect(readFile(path.join(runsDir, "failed-run", "run_status.json"), "utf-8")).rejects.toThrow();
+  });
+
+  it("queues a local CLI run action and writes running status", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+    const calls: { command: string; args: string[] }[] = [];
+
+    const result = await startRunAction(draft.runId, "run", (command, args) => {
+      calls.push({ command, args });
+      return { on: () => undefined };
+    });
+
+    const status = JSON.parse(await readFile(path.join(runsDir, draft.runId, "run_status.json"), "utf-8"));
+    expect(result).toMatchObject({ runId: draft.runId, status: "queued", action: "run" });
+    expect(calls[0].command).toBe("shotguncv");
+    expect(calls[0].args).toContain("--candidate-id");
+    expect(calls[0].args).toContain("cand-001");
+    expect(status).toMatchObject({ status: "running", current_stage: "ingest", last_action: "run" });
+  });
+
   it("rejects duplicate draft run ids", async () => {
     const runsDir = await createTempRunsDir();
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -402,7 +582,7 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("运行工作台");
-    expect(html).toContain("只读 AI 决策视图");
+    expect(html).toContain("本机 AI 运行工作台");
     expect(html).toContain("阶段完成度");
   });
 
