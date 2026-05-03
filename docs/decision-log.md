@@ -45,3 +45,14 @@ OpenAI 首期只接入 `generate` 与 `evaluate` 中的文本生成部分；规�
 - Markdown 文档统一中文。
 - 代码注释统一英文。
 - Git 提交信息统一英文。
+## v0.5.3 Web 运行管理入口
+
+Web 从只读查看器扩展为本机运行管理入口，但执行边界仍保持 Pipeline-first：Web 只能通过 `shotguncv` CLI 触发 run、retry 和 resume，不能调用 Python 内部业务函数。运行状态落在 `run_dir/run_status.json`，阶段完成度仍以阶段产物文件判断。
+
+原因：v0.5.3 需要让草稿、失败和续跑在 Web 内可操作，但不能引入第二套 pipeline 编排逻辑。把状态写回 `run_dir` 可以让 CLI、Web 和本地调试共享同一个可回放边界，同时避免数据库、队列和多用户权限的复杂度。
+
+## v0.5.4-v0.5.5 结构化日志与回归基线
+
+运行观测采用 run-local JSONL，而不是集中式监控。`logs/run_events.jsonl` 足够还原本地单用户 run 的阶段顺序、耗时和失败原因，同时不会把 CV/JD 原文写入日志。
+
+原因：当前阶段最重要的是可诊断和可回放，不是运维平台化。结构化日志加 targeted 回归测试可以稳定 v0.5 能力边界，并继续保持 Web 只作为本机触发与观察层。

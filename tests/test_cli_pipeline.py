@@ -225,6 +225,105 @@ def test_cli_run_command_executes_full_pipeline_from_multiform_inputs(tmp_path: 
     assert "Run completed" in output
     assert (run_dir / "report" / "summary.md").exists()
     assert (run_dir / "evaluate" / "scorecards.json").exists()
+    status = json.loads((run_dir / "run_status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "done"
+    assert status["current_stage"] == "report"
+    assert status["error_stage"] is None
+
+
+def test_cli_run_records_failed_stage_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    resume_path = ROOT / "fixtures" / "candidates" / "base_resume.md"
+    jd_path = ROOT / "fixtures" / "jds" / "sample_batch.txt"
+
+    def fail_analyze(run_dir: Path) -> None:
+        raise RuntimeError("simulated analyze failure")
+
+    monkeypatch.setattr("shotguncv_cli.main.analyze_run", fail_analyze)
+
+    exit_code, output = run(
+        [
+            "run",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(resume_path),
+            "--jd",
+            str(jd_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "simulated analyze failure" in output
+    status = json.loads((run_dir / "run_status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "failed"
+    assert status["current_stage"] == "analyze"
+    assert status["error_stage"] == "analyze"
+    assert "simulated analyze failure" in status["error_summary"]
+    events = [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert events[0]["event"] == "run_started"
+    assert events[0]["trigger_entrypoint"] == "cli"
+    assert events[0]["input_scale"]["cv_sources"] == 1
+    assert events[0]["model_config"]["analyzer"]["provider"] == "openai"
+    assert any(event["event"] == "stage_started" and event["stage"] == "analyze" for event in events)
+    failed = [event for event in events if event["event"] == "stage_failed" and event["stage"] == "analyze"][0]
+    assert failed["error_code"] == "RuntimeError"
+    assert "simulated analyze failure" in failed["error_summary"]
+    assert isinstance(failed["duration_ms"], int)
+
+
+def test_cli_run_resume_starts_at_first_incomplete_stage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    resume_path = ROOT / "fixtures" / "candidates" / "base_resume.md"
+    jd_path = ROOT / "fixtures" / "jds" / "sample_batch.txt"
+
+    exit_code, output = run(
+        [
+            "run",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(resume_path),
+            "--jd",
+            str(jd_path),
+        ]
+    )
+    assert exit_code == 0, output
+    (run_dir / "evaluate" / "scorecards.json").unlink()
+    (run_dir / "report" / "summary.md").unlink()
+
+    skipped: list[str] = []
+
+    def fail_if_called(run_dir: Path) -> None:
+        skipped.append("ingest")
+        raise AssertionError("resume should not rerun ingest when ingest artifacts are complete")
+
+    monkeypatch.setattr("shotguncv_cli.main.ingest_run", fail_if_called)
+
+    exit_code, output = run(["run", "--run-dir", str(run_dir), "--resume"])
+
+    assert exit_code == 0, output
+    assert skipped == []
+    status = json.loads((run_dir / "run_status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "done"
+    assert (run_dir / "evaluate" / "scorecards.json").exists()
+    assert (run_dir / "report" / "summary.md").exists()
+    events = [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert events[-1]["event"] == "run_finished"
+    assert events[-1]["status"] == "done"
+    assert any(event["event"] == "stage_finished" and event["stage"] == "report" for event in events)
 
 
 def test_cli_run_accepts_image_cv_with_mock_ocr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

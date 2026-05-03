@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { loadRunDetail } from "../../../lib/runs";
 import type { ApplicationStrategy, RankingExplanation, ScoreCard } from "../../../lib/types";
+import { RunActionPanel } from "./RunActionPanel";
 import { ScoreRing } from "./ScoreRing";
 
 
@@ -24,6 +25,15 @@ const STAGE_LABELS: Record<string, string> = {
   evaluate: "评估",
   plan: "计划",
   report: "报告",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Draft",
+  queued: "Queued",
+  running: "Running",
+  done: "Done",
+  failed: "Failed",
+  "ingest-ready": "Ingest ready",
 };
 
 
@@ -54,6 +64,7 @@ export default async function RunPage({ params }: PageProps) {
                 {STAGE_LABELS[stage] ?? stage}
               </span>
             ))}
+            <span className="pill">{STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus}</span>
           </div>
         </div>
         <div className="run-control-panel">
@@ -67,7 +78,59 @@ export default async function RunPage({ params }: PageProps) {
           <Link href={`/runs/${detail.runId}/report`} className="primary-link">
             {"打开报告"}
           </Link>
+          <RunActionPanel runId={detail.runId} draftStatus={detail.draftStatus} draft={detail.draft} />
         </div>
+      </section>
+
+      <section className="section">
+        <SectionHeading eyebrow="Run status" title="运行状态" action={STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus} />
+        <div className="detail-grid">
+          <article className="detail-card">
+            <h3>{"阶段状态"}</h3>
+            <div className="pill-row">
+              {detail.stageStatuses.map((item) => (
+                <span key={item.stage} className={`pill stage-${item.status}`}>
+                  {(STAGE_LABELS[item.stage] ?? item.stage) + " · " + item.status}
+                </span>
+              ))}
+            </div>
+          </article>
+          <article className="detail-card">
+            <h3>{"最近一次运行"}</h3>
+            <p>
+              {"Action: "}
+              <span className="mono">{detail.runStatus?.last_action ?? "n/a"}</span>
+            </p>
+            <p>
+              {"Current stage: "}
+              <span className="mono">{detail.runStatus?.current_stage ?? "n/a"}</span>
+            </p>
+            {detail.runStatus?.error_summary ? (
+              <p className="risk-line">
+                {(detail.runStatus.error_stage ?? "unknown") + ": " + detail.runStatus.error_summary}
+              </p>
+            ) : null}
+          </article>
+        </div>
+      </section>
+
+      <section className="section">
+        <SectionHeading eyebrow="Run timeline" title="运行时间线" action={`${detail.timeline.length} events`} />
+        {detail.timeline.length > 0 ? (
+          <div className="timeline-list">
+            {detail.timeline.map((event, index) => (
+              <article key={`${event.timestamp}-${event.event}-${index}`} className="timeline-row">
+                <span className="mono">{event.timestamp}</span>
+                <strong>{event.event}</strong>
+                <span>{event.stage ?? event.status ?? event.trigger_entrypoint ?? ""}</span>
+                {typeof event.duration_ms === "number" ? <span>{`${event.duration_ms} ms`}</span> : null}
+                {event.error_summary ? <span className="risk-line">{event.error_summary}</span> : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">{"暂无结构化运行日志"}</div>
+        )}
       </section>
 
       {detail.draft ? (

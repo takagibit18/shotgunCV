@@ -66,7 +66,13 @@ def snapshot_run_config(
     vision_fallback_enabled: bool | None = None,
     ocr_languages: str | None = None,
 ) -> Path:
-    config = default_run_config() if source_path is None else _from_payload(load_json(source_path))
+    existing_config_path = run_dir / RUN_CONFIG_PATH
+    if source_path is not None:
+        config = _from_payload(load_json(source_path))
+    elif existing_config_path.exists():
+        config = _from_payload(load_json(existing_config_path))
+    else:
+        config = default_run_config()
     normalized = _normalize_run_config(config)
     if vision_fallback_enabled is False:
         normalized.input_extraction.vision_provider = "disabled"

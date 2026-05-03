@@ -165,7 +165,38 @@ export type EvalSummaryItem = {
   top_reasons: string[];
 };
 
-export type RunDraftStatus = "draft" | "ingest-ready" | "running" | "complete";
+export type RunDraftStatus = "draft" | "queued" | "running" | "done" | "failed" | "ingest-ready";
+
+export type StageName = "ingest" | "analyze" | "generate" | "evaluate" | "plan" | "report";
+
+export type StageStatus = {
+  stage: StageName;
+  status: "complete" | "running" | "failed" | "pending";
+};
+
+export type RunStatusFile = {
+  status: "draft" | "queued" | "running" | "done" | "failed";
+  current_stage: StageName | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error_stage: StageName | null;
+  error_summary: string | null;
+  last_action: "run" | "retry_full" | "resume_failed" | "draft_update" | "delete";
+};
+
+export type RunTimelineEvent = {
+  timestamp: string;
+  event: "run_started" | "run_finished" | "stage_started" | "stage_finished" | "stage_failed";
+  stage?: StageName;
+  status?: string;
+  duration_ms?: number;
+  error_code?: string;
+  error_summary?: string;
+  trigger_entrypoint?: string;
+  input_scale?: Record<string, number>;
+  model_config?: Record<string, { provider: string; model: string }>;
+  cli_command_summary?: string[];
+};
 
 export type UploadedInputFile = {
   role: "cv" | "jd";
