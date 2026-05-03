@@ -74,6 +74,29 @@ describe("run viewer data loading", () => {
     });
   });
 
+  it("uses uploaded JD display names as readable fallbacks for empty analyzed titles", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-display-name");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const manifestPath = path.join(runsDir, "demo-display-name", "ingest", "manifest.json");
+    const jdProfilesPath = path.join(runsDir, "demo-display-name", "analyze", "jd_profiles.json");
+    const evalSummaryPath = path.join(runsDir, "demo-display-name", "evaluate", "eval_summary.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+    manifest.jd_inputs[0].display_name = "Example AI - Staff Product Manager";
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+    const jdProfiles = JSON.parse(await readFile(jdProfilesPath, "utf-8"));
+    jdProfiles[0].title = "";
+    jdProfiles[0].company = "";
+    await writeFile(jdProfilesPath, JSON.stringify(jdProfiles, null, 2), "utf-8");
+    const evalSummary = JSON.parse(await readFile(evalSummaryPath, "utf-8"));
+    evalSummary[0].title = "";
+    await writeFile(evalSummaryPath, JSON.stringify(evalSummary, null, 2), "utf-8");
+
+    const detail = await loadRunDetail("demo-display-name");
+
+    expect(detail.evaluate.topVariants[0].title).toBe("Example AI - Staff Product Manager");
+  });
+
   it("marks evaluate stage complete for legacy runs without ranking explanations", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-legacy", { includeExplanations: false });
@@ -112,6 +135,7 @@ describe("run viewer data loading", () => {
       label: "April upload",
       cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
       jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - Applied AI Engineer"],
       now: new Date("2026-04-25T08:30:00.000Z"),
     });
 
@@ -143,6 +167,7 @@ describe("run viewer data loading", () => {
       expect.objectContaining({
         role: "jd",
         originalName: "jd.txt",
+        displayName: "Example - Applied AI Engineer",
         storedRelativePath: "input_files/jd/jd.txt",
         sizeBytes: 7,
       }),
@@ -162,6 +187,78 @@ describe("run viewer data loading", () => {
     expect(await readFile(path.join(runsDir, result.runId, "input_files", "jd", "jd.txt"), "utf-8")).toBe("jd text");
   });
 
+  it("creates a draft run with an automatic timestamp candidate id", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const result = await createRunDraft({
+      cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - Applied AI Engineer"],
+      now: new Date("2026-04-25T08:30:00.123Z"),
+    });
+
+    const manifest = JSON.parse(
+      await readFile(path.join(runsDir, result.runId, "ingest", "upload_manifest.json"), "utf-8"),
+    );
+    expect(manifest.candidateId).toBe("cand-20260425-083000123");
+    expect(result.nextCommand).toContain("--candidate-id cand-20260425-083000123");
+  });
+
+  it("creates separate metadata-only JD files from pasted text entries", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const result = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["file jd text"], "jd-file.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - File JD"],
+      jdTexts: [
+        "Title: Applied AI Engineer\nCompany: Example\nBody:\n- Build AI workflows",
+        "  ",
+        "Title: Platform PM\nCompany: Example\nBody:\n- Own automation roadmap",
+      ],
+      jdTextDisplayNames: ["Example - Applied AI Engineer", "", "Example - Platform PM"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    const manifest = JSON.parse(
+      await readFile(path.join(runsDir, result.runId, "ingest", "upload_manifest.json"), "utf-8"),
+    );
+    expect(manifest.files.filter((file: { role: string }) => file.role === "jd")).toEqual([
+      expect.objectContaining({
+        role: "jd",
+        originalName: "jd-file.txt",
+        displayName: "Example - File JD",
+        storedRelativePath: "input_files/jd/jd-file.txt",
+        contentType: "text/plain",
+      }),
+      expect.objectContaining({
+        role: "jd",
+        originalName: "pasted-jd-001.txt",
+        displayName: "Example - Applied AI Engineer",
+        storedRelativePath: "input_files/jd/pasted-jd-001.txt",
+        contentType: "text/plain",
+      }),
+      expect.objectContaining({
+        role: "jd",
+        originalName: "pasted-jd-002.txt",
+        displayName: "Example - Platform PM",
+        storedRelativePath: "input_files/jd/pasted-jd-002.txt",
+        contentType: "text/plain",
+      }),
+    ]);
+    expect(JSON.stringify(manifest)).not.toContain("Build AI workflows");
+    expect(JSON.stringify(manifest)).not.toContain("Own automation roadmap");
+    expect(await readFile(path.join(runsDir, result.runId, "input_files", "jd", "pasted-jd-001.txt"), "utf-8")).toBe(
+      "Title: Applied AI Engineer\nCompany: Example\nBody:\n- Build AI workflows",
+    );
+    expect(await readFile(path.join(runsDir, result.runId, "input_files", "jd", "pasted-jd-002.txt"), "utf-8")).toBe(
+      "Title: Platform PM\nCompany: Example\nBody:\n- Own automation roadmap",
+    );
+  });
+
   it("rejects invalid draft uploads with stable error codes", async () => {
     const runsDir = await createTempRunsDir();
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -171,6 +268,7 @@ describe("run viewer data loading", () => {
         candidateId: "cand-001",
         cvFiles: [],
         jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        jdFileDisplayNames: ["Example - Applied AI Engineer"],
         now: new Date("2026-04-25T08:30:00.000Z"),
       }),
     ).rejects.toMatchObject({ code: "missing_cv" });
@@ -180,6 +278,7 @@ describe("run viewer data loading", () => {
         candidateId: "cand-001",
         cvFiles: [new File(["resume"], "../resume.md", { type: "text/markdown" })],
         jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        jdFileDisplayNames: ["Example - Applied AI Engineer"],
         now: new Date("2026-04-25T08:30:00.000Z"),
       }),
     ).rejects.toMatchObject({ code: "unsafe_filename" });
@@ -189,9 +288,42 @@ describe("run viewer data loading", () => {
         candidateId: "cand-001",
         cvFiles: [new File(["resume"], "resume.exe", { type: "application/octet-stream" })],
         jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        jdFileDisplayNames: ["Example - Applied AI Engineer"],
         now: new Date("2026-04-25T08:30:00.000Z"),
       }),
     ).rejects.toMatchObject({ code: "unsupported_file_type" });
+
+    await expect(
+      createRunDraft({
+        candidateId: "cand-001",
+        cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+        jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+        jdFileDisplayNames: ["   "],
+        now: new Date("2026-04-25T08:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "missing_jd_display_name" });
+
+    await expect(
+      createRunDraft({
+        candidateId: "cand-001",
+        cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+        jdFiles: [],
+        jdTexts: ["Title: Applied AI Engineer\nCompany: Example\nBody:\n- Build AI workflows"],
+        jdTextDisplayNames: ["   "],
+        now: new Date("2026-04-25T08:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "missing_jd_display_name" });
+
+    await expect(
+      createRunDraft({
+        candidateId: "cand-001",
+        cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+        jdFiles: [],
+        jdTexts: ["   "],
+        jdTextDisplayNames: ["Example - Applied AI Engineer"],
+        now: new Date("2026-04-25T08:30:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "missing_jd" });
   });
 
   it("includes draft runs without marking ingest complete", async () => {
@@ -202,6 +334,7 @@ describe("run viewer data loading", () => {
       label: "Draft upload",
       cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
       jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
       now: new Date("2026-04-25T08:30:00.000Z"),
     });
 
@@ -226,6 +359,7 @@ describe("run viewer data loading", () => {
       label: "Duplicate upload",
       cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
       jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
       now: new Date("2026-04-25T08:30:00.000Z"),
     };
 
@@ -290,6 +424,7 @@ describe("run viewer pages", () => {
       label: "Draft upload",
       cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
       jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
       now: new Date("2026-04-25T08:30:00.000Z"),
     });
 
@@ -300,6 +435,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("input_files/cv");
     expect(html).toContain("输入来源");
     expect(html).toContain("resume.md");
+    expect(html).toContain("Example - Draft Role");
     expect(html).toContain("draft");
   });
 
@@ -323,6 +459,7 @@ describe("run viewer pages", () => {
       expect.objectContaining({
         role: "jd",
         sourceOrigin: "fixture",
+        displayName: "Example AI - LLM Product Engineer",
         originalName: "sample_batch.txt",
         relativePath: "fixtures/jds/sample_batch.txt",
         sizeBytes: 2345,
@@ -332,6 +469,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("输入来源");
     expect(html).toContain("fixture");
     expect(html).toContain("base_resume.md");
+    expect(html).toContain("Example AI - LLM Product Engineer");
     expect(html).toContain("fixtures/candidates/base_resume.md");
     expect(html).toContain("1.2 KB");
     expect(html).toContain("extracted");
@@ -383,8 +521,14 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("Create draft run");
     expect(html).toContain("Draft only");
+    expect(html).not.toContain("candidateId");
+    expect(html).not.toContain("name=\"label\"");
     expect(html).toContain("cvFiles");
     expect(html).toContain("jdFiles");
+    expect(html).toContain("本地文件");
+    expect(html).toContain("粘贴文本");
+    expect(html).toContain("公司/岗位显示名");
+    expect(html).toContain("选择本地 JD 文件（可多选）");
     expect(html).toContain("input_files/");
   });
 
@@ -538,6 +682,7 @@ async function createIncompleteRun(runsDir: string, runId: string): Promise<void
         source_origin: "fixture",
         source_type: "file",
         source_value: "fixtures/jds/sample_batch.txt",
+        display_name: "Example AI - LLM Product Engineer",
         original_name: "sample_batch.txt",
         relative_path: "fixtures/jds/sample_batch.txt",
         size_bytes: 2345,
