@@ -63,6 +63,23 @@ type InputSourceDisplay = {
   extractionError: string;
 };
 
+type ObservabilitySummary = {
+  resolvedModels: {
+    stage: string;
+    role: string;
+    provider: string;
+    configuredModel: string;
+    resolvedModel: string;
+    baseUrlHost: string;
+  }[];
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  toolCallCount: number;
+  fallbackCount: number;
+  qualityWarnings: string[];
+};
+
 type ManifestInputItem = {
   role?: "cv" | "jd";
   source_origin?: string;
@@ -114,6 +131,7 @@ type RunDetail = {
   stageStatuses: StageStatus[];
   timeline: RunTimelineEvent[];
   inputSources: InputSourceDisplay[];
+  observability: ObservabilitySummary;
 };
 
 type RunReport = {
@@ -192,6 +210,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
   const runStatus = await readJsonIfExists<RunStatusFile>(path.join(runDir, "run_status.json"));
   const timeline = await readTimeline(runDir);
+  const observability = buildObservabilitySummary(timeline, runStatus);
   const ingestManifest = await readJsonIfExists<IngestManifest>(path.join(runDir, "ingest", "manifest.json"));
   const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
   const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
@@ -263,6 +282,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     stageStatuses: buildStageStatuses(completedStages, runStatus),
     timeline,
     inputSources: buildInputSources(ingestManifest, draft),
+    observability,
   };
 }
 
@@ -332,6 +352,53 @@ async function readTimeline(runDir: string): Promise<RunTimelineEvent[]> {
 }
 
 
+function buildObservabilitySummary(
+  timeline: RunTimelineEvent[],
+  runStatus: RunStatusFile | null,
+): ObservabilitySummary {
+  const resolvedModels = timeline
+    .filter((event) => event.event === "model_resolved")
+    .map((event) => ({
+      stage: event.stage ?? "",
+      role: event.role ?? "",
+      provider: event.provider ?? "",
+      configuredModel: event.configured_model ?? "",
+      resolvedModel: event.resolved_model ?? "",
+      baseUrlHost: event.base_url_host ?? "",
+    }));
+
+  const tokenEvents = timeline.filter((event) => event.event === "llm_call_finished");
+  const promptTokens = sumOptional(tokenEvents.map((event) => event.prompt_tokens));
+  const completionTokens = sumOptional(tokenEvents.map((event) => event.completion_tokens));
+  const totalTokens = sumOptional(tokenEvents.map((event) => event.total_tokens));
+  const qualityWarnings = timeline
+    .filter((event) => event.event === "quality_gate_checked" && event.status && event.status !== "ok")
+    .map((event) => `${event.gate ?? "quality"}: ${event.status}`);
+  if (runStatus?.quality_summary) {
+    qualityWarnings.unshift(runStatus.quality_summary);
+  }
+
+  return {
+    resolvedModels,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    toolCallCount: timeline.filter((event) => event.event.startsWith("tool_call_")).length,
+    fallbackCount: timeline.filter((event) => event.event === "fallback_used").length,
+    qualityWarnings,
+  };
+}
+
+
+function sumOptional(values: Array<number | null | undefined>): number | null {
+  const numericValues = values.filter((value): value is number => typeof value === "number");
+  if (numericValues.length === 0) {
+    return null;
+  }
+  return numericValues.reduce((total, value) => total + value, 0);
+}
+
+
 async function readJsonOrThrow<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf-8")) as T;
 }
@@ -355,7 +422,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 
-export type { RunDetail, RunReport, RunSummary };
+export type { ObservabilitySummary, RunDetail, RunReport, RunSummary };
 
 
 function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadManifest | null): InputSourceDisplay[] {

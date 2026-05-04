@@ -26,6 +26,14 @@ from shotguncv_core.models import (
     ScoreCard,
 )
 from shotguncv_core.run_config import load_run_config, snapshot_run_config
+from shotguncv_core.run_logs import (
+    log_agent_reasoning_summary,
+    log_fallback_used,
+    log_input_extracted,
+    log_input_resolved,
+    log_quality_gate_checked,
+)
+from shotguncv_core.run_status import update_quality_status
 from shotguncv_core.storage import dump_json, hydrate, load_json, stage_dir
 from shotguncv_evals.rules import RuleEvaluation, evaluate_resume_fit
 
@@ -125,6 +133,18 @@ def ingest_run(
     jd_paths = _resolve_jd_sources(jd_sources, jd_input_sources)
     candidate_inputs = collect_input_documents(candidate_paths, options=extraction_options)
     jd_inputs = collect_input_documents(jd_paths, options=extraction_options)
+    log_input_resolved(
+        run_dir,
+        cli_cv_sources=len(candidate_paths),
+        cli_jd_sources=len(jd_paths),
+        resolved_cv_files=len(candidate_inputs),
+        resolved_jd_files=len(jd_inputs),
+        jd_text_blocks=sum(1 for document in jd_inputs if document.text.strip()),
+    )
+    for document in candidate_inputs:
+        _log_input_document_extracted(run_dir, "cv", document)
+    for document in jd_inputs:
+        _log_input_document_extracted(run_dir, "jd", document)
     upload_metadata = _load_upload_manifest_metadata(run_dir)
     if not candidate_inputs:
         raise ValueError("At least one CV input is required for ingest.")
@@ -171,6 +191,7 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
     dump_json(analyze_directory / "candidate_profile.json", feedback.candidate_profile)
     dump_json(analyze_directory / "jd_profiles.json", feedback.jd_profiles)
     dump_json(analyze_directory / "evidence_map.json", feedback.evidence_map)
+    _record_analyze_quality(run_dir, manifest, feedback.candidate_profile, feedback.jd_profiles)
     return AnalysisArtifacts(candidate=feedback.candidate_profile, jd_profiles=feedback.jd_profiles, evidence_map=feedback.evidence_map)
 
 
@@ -296,6 +317,7 @@ def evaluate_run(
     dump_json(evaluate_directory / "llm_assessments.json", llm_assessments)
     dump_json(evaluate_directory / "llm_failures.json", llm_failures)
     dump_json(evaluate_directory / "eval_summary.json", eval_summary)
+    _record_evaluate_quality(run_dir, scorecards, llm_failures)
     return EvaluationArtifacts(
         scorecards=scorecards,
         gap_maps=gap_maps,
@@ -372,6 +394,18 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
         if not strategy.interview_prep_points:
             strategy.interview_prep_points = jd.interview_focus_areas[:3]
         strategies.append(strategy)
+        log_agent_reasoning_summary(
+            run_dir,
+            stage="plan",
+            agent="planner",
+            summary=strategy.reason_summary,
+            decision_inputs=[
+                f"jd_id={strategy.jd_id}",
+                f"variant_id={strategy.recommended_variant_id}",
+                f"final_score={(scorecard.final_overall_score or scorecard.overall_score):.2f}",
+                f"decision={strategy.apply_decision}",
+            ],
+        )
 
     dump_json(stage_dir(run_dir, "plan") / "application_strategies.json", strategies)
     return PlanArtifacts(strategies=strategies)
@@ -464,6 +498,120 @@ def _join_input_text(documents: list[InputDocument]) -> str:
         if text:
             chunks.append(f"Source: {document.source_value}\n{text}")
     return "\n\n".join(chunk for chunk in chunks if chunk.strip())
+
+
+def _log_input_document_extracted(run_dir: Path, role: str, document: InputDocument) -> None:
+    fallback_from = None
+    warning = document.extraction_error or None
+    if document.extraction_status in {"vision", "sidecar"} and document.extraction_error:
+        fallback_from = "local_ocr"
+    log_input_extracted(
+        run_dir,
+        role=role,
+        provider=document.extraction_provider,
+        status=document.extraction_status,
+        text_chars=len(document.text or ""),
+        fallback_from=fallback_from,
+        warning=warning,
+    )
+
+
+def _record_analyze_quality(
+    run_dir: Path,
+    manifest: dict[str, object],
+    candidate: CandidateProfile,
+    jd_profiles: list[JDProfile],
+) -> None:
+    jd_inputs = manifest.get("jd_inputs", [])
+    jd_text_count = sum(
+        1
+        for item in jd_inputs
+        if isinstance(item, dict) and str(item.get("content") or item.get("text") or "").strip()
+    )
+    empty_title_count = sum(1 for jd in jd_profiles if not jd.title.strip())
+    empty_responsibilities_count = sum(1 for jd in jd_profiles if not jd.responsibilities)
+    empty_requirements_count = sum(1 for jd in jd_profiles if not jd.requirements)
+    jd_gate_failed = bool(
+        jd_text_count
+        and jd_profiles
+        and (empty_title_count or empty_responsibilities_count or empty_requirements_count)
+    )
+    log_quality_gate_checked(
+        run_dir,
+        stage="analyze",
+        gate="jd_profile_completeness",
+        status="failed" if jd_gate_failed else "ok",
+        checks={
+            "jd_count": len(jd_profiles),
+            "jd_text_blocks": jd_text_count,
+            "empty_title_count": empty_title_count,
+            "empty_responsibilities_count": empty_responsibilities_count,
+            "empty_requirements_count": empty_requirements_count,
+        },
+        action="warn" if jd_gate_failed else "continue",
+    )
+
+    resume_text = str(manifest.get("candidate_resume_text", ""))
+    control_char_count = sum(1 for char in resume_text if ord(char) < 32 and char not in "\r\n\t")
+    visible_chars = sum(1 for char in resume_text if char.isprintable() and not char.isspace())
+    control_char_ratio = round(control_char_count / max(1, len(resume_text)), 4)
+    cv_warning = visible_chars < 120 or control_char_ratio > 0.05 or not candidate.experiences
+    log_quality_gate_checked(
+        run_dir,
+        stage="analyze",
+        gate="cv_text_quality",
+        status="warning" if cv_warning else "ok",
+        checks={
+            "text_chars": len(resume_text),
+            "visible_chars": visible_chars,
+            "control_char_ratio": control_char_ratio,
+            "experience_count": len(candidate.experiences),
+        },
+        action="warn" if cv_warning else "continue",
+    )
+
+    summaries: list[str] = []
+    if jd_gate_failed:
+        summaries.append("JD profile fields are incomplete.")
+    if cv_warning:
+        summaries.append("CV extraction quality is low.")
+    if summaries:
+        update_quality_status(run_dir, "warning", " ".join(summaries))
+
+
+def _record_evaluate_quality(run_dir: Path, scorecards: list[ScoreCard], llm_failures: list[LLMFailure]) -> None:
+    fallback_count = sum(1 for scorecard in scorecards if scorecard.final_decision_source == "guardrail-fallback")
+    weak_high_score_count = sum(
+        1
+        for scorecard in scorecards
+        if (scorecard.overall_score >= 0.85 and scorecard.llm_evidence_score <= 0.35)
+        or "llm_assessment_missing" in scorecard.guardrail_flags
+    )
+    status = "warning" if fallback_count or weak_high_score_count or llm_failures else "ok"
+    log_quality_gate_checked(
+        run_dir,
+        stage="evaluate",
+        gate="score_consistency",
+        status=status,
+        checks={
+            "scorecard_count": len(scorecards),
+            "fallback_count": fallback_count,
+            "llm_failure_count": len(llm_failures),
+            "weak_high_score_count": weak_high_score_count,
+        },
+        action="warn" if status == "warning" else "continue",
+    )
+    for failure in llm_failures:
+        log_fallback_used(
+            run_dir,
+            stage="evaluate",
+            operation="judge_assess",
+            from_provider=failure.provider,
+            to_provider="guardrail-fallback",
+            reason=f"{failure.error_type}: {failure.error_message}",
+        )
+    if status == "warning":
+        update_quality_status(run_dir, "warning", "Evaluation used fallback or score consistency warnings.")
 
 
 def _has_extractable_text(documents: list[InputDocument]) -> bool:

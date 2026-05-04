@@ -381,6 +381,17 @@ describe("run viewer data loading", () => {
     await createIncompleteRun(runsDir, "timeline-run");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
     await mkdir(path.join(runsDir, "timeline-run", "logs"), { recursive: true });
+    await writeJson(path.join(runsDir, "timeline-run", "run_status.json"), {
+      status: "done",
+      current_stage: "report",
+      started_at: "2026-05-03T08:00:00Z",
+      finished_at: "2026-05-03T08:00:02Z",
+      error_stage: null,
+      error_summary: null,
+      last_action: "run",
+      quality_status: "warning",
+      quality_summary: "JD profile fields are incomplete.",
+    });
     await writeFile(
       path.join(runsDir, "timeline-run", "logs", "run_events.jsonl"),
       [
@@ -398,6 +409,57 @@ describe("run viewer data loading", () => {
           stage: "analyze",
         }),
         JSON.stringify({
+          timestamp: "2026-05-03T08:00:01Z",
+          event: "model_resolved",
+          stage: "analyze",
+          role: "analyzer",
+          provider: "openai",
+          configured_model: "",
+          resolved_model: "gpt-5.4-mini",
+          base_url_host: "api.openai.com",
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:01Z",
+          event: "llm_call_finished",
+          stage: "analyze",
+          operation: "analyze_resume_and_jds",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          duration_ms: 500,
+          prompt_tokens: 100,
+          completion_tokens: 25,
+          total_tokens: 125,
+          output_parse_status: "success",
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:01Z",
+          event: "tool_call_finished",
+          stage: "ingest",
+          tool: "openai_vision",
+          input_type: "jd",
+          duration_ms: 500,
+          status: "success",
+          output_summary: { text_chars: 1200 },
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:01Z",
+          event: "fallback_used",
+          stage: "analyze",
+          operation: "analyze_resume_and_jds",
+          from_provider: "openai",
+          to_provider: "deterministic",
+          reason: "invalid json",
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-03T08:00:01Z",
+          event: "quality_gate_checked",
+          stage: "analyze",
+          gate: "jd_profile_completeness",
+          status: "failed",
+          checks: { empty_title_count: 1 },
+          action: "warn",
+        }),
+        JSON.stringify({
           timestamp: "2026-05-03T08:00:02Z",
           event: "stage_failed",
           stage: "analyze",
@@ -412,13 +474,26 @@ describe("run viewer data loading", () => {
     const detail = await loadRunDetail("timeline-run");
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "timeline-run" }) }));
 
-    expect(detail.timeline).toHaveLength(3);
+    expect(detail.timeline).toHaveLength(8);
     expect(detail.timeline[0]).toMatchObject({
       event: "run_started",
       trigger_entrypoint: "web",
       input_scale: { cv_sources: 1, jd_sources: 2 },
     });
+    expect(detail.observability).toMatchObject({
+      totalTokens: 125,
+      toolCallCount: 1,
+      fallbackCount: 1,
+    });
+    expect(detail.observability.resolvedModels[0]).toMatchObject({
+      stage: "analyze",
+      resolvedModel: "gpt-5.4-mini",
+    });
     expect(html).toContain("Run timeline");
+    expect(html).toContain("运行观测");
+    expect(html).toContain("gpt-5.4-mini");
+    expect(html).toContain("125");
+    expect(html).toContain("Done with warnings");
     expect(html).toContain("stage_failed");
     expect(html).toContain("simulated failure");
   });

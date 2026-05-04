@@ -182,11 +182,30 @@ export type RunStatusFile = {
   error_stage: StageName | null;
   error_summary: string | null;
   last_action: "run" | "retry_full" | "resume_failed" | "draft_update" | "delete";
+  quality_status?: "ok" | "warning" | "failed";
+  quality_summary?: string | null;
 };
 
 export type RunTimelineEvent = {
   timestamp: string;
-  event: "run_started" | "run_finished" | "stage_started" | "stage_finished" | "stage_failed";
+  event:
+    | "run_started"
+    | "run_finished"
+    | "stage_started"
+    | "stage_finished"
+    | "stage_failed"
+    | "input_resolved"
+    | "input_extracted"
+    | "model_resolved"
+    | "llm_call_started"
+    | "llm_call_finished"
+    | "llm_call_failed"
+    | "tool_call_started"
+    | "tool_call_finished"
+    | "tool_call_failed"
+    | "agent_reasoning_summary"
+    | "quality_gate_checked"
+    | "fallback_used";
   stage?: StageName;
   status?: string;
   duration_ms?: number;
@@ -196,6 +215,33 @@ export type RunTimelineEvent = {
   input_scale?: Record<string, number>;
   model_config?: Record<string, { provider: string; model: string }>;
   cli_command_summary?: string[];
+  role?: string;
+  provider?: string;
+  configured_model?: string;
+  resolved_model?: string;
+  base_url_host?: string | null;
+  operation?: string;
+  model?: string;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  output_parse_status?: string;
+  tool?: string;
+  input_type?: string;
+  output_summary?: Record<string, unknown>;
+  gate?: string;
+  checks?: Record<string, unknown>;
+  action?: string;
+  from_provider?: string;
+  to_provider?: string;
+  reason?: string;
+  summary?: string;
+  decision_inputs?: string[];
+  cli_cv_sources?: number;
+  cli_jd_sources?: number;
+  resolved_cv_files?: number;
+  resolved_jd_files?: number;
+  jd_text_blocks?: number;
 };
 
 export type UploadedInputFile = {
