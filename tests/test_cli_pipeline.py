@@ -229,6 +229,65 @@ def test_cli_run_command_executes_full_pipeline_from_multiform_inputs(tmp_path: 
     assert status["status"] == "done"
     assert status["current_stage"] == "report"
     assert status["error_stage"] is None
+    assert status["quality_status"] in {"ok", "warning"}
+
+
+def test_cli_run_logs_resolved_inputs_and_models_for_directory_jds(tmp_path: Path) -> None:
+    run_dir = tmp_path / "cli-run"
+    cv_dir = tmp_path / "cv"
+    jd_dir = tmp_path / "jd"
+    config_path = tmp_path / "deterministic.json"
+    cv_dir.mkdir()
+    jd_dir.mkdir()
+    (cv_dir / "resume.md").write_text("- Built LLM workflow tools", encoding="utf-8")
+    (jd_dir / "jd-a.txt").write_text("Title: Applied AI Engineer\nBody:\n- Build Python automation", encoding="utf-8")
+    (jd_dir / "jd-b.txt").write_text("Title: Evaluation Engineer\nBody:\n- Build eval systems", encoding="utf-8")
+    config_path.write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": "deterministic", "model": ""},
+                "generator": {"provider": "deterministic", "model": ""},
+                "judge": {"provider": "deterministic", "model": ""},
+                "planner": {"provider": "deterministic", "model": ""},
+                "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": ".env"},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, output = run(
+        [
+            "run",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--cv",
+            str(cv_dir),
+            "--jd",
+            str(jd_dir),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    assert exit_code == 0, output
+    events = [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    run_started = events[0]
+    assert run_started["input_scale"]["cli_jd_sources"] == 1
+    input_resolved = [event for event in events if event["event"] == "input_resolved"][0]
+    assert input_resolved["cli_jd_sources"] == 1
+    assert input_resolved["resolved_jd_files"] == 2
+    assert input_resolved["jd_text_blocks"] == 2
+    model_resolved = [event for event in events if event["event"] == "model_resolved" and event["stage"] == "analyze"][0]
+    assert model_resolved["configured_model"] == ""
+    assert model_resolved["resolved_model"] == "heuristic-v0.3.0"
+    assert any(event["event"] == "quality_gate_checked" for event in events)
 
 
 def test_cli_run_records_failed_stage_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -327,9 +327,13 @@ def _execute_single_stage(run_dir: Path, stage: StageName, callback: Callable[[]
 
 
 def _build_input_scale(args: argparse.Namespace) -> dict[str, int]:
+    cv_sources = len(getattr(args, "cv_sources", []) or []) + (1 if getattr(args, "candidate_resume", None) else 0)
+    jd_sources = len(getattr(args, "jd_input_sources", []) or []) + len(getattr(args, "jd_files", []) or [])
     return {
-        "cv_sources": len(getattr(args, "cv_sources", []) or []) + (1 if getattr(args, "candidate_resume", None) else 0),
-        "jd_sources": len(getattr(args, "jd_input_sources", []) or []) + len(getattr(args, "jd_files", []) or []),
+        "cv_sources": cv_sources,
+        "jd_sources": jd_sources,
+        "cli_cv_sources": cv_sources,
+        "cli_jd_sources": jd_sources,
     }
 
 

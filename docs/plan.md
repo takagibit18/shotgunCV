@@ -1,4 +1,4 @@
-# ShotgunCV v0.5.0-v0.5.5 落地规划
+# ShotgunCV v0.5.0-v0.5.6 落地规划
 
 ## Summary
 
@@ -118,6 +118,28 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - Web 测试覆盖草稿创建、触发、状态展示、输入清单和失败详情。
 - 文档与实际能力一致，不承诺自动投递、CRM、远程队列或多用户协作。
 
+### v0.5.6 观测性收盘与质量门槛
+
+目标：补齐 v0.5 收盘版本的运行可信度，让一次本地 run 不只显示“跑完”，还能够解释输入规模、实际模型、agent/tool 执行、token 消耗、fallback 与质量风险。
+
+关键变化：
+
+- 修正 `input_scale` 统计口径，区分 CLI 参数源数量与 ingest 后实际解析出的文件数量，例如 `cli_jd_sources: 1`、`resolved_jd_files: 2`。
+- 日志记录最终生效模型 `resolved_model`，不再只记录 `run_config.json` 中可能为空的 `configured_model`。
+- 扩展结构化日志事件，覆盖 token、耗时、解析状态、fallback、tool call、agent reasoning summary 和质量门槛检查。
+- 增加 analyze 质量门槛，避免 JD profile 空字段、CV 抽取低质量、规则高分但证据弱的 run 静默产出普通 `done` 报告。
+- Web 详情页展示 `done_with_warnings` 或等价质量警告状态，并展示 resolved model、token usage、tool call 次数、fallback 次数和质量摘要。
+- 日志采用三层等级：`normal`、`debug`、`trace`；默认 `normal`，`trace` 仅用于本机私有调试且必须脱敏。
+
+验收标准：
+
+- CLI `--jd` 传目录且目录内有多个 JD 文件时，日志同时保留 CLI source 数量和 resolved file 数量。
+- model 配置为空但运行时解析出默认模型时，日志能显示 `configured_model: ""` 与非空 `resolved_model`。
+- LLM 调用日志记录 token usage；provider 未返回 token 时写 `null`，不伪造数值。
+- fallback、tool call 和质量门槛检查均能在 `run_events.jsonl` 中定位到 stage、operation、原因和结果。
+- JD 原文非空但 analyze 后 `title/responsibilities/requirements` 为空时，run 至少进入 warning 状态，不能静默展示为完全可信的普通完成。
+- 日志不记录完整 chain-of-thought；只记录可审计 reasoning summary、decision inputs 和 tool execution summary。
+
 ## Public Interfaces
 
 计划新增或稳定以下接口与文件契约：
@@ -130,6 +152,20 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - Web API：保留草稿创建接口，新增 run 触发、状态读取、重试/继续执行相关接口。
 - CLI：继续以 `shotguncv run/ingest/analyze/generate/evaluate/plan/report --run-dir` 为执行入口。
 
+v0.5.6 计划扩展以下日志和状态契约：
+
+- `run_dir/logs/run_events.jsonl` 新增事件：`input_resolved`、`input_extracted`、`model_resolved`、`llm_call_started`、`llm_call_finished`、`llm_call_failed`、`tool_call_started`、`tool_call_finished`、`tool_call_failed`、`agent_reasoning_summary`、`quality_gate_checked`、`fallback_used`。
+- `input_resolved` 记录 `cli_cv_sources`、`cli_jd_sources`、`resolved_cv_files`、`resolved_jd_files`、`jd_text_blocks`。
+- `input_extracted` 记录单文件抽取 provider、status、text chars、fallback 来源和 warning。
+- `model_resolved` 记录 `provider`、`configured_model`、`resolved_model`、`base_url_host`，不得记录 API key。
+- `llm_call_*` 记录 operation、provider、model、duration、prompt tokens、completion tokens、total tokens、parse status 和 error summary。
+- `tool_call_*` 记录 tool 名称、输入类型、耗时、状态和输出摘要。
+- `agent_reasoning_summary` 只记录可审计决策摘要，不记录完整 chain-of-thought。
+- `quality_gate_checked` 记录 `jd_profile_completeness`、`cv_text_quality`、`score_consistency` 等质量门槛结果。
+- `fallback_used` 记录 fallback 来源、目标 provider、原因和影响阶段。
+- 日志等级为 `normal | debug | trace`：`normal` 记录阶段、耗时、状态、resolved model、token usage、fallback 和质量警告；`debug` 追加 prompt 摘要、输出结构摘要、字段完整性和 tool output 摘要；`trace` 允许本机调试记录完整 request/response，但必须脱敏 API key、路径隐私和候选人敏感信息。
+- `run_dir/run_status.json` 计划扩展 `quality_status: ok | warning | failed` 与 `quality_summary`；`last_action` 保持现有语义。
+
 ## Test Plan
 
 - Python 单元测试：覆盖 ingest 多输入合并、PDF/图片抽取状态、不可解析输入、阶段产物检测、失败摘要生成。
@@ -137,6 +173,12 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - Web 单元测试：覆盖 draft API、run status 读取、输入来源展示、失败状态展示。
 - Web 集成测试：模拟上传文件创建草稿，触发 CLI，轮询到 `done/failed`，再读取详情页和报告页。
 - 回归测试：固定 fixtures 下重复运行应产生稳定排序、稳定阶段状态和稳定报告关键字段。
+- v0.5.6 日志测试：CLI `--jd` 传目录且目录内有 2 个 JD 文件时，断言日志同时记录 `cli_jd_sources: 1` 和 `resolved_jd_files: 2`。
+- v0.5.6 模型测试：配置 model 为空但运行时解析出默认模型时，断言日志记录 `configured_model: ""` 和非空 `resolved_model`。
+- v0.5.6 token 测试：LLM 调用完成后记录 `prompt_tokens`、`completion_tokens`、`total_tokens`；provider 不返回 token 时记录 `null`。
+- v0.5.6 fallback 测试：fallback 发生时写入 `fallback_used`，并能定位 stage、operation、reason。
+- v0.5.6 质量门槛测试：JD 原文非空但 analyze 后 `responsibilities/requirements/title` 为空时写入 `quality_gate_checked`，CV 文本控制字符比例过高时写入 `cv_text_quality` warning，规则分高但 evidence/profile 质量低时写入 `score_consistency` warning。
+- v0.5.6 Web 测试：run detail 显示 resolved model、token usage、tool call 次数、fallback 次数；`done` 且有质量 warning 时展示 `Done with warnings` 或等价提示；旧 run 缺少新增事件时仍兼容展示。
 
 ## Assumptions
 
@@ -145,3 +187,6 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - `run_dir` 是跨 Web/CLI 的唯一状态边界。
 - PDF/OCR/vision 的外部依赖缺失时，系统应给出可操作错误，而不是静默失败。
 - 本轮只落地 `docs/plan.md`，不实施代码、测试或其他文档变更。
+- v0.5.6 是 v0.5 收盘优化版本，只增强可观测性、质量门槛和文档边界，不新增远程队列、多用户、自动投递或 CRM 能力。
+- 默认日志等级为 `normal`；`debug` 和 `trace` 只影响日志详细度，不改变 pipeline 业务产物。
+- `trace` 仅用于本机私有调试，并要求脱敏。

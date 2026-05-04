@@ -40,6 +40,10 @@ const STATUS_LABELS: Record<string, string> = {
 export default async function RunPage({ params }: PageProps) {
   const resolvedParams = await params;
   const detail = await loadRunDetail(resolvedParams.runId);
+  const displayStatus =
+    detail.draftStatus === "done" && detail.runStatus?.quality_status === "warning"
+      ? "Done with warnings"
+      : STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus;
 
   return (
     <main className="app-shell">
@@ -64,7 +68,7 @@ export default async function RunPage({ params }: PageProps) {
                 {STAGE_LABELS[stage] ?? stage}
               </span>
             ))}
-            <span className="pill">{STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus}</span>
+            <span className="pill">{displayStatus}</span>
           </div>
         </div>
         <div className="run-control-panel">
@@ -83,7 +87,7 @@ export default async function RunPage({ params }: PageProps) {
       </section>
 
       <section className="section">
-        <SectionHeading eyebrow="Run status" title="运行状态" action={STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus} />
+        <SectionHeading eyebrow="Run status" title="运行状态" action={displayStatus} />
         <div className="detail-grid">
           <article className="detail-card">
             <h3>{"阶段状态"}</h3>
@@ -110,6 +114,68 @@ export default async function RunPage({ params }: PageProps) {
                 {(detail.runStatus.error_stage ?? "unknown") + ": " + detail.runStatus.error_summary}
               </p>
             ) : null}
+            {detail.runStatus?.quality_summary ? (
+              <p className="risk-line">
+                {"Quality: "}
+                {detail.runStatus.quality_summary}
+              </p>
+            ) : null}
+          </article>
+        </div>
+      </section>
+
+      <section className="section">
+        <SectionHeading
+          eyebrow="Observability"
+          title="运行观测"
+          action={`${detail.observability.fallbackCount} fallback`}
+        />
+        <div className="detail-grid">
+          <article className="detail-card">
+            <h3>{"模型与 token"}</h3>
+            <p>
+              {"Total tokens: "}
+              <span className="mono">{detail.observability.totalTokens ?? "n/a"}</span>
+            </p>
+            <p>
+              {"Prompt / completion: "}
+              <span className="mono">
+                {(detail.observability.promptTokens ?? "n/a") + " / " + (detail.observability.completionTokens ?? "n/a")}
+              </span>
+            </p>
+            <ul>
+              {detail.observability.resolvedModels.map((model) => (
+                <li key={`${model.stage}-${model.role}-${model.resolvedModel}`}>
+                  <span className="mono">{model.stage}</span>
+                  {" · "}
+                  {model.role}
+                  {" · "}
+                  {model.provider}
+                  {" · "}
+                  {model.resolvedModel || "n/a"}
+                </li>
+              ))}
+            </ul>
+          </article>
+          <article className="detail-card">
+            <h3>{"工具与质量"}</h3>
+            <p>
+              {"Tool calls: "}
+              <span className="mono">{detail.observability.toolCallCount}</span>
+            </p>
+            <p>
+              {"Fallbacks: "}
+              <span className="mono">{detail.observability.fallbackCount}</span>
+            </p>
+            {detail.observability.qualityWarnings.length > 0 ? (
+              <ul>
+                {detail.observability.qualityWarnings.map((warning) => (
+                  <li key={warning} className="risk-line">{warning}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>{"No quality warnings"}</p>
+            )}
           </article>
         </div>
       </section>
@@ -123,8 +189,12 @@ export default async function RunPage({ params }: PageProps) {
                 <span className="mono">{event.timestamp}</span>
                 <strong>{event.event}</strong>
                 <span>{event.stage ?? event.status ?? event.trigger_entrypoint ?? ""}</span>
+                {event.operation ? <span>{event.operation}</span> : null}
+                {event.resolved_model ? <span>{event.resolved_model}</span> : null}
+                {typeof event.total_tokens === "number" ? <span>{`${event.total_tokens} tokens`}</span> : null}
                 {typeof event.duration_ms === "number" ? <span>{`${event.duration_ms} ms`}</span> : null}
                 {event.error_summary ? <span className="risk-line">{event.error_summary}</span> : null}
+                {event.reason ? <span className="risk-line">{event.reason}</span> : null}
               </article>
             ))}
           </div>
