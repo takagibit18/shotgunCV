@@ -14,13 +14,13 @@ export default function UploadPage() {
 
       <section className="workspace-hero">
         <div>
-          <p className="eyebrow">{"本地上传"}</p>
-          <h1 className="page-title">{"Create draft run"}</h1>
+          <p className="eyebrow">{"本地上传 · 草稿创建"}</p>
+          <h1 className="page-title">{"创建投递草稿"}</h1>
           <p className="hero-copy">
-            {"上传的 CV 和 JD 文件只会落盘到本机 runs 目录；Web 仅创建草稿，不解析正文，也不触发 pipeline。"}
+            {"将 CV、补充材料和 JD 输入整理为可复现的 run 草稿。Web 只负责落盘和元数据，不解析正文，也不直接承载业务判断。"}
           </p>
         </div>
-        <span className="status-chip">{"Draft only"}</span>
+        <span className="status-chip">{"仅创建草稿"}</span>
       </section>
 
       <section className="section">
@@ -29,7 +29,7 @@ export default function UploadPage() {
             <p className="eyebrow">{"上传输入"}</p>
             <h2>{"新建 run 草稿"}</h2>
           </div>
-          <span className="status-chip">{"Local single-user"}</span>
+          <span className="status-chip">{"本地单用户"}</span>
         </div>
         <UploadForm />
         <div className="detail-card upload-note">

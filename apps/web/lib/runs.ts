@@ -7,7 +7,9 @@ import type {
   EvalSummaryItem,
   GapMap,
   JDProfile,
+  PreflightGate,
   RankingExplanation,
+  RequirementEvidence,
   ResumeVariant,
   RunConfig,
   RunDraftStatus,
@@ -110,6 +112,8 @@ type RunDetail = {
     candidate: CandidateProfile | null;
     jdProfiles: JDProfile[];
   };
+  requirementMatrix: RequirementEvidence[];
+  preflightGates: PreflightGate[];
   generate: {
     isComplete: boolean;
     variants: DisplayVariant[];
@@ -214,6 +218,10 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const ingestManifest = await readJsonIfExists<IngestManifest>(path.join(runDir, "ingest", "manifest.json"));
   const candidate = await readJsonIfExists<CandidateProfile>(path.join(runDir, "analyze", "candidate_profile.json"));
   const jdProfiles = (await readJsonIfExists<JDProfile[]>(path.join(runDir, "analyze", "jd_profiles.json"))) ?? [];
+  const requirementMatrix =
+    (await readJsonIfExists<RequirementEvidence[]>(path.join(runDir, "analyze", "requirement_matrix.json"))) ?? [];
+  const preflightGates =
+    (await readJsonIfExists<PreflightGate[]>(path.join(runDir, "analyze", "preflight_gates.json"))) ?? [];
   const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
   const displayVariants: DisplayVariant[] = variants.map((variant) => ({
     ...variant,
@@ -261,6 +269,8 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       candidate,
       jdProfiles,
     },
+    requirementMatrix,
+    preflightGates,
     generate: {
       isComplete: completedStages.includes("generate"),
       variants: displayVariants,

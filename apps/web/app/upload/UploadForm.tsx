@@ -239,7 +239,7 @@ export function UploadForm() {
         </section>
 
         <button className="primary-link" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Creating draft" : "Create draft run"}
+          {isSubmitting ? "正在创建草稿" : "创建草稿 run"}
         </button>
       </form>
 
@@ -254,7 +254,7 @@ export function UploadForm() {
         <div className="upload-result" role="status">
           <h3>{result.runId}</h3>
           <p>
-            {"Draft manifest: "}
+            {"草稿 manifest："}
             <span className="mono">{result.uploadManifestPath}</span>
           </p>
           <pre className="command-block">{result.nextCommand}</pre>

@@ -51,6 +51,30 @@ class ResumeVariant:
     emphasized_strengths: list[str]
     stretch_points: list[str]
     source_resume_path: str
+    safe_rewrites: list[str] = field(default_factory=list)
+    simulated_supplements: list[str] = field(default_factory=list)
+    forbidden_gaps: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RequirementEvidence:
+    jd_id: str
+    requirement_id: str
+    tier: str
+    requirement_text: str
+    evidence_status: str
+    evidence_refs: list[str] = field(default_factory=list)
+    fabrication_policy: str = "rewrite_only"
+    risk_weight: float = 0.5
+
+
+@dataclass(slots=True)
+class PreflightGate:
+    jd_id: str
+    status: str
+    reasons: list[str] = field(default_factory=list)
+    skipped_stages: list[str] = field(default_factory=list)
+    user_action: str = ""
 
 
 @dataclass(slots=True)
@@ -76,6 +100,11 @@ class ScoreCard:
     guardrail_flags: list[str] = field(default_factory=list)
     provider: str = ""
     model: str = ""
+    verified_fit_score: float = 0.0
+    rewrite_potential_score: float = 0.0
+    risk_score: float = 0.0
+    gate_status: str = "pass"
+    gate_reasons: list[str] = field(default_factory=list)
 
     @staticmethod
     def ranking_key(scorecard: "ScoreCard") -> tuple[float, float, float, float]:

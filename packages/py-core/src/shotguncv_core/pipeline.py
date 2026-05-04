@@ -21,7 +21,9 @@ from shotguncv_core.models import (
     JDProfile,
     LLMFailure,
     LLMAssessment,
+    PreflightGate,
     RankingExplanation,
+    RequirementEvidence,
     ResumeVariant,
     ScoreCard,
 )
@@ -66,10 +68,12 @@ class PlanArtifacts:
 
 
 RANKING_VERSION = "v0.3.0-llm-eval"
+SCORING_VERSION = "v0.5.7-requirement-gate"
 EVALUATE_MAX_WORKERS = 4
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 FIXTURES_ROOT = PROJECT_ROOT / "fixtures"
 UPLOAD_MANIFEST_PATH = Path("ingest") / "upload_manifest.json"
+GATED_SKIP_STAGES = ["generate", "evaluate", "llm_judge", "plan"]
 
 
 @dataclass(slots=True)
@@ -191,6 +195,10 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
     dump_json(analyze_directory / "candidate_profile.json", feedback.candidate_profile)
     dump_json(analyze_directory / "jd_profiles.json", feedback.jd_profiles)
     dump_json(analyze_directory / "evidence_map.json", feedback.evidence_map)
+    requirement_matrix = _build_requirement_matrix(feedback.candidate_profile, feedback.jd_profiles)
+    preflight_gates = _build_preflight_gates(requirement_matrix)
+    dump_json(analyze_directory / "requirement_matrix.json", requirement_matrix)
+    dump_json(analyze_directory / "preflight_gates.json", preflight_gates)
     _record_analyze_quality(run_dir, manifest, feedback.candidate_profile, feedback.jd_profiles)
     return AnalysisArtifacts(candidate=feedback.candidate_profile, jd_profiles=feedback.jd_profiles, evidence_map=feedback.evidence_map)
 
@@ -199,10 +207,17 @@ def generate_run(run_dir: Path) -> GenerationArtifacts:
     config = load_run_config(run_dir)
     candidate = hydrate(CandidateProfile, load_json(run_dir / "analyze" / "candidate_profile.json"))
     jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
+    preflight_gates = _load_preflight_gates(run_dir)
+    gate_index = {gate.jd_id: gate for gate in preflight_gates}
+    requirement_matrix = _load_requirement_matrix(run_dir)
     generator = build_generator_provider(config, stage="generate", run_dir=run_dir)
 
     variants: list[ResumeVariant] = []
     for jd in jd_profiles:
+        gate = gate_index.get(jd.jd_id)
+        if gate is not None and gate.status != "pass":
+            continue
+        jd_requirements = [item for item in requirement_matrix if item.jd_id == jd.jd_id]
         variants.append(
             ResumeVariant(
                 variant_id=f"variant-jd-{jd.jd_id}",
@@ -213,6 +228,9 @@ def generate_run(run_dir: Path) -> GenerationArtifacts:
                 emphasized_strengths=_select_emphasized_strengths(candidate, jd),
                 stretch_points=_build_stretch_points(jd, candidate),
                 source_resume_path=candidate.base_resume_path,
+                safe_rewrites=_build_safe_rewrites(jd_requirements),
+                simulated_supplements=_build_simulated_supplements(jd_requirements),
+                forbidden_gaps=_build_forbidden_gaps(jd_requirements),
             )
         )
 
@@ -229,6 +247,9 @@ def evaluate_run(
     jd_profiles = hydrate(list[JDProfile], load_json(run_dir / "analyze" / "jd_profiles.json"))
     variants = hydrate(list[ResumeVariant], load_json(run_dir / "generate" / "resume_variants.json"))
     evidence_map = _load_evidence_map(run_dir)
+    requirement_matrix = _load_requirement_matrix(run_dir)
+    preflight_gates = _load_preflight_gates(run_dir)
+    preflight_gate_index = {gate.jd_id: gate for gate in preflight_gates}
     judge = build_judge_provider(config, stage="evaluate", run_dir=run_dir)
     runtime_provider = getattr(judge, "runtime_provider", config.judge.provider)
     runtime_model = getattr(judge, "runtime_model", config.judge.model)
@@ -246,6 +267,7 @@ def evaluate_run(
                 judge=judge,
                 candidate=candidate,
                 evidence_map=evidence_map,
+                requirement_matrix=requirement_matrix,
                 provider=runtime_provider,
                 model=runtime_model,
             ): item
@@ -259,6 +281,7 @@ def evaluate_run(
                 result = _build_fallback_task_result(
                     item=item,
                     candidate=candidate,
+                    requirement_matrix=requirement_matrix,
                     provider=runtime_provider,
                     model=runtime_model,
                     error=exc,
@@ -282,6 +305,17 @@ def evaluate_run(
     explanations: list[RankingExplanation] = [item.explanation for item in ordered_results]
     llm_assessments: list[LLMAssessment] = [item.assessment for item in ordered_results if item.assessment is not None]
     llm_failures: list[LLMFailure] = [item.assessment_failure for item in ordered_results if item.assessment_failure is not None]
+    preflight_scorecards: list[ScoreCard] = []
+    preflight_explanations: list[RankingExplanation] = []
+    for jd in jd_profiles:
+        gate = preflight_gate_index.get(jd.jd_id)
+        if gate is None or gate.status == "pass":
+            continue
+        scorecard = _build_preflight_scorecard(jd, gate, runtime_provider, runtime_model)
+        preflight_scorecards.append(scorecard)
+        preflight_explanations.append(_build_preflight_explanation(jd, gate, scorecard))
+    scorecards.extend(preflight_scorecards)
+    explanations.extend(preflight_explanations)
 
     grouped_by_jd: dict[int, list[_EvaluateTaskResult]] = {}
     for item in ordered_results:
@@ -296,6 +330,24 @@ def evaluate_run(
         gap_maps.append(GapMap(jd_id=jd.jd_id, candidate_id=candidate.candidate_id, items=gap_items))
 
         if not jd_items:
+            preflight_scorecard = next((scorecard for scorecard in preflight_scorecards if scorecard.jd_id == jd.jd_id), None)
+            preflight_explanation = next((explanation for explanation in preflight_explanations if explanation.jd_id == jd.jd_id), None)
+            if preflight_scorecard is not None:
+                preflight_gate = preflight_gate_index.get(jd.jd_id)
+                eval_summary.append(
+                    {
+                        "jd_id": jd.jd_id,
+                        "title": jd.title,
+                        "top_variant_id": preflight_scorecard.variant_id,
+                        "gap_count": len(gap_items),
+                        "top_reasons": (
+                            preflight_explanation.risk_flags[:2]
+                            if preflight_explanation
+                            else (preflight_gate.reasons[:2] if preflight_gate else [])
+                        )
+                        or ["preflight gate blocked this JD"],
+                    }
+                )
             continue
 
         best_item = max(jd_items, key=lambda it: ScoreCard.ranking_key(it.scorecard))
@@ -358,6 +410,22 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
     strategies: list[ApplicationStrategy] = []
     for rank, scorecard in enumerate(ordered, start=1):
         jd = jd_index[scorecard.jd_id]
+        if scorecard.gate_status != "pass":
+            strategy = _build_preflight_strategy(jd, scorecard, rank)
+            strategies.append(strategy)
+            log_agent_reasoning_summary(
+                run_dir,
+                stage="plan",
+                agent="planner",
+                summary=strategy.reason_summary,
+                decision_inputs=[
+                    f"jd_id={strategy.jd_id}",
+                    f"variant_id={strategy.recommended_variant_id}",
+                    f"gate_status={scorecard.gate_status}",
+                    f"decision={strategy.apply_decision}",
+                ],
+            )
+            continue
         variant = variant_index[scorecard.variant_id]
         assessment = assessment_index.get((scorecard.jd_id, scorecard.variant_id))
         assessment_failure = failure_index.get((scorecard.jd_id, scorecard.variant_id))
@@ -455,6 +523,238 @@ def report_run(run_dir: Path) -> Path:
     return report_path
 
 
+def _build_requirement_matrix(candidate: CandidateProfile, jd_profiles: list[JDProfile]) -> list[RequirementEvidence]:
+    matrix: list[RequirementEvidence] = []
+    candidate_text = _candidate_search_text(candidate)
+    for jd in jd_profiles:
+        for index, requirement in enumerate(_collect_jd_requirements(jd), start=1):
+            tier = _classify_requirement_tier(requirement)
+            evidence_status, evidence_refs = _evaluate_requirement_evidence(requirement, tier, candidate, candidate_text)
+            matrix.append(
+                RequirementEvidence(
+                    jd_id=jd.jd_id,
+                    requirement_id=f"{jd.jd_id}-req-{index:03d}",
+                    tier=tier,
+                    requirement_text=requirement,
+                    evidence_status=evidence_status,
+                    evidence_refs=evidence_refs,
+                    fabrication_policy=_fabrication_policy_for(tier, evidence_status),
+                    risk_weight=_risk_weight_for_tier(tier),
+                )
+            )
+    return matrix
+
+
+def _build_preflight_gates(requirement_matrix: list[RequirementEvidence]) -> list[PreflightGate]:
+    gates: list[PreflightGate] = []
+    jd_ids = sorted({item.jd_id for item in requirement_matrix})
+    for jd_id in jd_ids:
+        jd_requirements = [item for item in requirement_matrix if item.jd_id == jd_id]
+        mismatches = [
+            item for item in jd_requirements if item.tier == "hard_gate" and item.evidence_status == "mismatch"
+        ]
+        missing = [item for item in jd_requirements if item.tier == "hard_gate" and item.evidence_status == "missing"]
+        if mismatches:
+            gates.append(
+                PreflightGate(
+                    jd_id=jd_id,
+                    status="blocked",
+                    reasons=[f"hard_gate_mismatch: {item.requirement_text}" for item in mismatches],
+                    skipped_stages=GATED_SKIP_STAGES,
+                    user_action="该 JD 的硬门槛与 CV 明确不符，默认不继续生成。",
+                )
+            )
+        elif missing:
+            gates.append(
+                PreflightGate(
+                    jd_id=jd_id,
+                    status="needs_review",
+                    reasons=[f"hard_gate_missing: {item.requirement_text}" for item in missing],
+                    skipped_stages=GATED_SKIP_STAGES,
+                    user_action="补充或确认硬门槛证据后再继续。",
+                )
+            )
+        else:
+            gates.append(PreflightGate(jd_id=jd_id, status="pass"))
+    return gates
+
+
+def _collect_jd_requirements(jd: JDProfile) -> list[str]:
+    seen: set[str] = set()
+    requirements: list[str] = []
+    for source in [jd.must_have_requirements, jd.requirements, jd.responsibilities, jd.nice_to_have_requirements, jd.bonuses]:
+        for raw_item in source:
+            item = raw_item.strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            requirements.append(item)
+    return requirements
+
+
+def _classify_requirement_tier(requirement: str) -> str:
+    text = requirement.lower()
+    hard_needles = [
+        "学历",
+        "本科",
+        "硕士",
+        "博士",
+        "专业",
+        "证书",
+        "认证",
+        "持有",
+        "工作许可",
+        "签证",
+        "语言",
+        "英语",
+        "cet",
+        "ielts",
+        "toefl",
+        "degree",
+        "bachelor",
+        "master",
+        "phd",
+        "certification",
+        "certificate",
+        "license",
+        "work authorization",
+    ]
+    if any(needle in text for needle in hard_needles) or _has_explicit_year_requirement(text):
+        return "hard_gate"
+    medium_needles = ["项目", "经历", "场景", "负责", "参与", "主导", "落地", "project", "experience", "case study"]
+    if any(needle in text for needle in medium_needles):
+        return "medium_priority"
+    high_needles = [
+        "python",
+        "llm",
+        "ai",
+        "automation",
+        "evaluation",
+        "ranking",
+        "prompt",
+        "framework",
+        "平台",
+        "模型",
+        "算法",
+        "核心",
+    ]
+    if any(needle in text for needle in high_needles):
+        return "high_priority"
+    return "nice_to_have"
+
+
+def _evaluate_requirement_evidence(
+    requirement: str,
+    tier: str,
+    candidate: CandidateProfile,
+    candidate_text: str,
+) -> tuple[str, list[str]]:
+    requirement_text = requirement.lower()
+    candidate_evidence = candidate.experiences + candidate.projects + candidate.skills + candidate.verified_evidence + candidate.core_claims
+    refs = _matching_evidence_refs(requirement_text, candidate_evidence)
+    if tier == "hard_gate":
+        status = _evaluate_hard_gate(requirement_text, candidate_text)
+        return status, refs if status in {"verified", "inferred"} else []
+    if refs:
+        return "verified", refs
+    if tier == "medium_priority":
+        return "simulatable", []
+    return "missing", []
+
+
+def _evaluate_hard_gate(requirement: str, candidate_text: str) -> str:
+    if any(item in requirement for item in ["硕士", "master"]) and any(item in candidate_text for item in ["本科", "bachelor"]):
+        return "mismatch"
+    checks: list[bool] = []
+    if any(item in requirement for item in ["学历", "本科", "bachelor", "degree"]):
+        checks.append(any(item in candidate_text for item in ["本科", "bachelor", "degree", "硕士", "master", "phd", "博士"]))
+    if any(item in requirement for item in ["计算机", "专业", "computer", "cs"]):
+        checks.append(any(item in candidate_text for item in ["计算机", "computer", "computer science", "cs", "software"]))
+    if any(item in requirement for item in ["证书", "认证", "certificate", "certification", "pmp"]):
+        cert_tokens = [token for token in ["pmp", "aws", "cpa", "cfa"] if token in requirement]
+        checks.append(any(token in candidate_text for token in cert_tokens) if cert_tokens else "证书" in candidate_text)
+    if _has_explicit_year_requirement(requirement):
+        required_years = _extract_required_years(requirement)
+        candidate_years = _extract_required_years(candidate_text)
+        checks.append(candidate_years >= required_years if required_years else bool(candidate_years))
+    if not checks:
+        return "missing"
+    return "verified" if all(checks) else "missing"
+
+
+def _matching_evidence_refs(requirement: str, candidate_items: list[str]) -> list[str]:
+    tokens = [token for token in _requirement_tokens(requirement) if len(token) >= 2]
+    refs: list[str] = []
+    for item in candidate_items:
+        lowered = item.lower()
+        if any(token in lowered for token in tokens):
+            refs.append(item)
+    return refs[:3]
+
+
+def _requirement_tokens(text: str) -> list[str]:
+    normalized = text.replace("，", " ").replace("、", " ").replace(",", " ").replace("/", " ")
+    tokens = [token.strip("-().:; ") for token in normalized.split()]
+    cjk_tokens = [chunk for chunk in normalized.replace(" ", "").split("。") if chunk]
+    tokens.extend(cjk_tokens)
+    return [token.lower() for token in tokens if token.strip()]
+
+
+def _candidate_search_text(candidate: CandidateProfile) -> str:
+    return " ".join(
+        candidate.experiences
+        + candidate.projects
+        + candidate.skills
+        + candidate.industry_tags
+        + candidate.strengths
+        + candidate.constraints
+        + candidate.core_claims
+        + candidate.verified_evidence
+    ).lower()
+
+
+def _has_explicit_year_requirement(text: str) -> bool:
+    return _extract_required_years(text) > 0
+
+
+def _extract_required_years(text: str) -> int:
+    import re
+
+    match = re.search(r"(\d+)\s*(?:\+|年以上|年以上|years?|yrs?)", text.lower())
+    return int(match.group(1)) if match else 0
+
+
+def _fabrication_policy_for(tier: str, evidence_status: str) -> str:
+    if tier == "hard_gate" or evidence_status in {"missing", "mismatch"} and tier == "high_priority":
+        return "never_fabricate"
+    if tier == "medium_priority" and evidence_status == "simulatable":
+        return "simulate_allowed"
+    return "rewrite_only"
+
+
+def _risk_weight_for_tier(tier: str) -> float:
+    return {"hard_gate": 1.0, "high_priority": 0.7, "medium_priority": 0.45, "nice_to_have": 0.2}.get(tier, 0.4)
+
+
+def _build_safe_rewrites(requirements: list[RequirementEvidence]) -> list[str]:
+    verified = [item.requirement_text for item in requirements if item.evidence_status in {"verified", "inferred"}]
+    return [f"Use verified evidence for: {item}" for item in verified[:3]]
+
+
+def _build_simulated_supplements(requirements: list[RequirementEvidence]) -> list[str]:
+    simulatable = [item.requirement_text for item in requirements if item.evidence_status == "simulatable"]
+    return [f"待核实模拟补强：{item}" for item in simulatable[:3]]
+
+
+def _build_forbidden_gaps(requirements: list[RequirementEvidence]) -> list[str]:
+    forbidden = [
+        item.requirement_text
+        for item in requirements
+        if item.fabrication_policy == "never_fabricate" and item.evidence_status in {"missing", "mismatch", "forbidden_to_fabricate"}
+    ]
+    return [f"禁止编造：{item}" for item in forbidden[:3]]
+
+
 def _select_emphasized_strengths(candidate: CandidateProfile, jd: JDProfile) -> list[str]:
     strengths = []
     for keyword in jd.keywords:
@@ -503,7 +803,9 @@ def _join_input_text(documents: list[InputDocument]) -> str:
 def _log_input_document_extracted(run_dir: Path, role: str, document: InputDocument) -> None:
     fallback_from = None
     warning = document.extraction_error or None
-    if document.extraction_status in {"vision", "sidecar"} and document.extraction_error:
+    if document.media_type == "application/pdf" and document.extraction_status in {"ocr", "vision"}:
+        fallback_from = "local_pdf"
+    elif document.extraction_status in {"vision", "sidecar"} and document.extraction_error:
         fallback_from = "local_ocr"
     log_input_extracted(
         run_dir,
@@ -514,6 +816,15 @@ def _log_input_document_extracted(run_dir: Path, role: str, document: InputDocum
         fallback_from=fallback_from,
         warning=warning,
     )
+    if fallback_from is not None and document.extraction_provider:
+        log_fallback_used(
+            run_dir,
+            stage="ingest",
+            operation=f"{role}_input_extraction",
+            from_provider=fallback_from,
+            to_provider=document.extraction_provider,
+            reason=warning or f"{document.extraction_status} fallback used",
+        )
 
 
 def _record_analyze_quality(
@@ -824,9 +1135,11 @@ def _build_scorecard(
     rule_eval: RuleEvaluation,
     assessment: LLMAssessment | None,
     judge_rationale: str,
+    requirement_matrix: list[RequirementEvidence],
     provider: str,
     model: str,
 ) -> ScoreCard:
+    requirement_scores = _calculate_requirement_scores(jd.jd_id, requirement_matrix, rule_eval, assessment)
     if assessment is None:
         return ScoreCard(
             jd_id=jd.jd_id,
@@ -845,11 +1158,16 @@ def _build_scorecard(
             llm_persuasion_score=0.0,
             llm_risk_score=0.0,
             llm_overall_score=0.0,
-            final_overall_score=rule_eval.overall_score,
-            final_decision_source="guardrail-fallback",
+            final_overall_score=requirement_scores["final_overall_score"],
+            final_decision_source="v0.5.7-rules+guardrail-fallback",
             guardrail_flags=["llm_assessment_missing"],
             provider=provider,
             model=model,
+            verified_fit_score=requirement_scores["verified_fit_score"],
+            rewrite_potential_score=requirement_scores["rewrite_potential_score"],
+            risk_score=requirement_scores["risk_score"],
+            gate_status="pass",
+            gate_reasons=[],
         )
 
     llm_overall = round(
@@ -861,7 +1179,7 @@ def _build_scorecard(
         ),
         2,
     )
-    final_score = llm_overall
+    final_score = requirement_scores["final_overall_score"]
     flags: list[str] = []
     if _assessment_is_incomplete(assessment):
         flags.append("llm_assessment_incomplete")
@@ -875,11 +1193,11 @@ def _build_scorecard(
 
     candidate_text = " ".join(candidate.experiences + candidate.projects + candidate.skills + candidate.strengths).lower()
     missing_must_have = [item for item in jd.must_have_requirements if item.lower() not in candidate_text]
-    if missing_must_have and assessment.application_worthiness == "strong_apply":
+    if not requirement_matrix and missing_must_have and assessment.application_worthiness == "strong_apply":
         final_score = min(final_score, 0.79)
         flags.append("missing_must_have_requirements")
 
-    final_decision_source = "llm-primary" if not flags else "llm-primary+guardrail"
+    final_decision_source = "v0.5.7-requirement-score" if not flags else "v0.5.7-requirement-score+guardrail"
 
     return ScoreCard(
         jd_id=jd.jd_id,
@@ -903,6 +1221,126 @@ def _build_scorecard(
         guardrail_flags=flags,
         provider=assessment.provider or provider,
         model=assessment.model or model,
+        verified_fit_score=requirement_scores["verified_fit_score"],
+        rewrite_potential_score=requirement_scores["rewrite_potential_score"],
+        risk_score=requirement_scores["risk_score"],
+        gate_status="pass",
+        gate_reasons=[],
+    )
+
+
+def _calculate_requirement_scores(
+    jd_id: str,
+    requirement_matrix: list[RequirementEvidence],
+    rule_eval: RuleEvaluation,
+    assessment: LLMAssessment | None,
+) -> dict[str, float]:
+    requirements = [item for item in requirement_matrix if item.jd_id == jd_id]
+    if not requirements:
+        risk = assessment.interview_pressure_risk if assessment is not None else rule_eval.gap_risk_score
+        verified = round((rule_eval.fit_score * 0.45) + (rule_eval.evidence_score * 0.55), 2)
+        rewrite = round(min(1.0, verified + max(0.0, 1 - rule_eval.rewrite_cost_score) * 0.15), 2)
+        final = round((verified * 0.65) + (rewrite * 0.20) + ((1 - risk) * 0.15), 2)
+        return {"verified_fit_score": verified, "rewrite_potential_score": rewrite, "risk_score": round(risk, 2), "final_overall_score": final}
+
+    total_weight = sum(item.risk_weight for item in requirements) or 1.0
+    verified_points = 0.0
+    rewrite_points = 0.0
+    risk_points = 0.0
+    for item in requirements:
+        weight = item.risk_weight
+        if item.evidence_status == "verified":
+            verified_points += weight
+            rewrite_points += weight
+        elif item.evidence_status == "inferred":
+            verified_points += weight * 0.7
+            rewrite_points += weight * 0.85
+            risk_points += weight * 0.15
+        elif item.evidence_status == "simulatable":
+            rewrite_points += weight * 0.65
+            risk_points += weight * 0.45
+        elif item.evidence_status == "missing":
+            risk_points += weight * (0.9 if item.tier == "hard_gate" else 0.55)
+        elif item.evidence_status == "mismatch":
+            risk_points += weight
+    verified = round(max(0.0, min(1.0, verified_points / total_weight)), 2)
+    rewrite = round(max(verified, min(1.0, rewrite_points / total_weight)), 2)
+    base_risk = risk_points / total_weight
+    llm_risk = assessment.interview_pressure_risk if assessment is not None else rule_eval.gap_risk_score
+    risk = round(max(0.0, min(1.0, base_risk * 0.75 + llm_risk * 0.25)), 2)
+    final = round((verified * 0.65) + (rewrite * 0.20) + ((1 - risk) * 0.15), 2)
+    return {
+        "verified_fit_score": verified,
+        "rewrite_potential_score": rewrite,
+        "risk_score": risk,
+        "final_overall_score": final,
+    }
+
+
+def _build_preflight_scorecard(jd: JDProfile, gate: PreflightGate, provider: str, model: str) -> ScoreCard:
+    risk_score = 0.99 if gate.status == "blocked" else 0.85
+    return ScoreCard(
+        jd_id=jd.jd_id,
+        variant_id=f"preflight-{jd.jd_id}",
+        fit_score=0.0,
+        ats_score=0.0,
+        evidence_score=0.0,
+        stretch_score=0.0,
+        gap_risk_score=risk_score,
+        rewrite_cost_score=1.0,
+        overall_score=0.0,
+        ranking_version=SCORING_VERSION,
+        judge_rationale="Preflight gate skipped generation and LLM judge.",
+        final_overall_score=0.0,
+        final_decision_source="preflight-gate",
+        guardrail_flags=gate.reasons,
+        provider=provider,
+        model=model,
+        verified_fit_score=0.0,
+        rewrite_potential_score=0.0,
+        risk_score=risk_score,
+        gate_status=gate.status,
+        gate_reasons=gate.reasons,
+    )
+
+
+def _build_preflight_explanation(jd: JDProfile, gate: PreflightGate, scorecard: ScoreCard) -> RankingExplanation:
+    return RankingExplanation(
+        jd_id=jd.jd_id,
+        variant_id=scorecard.variant_id,
+        ranking_version=SCORING_VERSION,
+        dimension_reasons={
+            "fit": "Preflight gate did not calculate a normal fit score.",
+            "ats": "Preflight gate skipped ATS evaluation for this JD.",
+            "evidence": "Hard gate evidence must be confirmed before generation.",
+            "stretch": "No generated rewrite potential is counted before gate review.",
+            "gap_risk": f"gate_status={gate.status}; risk_score={scorecard.risk_score:.2f}",
+            "rewrite_cost": "Generation was skipped to avoid fabricating hard facts.",
+            "overall": "; ".join(gate.reasons) or "Preflight gate blocked this JD.",
+        },
+        positive_signals=[],
+        risk_flags=gate.reasons,
+        evidence_refs=[],
+        decision_summary="Preflight gate skipped generation/evaluation until hard gate evidence is confirmed.",
+    )
+
+
+def _build_preflight_strategy(jd: JDProfile, scorecard: ScoreCard, rank: int) -> ApplicationStrategy:
+    decision = "blocked" if scorecard.gate_status == "blocked" else "needs_review"
+    return ApplicationStrategy(
+        jd_id=jd.jd_id,
+        recommended_variant_id=scorecard.variant_id,
+        priority_rank=rank,
+        apply_decision=decision,
+        reason_summary="; ".join(scorecard.gate_reasons) or f"Preflight gate status: {scorecard.gate_status}.",
+        needs_jd_specific_variant=False,
+        decision_drivers=["preflight-gate"],
+        watchouts=scorecard.gate_reasons,
+        recommended_actions=["补充或确认硬门槛证据后再重新运行。"],
+        catch_up_notes=[],
+        decision_confidence=1.0,
+        interview_prep_points=jd.interview_focus_areas[:3],
+        resume_revision_tasks=[],
     )
 
 
@@ -1002,6 +1440,7 @@ def _evaluate_work_item(
     judge: object,
     candidate: CandidateProfile,
     evidence_map: dict[str, object],
+    requirement_matrix: list[RequirementEvidence],
     provider: str,
     model: str,
 ) -> _EvaluateTaskResult:
@@ -1044,6 +1483,7 @@ def _evaluate_work_item(
         rule_eval=rule_eval,
         assessment=assessment,
         judge_rationale=judge_rationale,
+        requirement_matrix=requirement_matrix,
         provider=provider,
         model=model,
     )
@@ -1074,6 +1514,7 @@ def _evaluate_work_item(
 def _build_fallback_task_result(
     item: _EvaluateWorkItem,
     candidate: CandidateProfile,
+    requirement_matrix: list[RequirementEvidence],
     provider: str,
     model: str,
     error: Exception | None = None,
@@ -1094,6 +1535,7 @@ def _build_fallback_task_result(
         rule_eval=rule_eval,
         assessment=None,
         judge_rationale=f"Task failed; fallback to rules with score {rule_eval.overall_score:.2f}.",
+        requirement_matrix=requirement_matrix,
         provider=provider,
         model=model,
     )
@@ -1119,6 +1561,20 @@ def _build_fallback_task_result(
         status="fallback",
         duration_ms=int((perf_counter() - started) * 1000),
     )
+
+
+def _load_requirement_matrix(run_dir: Path) -> list[RequirementEvidence]:
+    path = run_dir / "analyze" / "requirement_matrix.json"
+    if not path.exists():
+        return []
+    return hydrate(list[RequirementEvidence], load_json(path))
+
+
+def _load_preflight_gates(run_dir: Path) -> list[PreflightGate]:
+    path = run_dir / "analyze" / "preflight_gates.json"
+    if not path.exists():
+        return []
+    return hydrate(list[PreflightGate], load_json(path))
 
 
 def _load_evidence_map(run_dir: Path) -> dict[str, object]:

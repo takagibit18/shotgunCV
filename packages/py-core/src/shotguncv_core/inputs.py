@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 import base64
 import json
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -104,11 +106,9 @@ def _extract_document(path: Path, options: InputExtractionOptions) -> InputDocum
         )
     if suffix in PDF_EXTENSIONS:
         text = _extract_pdf_text(path)
-        if not text.strip():
-            raise InputExtractionError(
-                f"PDF input `{path}` did not contain extractable text. "
-                "Scanned PDFs are not OCRed in this version; provide a text or markdown sidecar."
-            )
+        quality_warning = _pdf_text_quality_warning(text)
+        if quality_warning is not None:
+            return _extract_pdf_with_image_fallback(path, options, quality_warning)
         return InputDocument(
             source_type="file",
             source_value=str(path),
@@ -238,6 +238,76 @@ def _image_media_type(suffix: str) -> str:
     return mapping.get(suffix, "image/*")
 
 
+def _extract_pdf_with_image_fallback(path: Path, options: InputExtractionOptions, quality_warning: str) -> InputDocument:
+    try:
+        page_images = _render_pdf_pages_to_images(path)
+    except Exception as exc:
+        render_error = str(exc).strip() or exc.__class__.__name__
+        raise InputExtractionError(_format_pdf_extraction_error(path, quality_warning, render_error, "", "")) from exc
+
+    try:
+        try:
+            if options.ocr_provider != "disabled":
+                ocr_chunks = [_extract_image_text_with_ocr(image_path, options.ocr_languages).strip() for image_path in page_images]
+                ocr_text = "\n\n".join(chunk for chunk in ocr_chunks if chunk)
+                if ocr_text.strip():
+                    return InputDocument(
+                        source_type="file",
+                        source_value=str(path),
+                        media_type="application/pdf",
+                        text=ocr_text,
+                        extraction_status="ocr",
+                        extraction_provider=options.ocr_provider,
+                        extraction_error=f"PDF text extraction fallback: {quality_warning}",
+                        original_name=path.name,
+                        size_bytes=path.stat().st_size,
+                    )
+                ocr_error = "OCR returned empty text."
+            else:
+                ocr_error = "OCR provider is disabled."
+        except Exception as exc:
+            ocr_error = str(exc).strip() or exc.__class__.__name__
+
+        if options.vision_enabled and options.vision_provider != "disabled":
+            try:
+                vision_chunks = [
+                    _extract_image_text_with_vision(
+                        image_path,
+                        options,
+                        f"PDF text extraction: {quality_warning}; OCR: {ocr_error}",
+                    ).strip()
+                    for image_path in page_images
+                ]
+                vision_text = "\n\n".join(chunk for chunk in vision_chunks if chunk)
+                if vision_text.strip():
+                    return InputDocument(
+                        source_type="file",
+                        source_value=str(path),
+                        media_type="application/pdf",
+                        text=vision_text,
+                        extraction_status="vision",
+                        extraction_provider=options.vision_provider,
+                        extraction_error=f"PDF text extraction fallback: {quality_warning}; ocr: {ocr_error}",
+                        original_name=path.name,
+                        size_bytes=path.stat().st_size,
+                    )
+                vision_error = "Vision provider returned empty text."
+            except Exception as exc:
+                vision_error = str(exc).strip() or exc.__class__.__name__
+        else:
+            vision_error = "Vision fallback is disabled."
+
+        raise InputExtractionError(_format_pdf_extraction_error(path, quality_warning, "", ocr_error, vision_error))
+    finally:
+        _cleanup_rendered_pdf_pages(page_images)
+
+
+def _cleanup_rendered_pdf_pages(page_images: list[Path]) -> None:
+    parents = {image_path.parent for image_path in page_images}
+    for parent in parents:
+        if parent.name.startswith("shotguncv-pdf-pages-"):
+            shutil.rmtree(parent, ignore_errors=True)
+
 def _find_sidecar(path: Path) -> Path | None:
     for suffix in (".txt", ".md"):
         candidate = path.with_suffix(suffix)
@@ -263,6 +333,58 @@ def _extract_pdf_text(path: Path) -> str:
     except Exception:
         pass
     return _extract_pdf_literal_text(path.read_bytes())
+
+
+def _pdf_text_quality_warning(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped:
+        return "PDF text extraction returned empty text."
+    visible_chars = sum(1 for char in stripped if char.isprintable() and not char.isspace())
+    replacement_chars = stripped.count("\ufffd")
+    control_chars = sum(1 for char in stripped if ord(char) < 32 and char not in "\r\n\t")
+    escaped_control_sequences = len(re.findall(r"\\\d{3}", stripped))
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    single_char_lines = sum(1 for line in lines if len(line) == 1)
+    average_line_length = visible_chars / max(1, len(lines))
+    debug_token_hits = sum(
+        stripped.lower().count(token)
+        for token in ("execute_tools", "submit_debug", "hit_rate", "offset/limit", "diff", "> analyze")
+    )
+    if visible_chars < 8:
+        return f"PDF text extraction returned too little usable text ({visible_chars} visible chars)."
+    if replacement_chars / max(1, len(stripped)) > 0.05:
+        return "PDF text extraction produced too many replacement characters."
+    if control_chars / max(1, len(stripped)) > 0.05:
+        return "PDF text extraction produced too many control characters."
+    if escaped_control_sequences >= 3:
+        return f"PDF text extraction produced escaped control sequences ({escaped_control_sequences} matches)."
+    if len(lines) >= 12 and single_char_lines / max(1, len(lines)) > 0.35 and average_line_length < 12:
+        return "PDF text extraction produced fragmented low-information lines."
+    if debug_token_hits >= 3:
+        return "PDF text extraction appears to contain tool/debug noise instead of document text."
+    return None
+
+
+def _render_pdf_pages_to_images(path: Path) -> list[Path]:
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except Exception as exc:
+        raise RuntimeError("PDF OCR fallback requires PyMuPDF.") from exc
+
+    output_dir = Path(tempfile.mkdtemp(prefix="shotguncv-pdf-pages-"))
+    page_paths: list[Path] = []
+    document = fitz.open(str(path))
+    try:
+        for index, page in enumerate(document, start=1):
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            page_path = output_dir / f"{path.stem}-page-{index:03d}.png"
+            pixmap.save(str(page_path))
+            page_paths.append(page_path)
+    finally:
+        document.close()
+    if not page_paths:
+        raise RuntimeError("PDF renderer found no pages.")
+    return page_paths
 
 
 def _extract_pdf_literal_text(payload: bytes) -> str:
@@ -340,3 +462,27 @@ def _format_image_extraction_error(path: Path, ocr_error: str, vision_error: str
         "Install Tesseract with required language packs, configure OPENAI_API_KEY/SHOTGUNCV_VISION_MODEL, "
         "or provide a same-name .txt or .md sidecar."
     )
+
+
+def _format_pdf_extraction_error(
+    path: Path,
+    quality_warning: str,
+    render_error: str,
+    ocr_error: str,
+    vision_error: str,
+) -> str:
+    parts = [
+        f"PDF input `{path}` could not be extracted.",
+        f"PDF text extraction issue: {quality_warning}",
+    ]
+    if render_error:
+        parts.append(f"Render error: {render_error}.")
+    if ocr_error:
+        parts.append(f"OCR error: {ocr_error}.")
+    if vision_error:
+        parts.append(f"Vision fallback error: {vision_error}.")
+    parts.append(
+        "Install PyMuPDF and Tesseract with required language packs, configure OPENAI_API_KEY/SHOTGUNCV_VISION_MODEL, "
+        "or provide a text or markdown CV sidecar."
+    )
+    return " ".join(parts)

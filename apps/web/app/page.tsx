@@ -24,11 +24,11 @@ export default async function HomePage() {
     <main className="app-shell">
       <section className="workspace-hero">
         <div>
-          <p className="eyebrow">{"\u672c\u673a AI \u8fd0\u884c\u5de5\u4f5c\u53f0"}</p>
-          <h1>{"ShotgunCV \u8fd0\u884c\u5de5\u4f5c\u53f0"}</h1>
+          <p className="eyebrow">{"v0.5.7 本地 AI 简历运营工作台"}</p>
+          <h1>{"ShotgunCV 投递运行台"}</h1>
           <p className="hero-copy">
             {
-              "\u6d4f\u89c8\u672c\u5730 runs \u76ee\u5f55\u4e2d\u7684\u9636\u6bb5\u4ea7\u7269\u3001\u8bc4\u4f30\u7ed3\u679c\u4e0e\u6295\u9012\u7b56\u7565\uff0c\u5e76\u901a\u8fc7\u672c\u673a CLI \u89e6\u53d1\u8349\u7a3f\u8fd0\u884c\u3001\u5931\u8d25\u91cd\u8bd5\u548c\u9636\u6bb5\u7eed\u8dd1\u3002"
+              "面向本地单用户的 AI Resume Ops 工作台，集中查看 runs 目录中的阶段产物、评分证据、风险提示和下一步投递动作。"
             }
           </p>
           <p className="sr-only">{"ShotgunCV \u8fd0\u884c\u67e5\u770b\u5668"}</p>
@@ -47,7 +47,7 @@ export default async function HomePage() {
             <span className="metric-label">{"\u6700\u65b0\u8fdb\u5ea6"}</span>
           </div>
           <Link href="/upload" className="primary-link">
-            {"Create draft run"}
+            {"创建草稿 run"}
           </Link>
         </div>
       </section>
@@ -56,9 +56,9 @@ export default async function HomePage() {
         <div className="section-heading">
           <div>
             <p className="eyebrow">{"运行队列"}</p>
-            <h2>{"\u8fd0\u884c\u5217\u8868"}</h2>
+            <h2>{"运行列表"}</h2>
           </div>
-          <span className="status-chip">{"\u672c\u673a\u8fd0\u884c\u7ba1\u7406"}</span>
+          <span className="status-chip">{"本机运行管理"}</span>
         </div>
 
         <div className="run-table" role="list">

@@ -26,17 +26,17 @@ export default async function ReportPage({ params }: PageProps) {
 
       <section className="workspace-hero">
         <div>
-          <p className="eyebrow">{"运行报告"}</p>
+          <p className="eyebrow">{"运行报告 · 投递复盘"}</p>
           <h1 className="page-title">{resolvedParams.runId}</h1>
-          <p className="hero-copy">{"结构化报告阅读视图，保留 Markdown 内容并统一到 light theme 工作台样式。"}</p>
+          <p className="hero-copy">{"先呈现投递结论、关键证据和面试前补强点，再保留原始 Markdown 报告用于追溯。"}</p>
         </div>
-        <span className="status-chip">{"Markdown"}</span>
+        <span className="status-chip">{"Markdown 原文"}</span>
       </section>
 
       <section className="section report-summary">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">{"报告页结构化"}</p>
+            <p className="eyebrow">{"结构化摘要"}</p>
             <h2>{"投递决策摘要"}</h2>
           </div>
           <span className="status-chip">{"保留原文 Markdown"}</span>

@@ -28,7 +28,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action }),
     });
-    await handleResponse(response, "Run action queued.");
+    await handleResponse(response, "运行动作已进入本地队列。");
   }
 
   async function deleteCurrentRun() {
@@ -41,7 +41,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
       }
       return;
     }
-    await handleResponse(response, "Run deleted.");
+    await handleResponse(response, "运行已删除。");
   }
 
   async function patchDraft(event: React.FormEvent<HTMLFormElement>) {
@@ -53,14 +53,14 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
       method: "PATCH",
       body: formData,
     });
-    await handleResponse(response, "Draft updated.");
+    await handleResponse(response, "草稿已更新。");
   }
 
   async function handleResponse(response: Response, success: string) {
     setIsBusy(false);
     if (!response.ok) {
       const payload = (await response.json()) as { error?: string; code?: string };
-      setMessage(payload.error ?? payload.code ?? "Request failed.");
+      setMessage(payload.error ?? payload.code ?? "请求失败。");
       return;
     }
     setMessage(success);
@@ -73,16 +73,16 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
     <div className="run-action-stack">
       <div className="pill-row compact">
         <button className="primary-link" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run")}>
-          {"Run"}
+          {"运行"}
         </button>
         <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("retry_full")}>
-          {"Retry full"}
+          {"完整重试"}
         </button>
         <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("resume_failed")}>
-          {"Resume failed"}
+          {"从失败处继续"}
         </button>
         <button className="secondary-link danger" type="button" disabled={!canDelete || isBusy} onClick={deleteCurrentRun}>
-          {"Delete"}
+          {"删除"}
         </button>
       </div>
       {message ? <p className="muted">{message}</p> : null}
@@ -95,12 +95,12 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
               <input name="candidateId" defaultValue={draft.candidateId} />
             </label>
             <label className="field-label">
-              <span>{"Label"}</span>
+              <span>{"运行标签"}</span>
               <input name="label" defaultValue={draft.label} />
             </label>
           </div>
           <label className="field-label">
-            <span>{"Replace all CV files"}</span>
+            <span>{"替换全部 CV 文件"}</span>
             <input name="cvFiles" type="file" multiple accept=".txt,.md,.pdf,.png,.jpg,.jpeg" />
           </label>
           <div className="jd-text-stack">
@@ -108,26 +108,26 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
               .filter((file) => file.role === "jd")
               .map((file, index) => (
                 <label className="field-label" key={file.storedRelativePath}>
-                  <span>{`JD display name ${index + 1}`}</span>
+                  <span>{`JD 显示名 ${index + 1}`}</span>
                   <input name="jdFileDisplayNames" defaultValue={file.displayName ?? ""} />
                 </label>
               ))}
           </div>
           <label className="field-label">
-            <span>{"Append JD file"}</span>
+            <span>{"追加 JD 文件"}</span>
             <input name="jdFiles" type="file" multiple accept=".txt,.md,.pdf,.png,.jpg,.jpeg" />
           </label>
           <label className="field-label">
-            <span>{"New JD display name"}</span>
+            <span>{"新 JD 显示名"}</span>
             <input name="jdFileDisplayNames" placeholder="Company - Role" />
           </label>
           <label className="field-label">
-            <span>{"Append pasted JD"}</span>
+            <span>{"追加粘贴 JD"}</span>
             <input name="jdTextDisplayNames" placeholder="Company - Role" />
-            <textarea name="jdTexts" rows={5} placeholder="Paste JD text" />
+            <textarea name="jdTexts" rows={5} placeholder="粘贴 JD 文本" />
           </label>
           <button className="primary-link" type="submit" disabled={isBusy}>
-            {"Update draft"}
+            {"更新草稿"}
           </button>
         </form>
       ) : null}
