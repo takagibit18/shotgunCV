@@ -38,6 +38,88 @@ def test_collects_text_from_pdf_document(tmp_path: Path) -> None:
     assert "PDF Resume Evidence" in documents[0].text
 
 
+def test_pdf_with_low_quality_text_uses_ocr_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "resume.pdf"
+    page_image = tmp_path / "resume-page-1.png"
+    pdf_path.write_bytes(b"%PDF-1.4 scanned")
+    page_image.write_bytes(b"image")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: "")
+    monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "OCR PDF Resume Text",
+    )
+
+    documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].media_type == "application/pdf"
+    assert documents[0].text == "OCR PDF Resume Text"
+    assert documents[0].extraction_status == "ocr"
+    assert documents[0].extraction_provider == "local_ocr"
+    assert "PDF text extraction" in documents[0].extraction_error
+
+
+def test_pdf_with_fragmented_junk_text_uses_ocr_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "resume.pdf"
+    page_image = tmp_path / "resume-page-1.png"
+    pdf_path.write_bytes(b"%PDF-1.4 encoded")
+    page_image.write_bytes(b"image")
+    junk_text = (
+        "> analyze -\n> execute_tools -\n> format -\n submit_review / submit_debug \n#\n$%\n 3 \n&'\n"
+        "\\001\\002\\003\\004\\005\\006\\007985\\010\\011\\012\\013\\014\\015\\006\\016\\017\\020\\007\\021"
+    )
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: junk_text)
+    monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "Bachelor degree in Computer Science. Built Python Agent systems.",
+    )
+
+    documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].text.startswith("Bachelor degree")
+    assert documents[0].extraction_status == "ocr"
+    assert "fragmented" in documents[0].extraction_error or "escaped control" in documents[0].extraction_error
+
+
+def test_pdf_with_empty_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "resume.pdf"
+    page_image = tmp_path / "resume-page-1.png"
+    pdf_path.write_bytes(b"%PDF-1.4 scanned")
+    page_image.write_bytes(b"image")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: "")
+    monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_vision",
+        lambda path, options, ocr_error: "Vision PDF Resume Text",
+    )
+
+    documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=True))
+
+    assert documents[0].text == "Vision PDF Resume Text"
+    assert documents[0].extraction_status == "vision"
+    assert documents[0].extraction_provider == "openai_vision"
+
+
+def test_pdf_fallback_failure_records_unparseable_guidance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "resume.pdf"
+    page_image = tmp_path / "resume-page-1.png"
+    pdf_path.write_bytes(b"%PDF-1.4 scanned")
+    page_image.write_bytes(b"image")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: "")
+    monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+
+    documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].media_type == "application/pdf"
+    assert documents[0].extraction_status == "unparseable"
+    assert "PDF text extraction" in documents[0].extraction_error
+    assert "OCR returned empty text" in documents[0].extraction_error
+    assert "Vision fallback is disabled" in documents[0].extraction_error
+
+
 def test_collects_image_with_text_sidecar(tmp_path: Path) -> None:
     image_path = tmp_path / "jd.png"
     sidecar_path = tmp_path / "jd.md"

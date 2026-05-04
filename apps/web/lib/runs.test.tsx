@@ -75,6 +75,30 @@ describe("run viewer data loading", () => {
     });
   });
 
+  it("loads v0.5.7 gate and three-score artifacts", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const detail = await loadRunDetail("demo-v057");
+
+    expect(detail.preflightGates[0]).toMatchObject({
+      jd_id: "jd-001",
+      status: "pass",
+    });
+    expect(detail.requirementMatrix[0]).toMatchObject({
+      tier: "hard_gate",
+      evidence_status: "verified",
+      fabrication_policy: "never_fabricate",
+    });
+    expect(detail.evaluate.scorecards[0]).toMatchObject({
+      verified_fit_score: 0.74,
+      rewrite_potential_score: 0.83,
+      risk_score: 0.22,
+      gate_status: "pass",
+    });
+  });
+
   it("uses uploaded JD display names as readable fallbacks for empty analyzed titles", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-display-name");
@@ -493,7 +517,7 @@ describe("run viewer data loading", () => {
     expect(html).toContain("运行观测");
     expect(html).toContain("gpt-5.4-mini");
     expect(html).toContain("125");
-    expect(html).toContain("Done with warnings");
+    expect(html).toContain("完成但有警告");
     expect(html).toContain("stage_failed");
     expect(html).toContain("simulated failure");
   });
@@ -656,8 +680,8 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await HomePage());
 
-    expect(html).toContain("运行工作台");
-    expect(html).toContain("本机 AI 运行工作台");
+    expect(html).toContain("ShotgunCV 投递运行台");
+    expect(html).toContain("v0.5.7 本地 AI 简历运营工作台");
     expect(html).toContain("阶段完成度");
   });
 
@@ -668,7 +692,32 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("/upload");
-    expect(html).toContain("Create draft run");
+    expect(html).toContain("创建草稿 run");
+  });
+
+  it("renders v0.5.7 polished Chinese workspace copy without mojibake", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-v060", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const homeHtml = renderToStaticMarkup(await HomePage());
+    const uploadHtml = renderToStaticMarkup(UploadPage());
+    const runHtml = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
+    const reportHtml = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
+    const combinedHtml = [homeHtml, uploadHtml, runHtml, reportHtml].join("\n");
+
+    expect(combinedHtml).toContain("v0.5.7 本地 AI 简历运营工作台");
+    expect(combinedHtml).toContain("运行队列");
+    expect(combinedHtml).toContain("返回运行列表");
+    expect(combinedHtml).toContain("上传输入");
+    expect(combinedHtml).toContain("运行详情");
+    expect(combinedHtml).toContain("运行状态");
+    expect(combinedHtml).toContain("投递决策摘要");
+    expect(combinedHtml).toContain("硬门槛审查");
+    expect(combinedHtml).toContain("真实匹配");
+    expect(combinedHtml).toContain("改写潜力");
+    expect(combinedHtml).toContain("风险压力");
+    expect(combinedHtml).not.toMatch(/[杩鏂鐢绋鐘宀]/);
   });
 
   it("renders draft run detail with the next CLI command", async () => {
@@ -774,8 +823,8 @@ describe("run viewer pages", () => {
   it("renders the upload page with local-only draft copy", () => {
     const html = renderToStaticMarkup(UploadPage());
 
-    expect(html).toContain("Create draft run");
-    expect(html).toContain("Draft only");
+    expect(html).toContain("创建投递草稿");
+    expect(html).toContain("仅创建草稿");
     expect(html).not.toContain("candidateId");
     expect(html).not.toContain("name=\"label\"");
     expect(html).toContain("cvFiles");
@@ -838,6 +887,20 @@ describe("run viewer pages", () => {
     expect(html).toContain("score-ring-orbit");
     expect(html).toContain("81%");
     expect(html).not.toContain("移动端改成可纵向扫描的决策卡");
+  });
+
+  it("renders v0.5.7 gate status and three-score labels", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-v057" }) }));
+
+    expect(html).toContain("Preflight gate");
+    expect(html).toContain("硬门槛审查");
+    expect(html).toContain("真实匹配");
+    expect(html).toContain("改写潜力");
+    expect(html).toContain("风险压力");
   });
 
   it("links matrix rows to the matching customized resume card", async () => {
@@ -992,7 +1055,7 @@ async function createIncompleteRun(runsDir: string, runId: string): Promise<void
 async function createCompleteRun(
   runsDir: string,
   runId: string,
-  options?: { includeExplanations?: boolean },
+  options?: { includeExplanations?: boolean; includeV057Artifacts?: boolean },
 ): Promise<void> {
   const includeExplanations = options?.includeExplanations ?? true;
   const runDir = path.join(runsDir, runId);
@@ -1012,8 +1075,34 @@ async function createCompleteRun(
       emphasized_strengths: ["evaluation"],
       stretch_points: ["metrics"],
       source_resume_path: "fixtures/candidates/base_resume.md",
+      safe_rewrites: options?.includeV057Artifacts ? ["Keep education and employer facts unchanged."] : undefined,
+      simulated_supplements: options?.includeV057Artifacts ? ["待核实模拟补强：风控项目复盘"] : undefined,
+      forbidden_gaps: options?.includeV057Artifacts ? ["Do not fabricate certificates."] : undefined,
     },
   ]);
+  if (options?.includeV057Artifacts) {
+    await writeJson(path.join(runDir, "analyze", "requirement_matrix.json"), [
+      {
+        jd_id: "jd-001",
+        requirement_id: "jd-001-req-001",
+        tier: "hard_gate",
+        requirement_text: "本科及以上学历，计算机相关专业",
+        evidence_status: "verified",
+        evidence_refs: ["Bachelor degree in Computer Science"],
+        fabrication_policy: "never_fabricate",
+        risk_weight: 1,
+      },
+    ]);
+    await writeJson(path.join(runDir, "analyze", "preflight_gates.json"), [
+      {
+        jd_id: "jd-001",
+        status: "pass",
+        reasons: [],
+        skipped_stages: [],
+        user_action: "",
+      },
+    ]);
+  }
   await writeJson(path.join(runDir, "evaluate", "scorecards.json"), [
     {
       jd_id: "jd-001",
@@ -1037,6 +1126,11 @@ async function createCompleteRun(
       guardrail_flags: [],
       provider: "openai",
       model: "gpt-5.4-mini",
+      verified_fit_score: options?.includeV057Artifacts ? 0.74 : undefined,
+      rewrite_potential_score: options?.includeV057Artifacts ? 0.83 : undefined,
+      risk_score: options?.includeV057Artifacts ? 0.22 : undefined,
+      gate_status: options?.includeV057Artifacts ? "pass" : undefined,
+      gate_reasons: options?.includeV057Artifacts ? [] : undefined,
     },
   ]);
   if (includeExplanations) {

@@ -15,7 +15,7 @@ type DimensionItem = {
   key: string;
   label: string;
   value?: number;
-  tone?: "default" | "risk";
+  tone?: "default" | "evidence" | "rewrite" | "risk";
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -28,12 +28,12 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  draft: "Draft",
-  queued: "Queued",
-  running: "Running",
-  done: "Done",
-  failed: "Failed",
-  "ingest-ready": "Ingest ready",
+  draft: "草稿",
+  queued: "排队中",
+  running: "运行中",
+  done: "已完成",
+  failed: "失败",
+  "ingest-ready": "导入就绪",
 };
 
 
@@ -42,7 +42,7 @@ export default async function RunPage({ params }: PageProps) {
   const detail = await loadRunDetail(resolvedParams.runId);
   const displayStatus =
     detail.draftStatus === "done" && detail.runStatus?.quality_status === "warning"
-      ? "Done with warnings"
+      ? "完成但有警告"
       : STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus;
 
   return (
@@ -53,10 +53,10 @@ export default async function RunPage({ params }: PageProps) {
 
       <section className="workspace-hero">
         <div>
-          <p className="eyebrow">{detail.label || "运行详情"}</p>
+          <p className="eyebrow">{"运行详情 · "}{detail.label || "未命名运行"}</p>
           <h1 className="page-title">{detail.runId}</h1>
           <p className="hero-copy">
-            {"从阶段产物到评分矩阵的只读视图，用于快速判断岗位优先级、简历版本收益和风险压力。"}
+            {"把阶段状态、模型观测、硬门槛审查和投递评分放在同一条工作流里，优先回答“现在能不能投、风险在哪里”。"}
           </p>
           <div className="pill-row">
             <span className="pill">{"分析器："}{detail.analyzerProvider}</span>
@@ -102,11 +102,11 @@ export default async function RunPage({ params }: PageProps) {
           <article className="detail-card">
             <h3>{"最近一次运行"}</h3>
             <p>
-              {"Action: "}
+              {"动作："}
               <span className="mono">{detail.runStatus?.last_action ?? "n/a"}</span>
             </p>
             <p>
-              {"Current stage: "}
+              {"当前阶段："}
               <span className="mono">{detail.runStatus?.current_stage ?? "n/a"}</span>
             </p>
             {detail.runStatus?.error_summary ? (
@@ -116,7 +116,7 @@ export default async function RunPage({ params }: PageProps) {
             ) : null}
             {detail.runStatus?.quality_summary ? (
               <p className="risk-line">
-                {"Quality: "}
+                {"质量提示："}
                 {detail.runStatus.quality_summary}
               </p>
             ) : null}
@@ -134,11 +134,11 @@ export default async function RunPage({ params }: PageProps) {
           <article className="detail-card">
             <h3>{"模型与 token"}</h3>
             <p>
-              {"Total tokens: "}
+              {"总 token："}
               <span className="mono">{detail.observability.totalTokens ?? "n/a"}</span>
             </p>
             <p>
-              {"Prompt / completion: "}
+              {"Prompt / completion："}
               <span className="mono">
                 {(detail.observability.promptTokens ?? "n/a") + " / " + (detail.observability.completionTokens ?? "n/a")}
               </span>
@@ -160,11 +160,11 @@ export default async function RunPage({ params }: PageProps) {
           <article className="detail-card">
             <h3>{"工具与质量"}</h3>
             <p>
-              {"Tool calls: "}
+              {"工具调用："}
               <span className="mono">{detail.observability.toolCallCount}</span>
             </p>
             <p>
-              {"Fallbacks: "}
+              {"Fallback："}
               <span className="mono">{detail.observability.fallbackCount}</span>
             </p>
             {detail.observability.qualityWarnings.length > 0 ? (
@@ -174,7 +174,7 @@ export default async function RunPage({ params }: PageProps) {
                 ))}
               </ul>
             ) : (
-              <p>{"No quality warnings"}</p>
+              <p>{"暂无质量警告"}</p>
             )}
           </article>
         </div>
@@ -205,7 +205,7 @@ export default async function RunPage({ params }: PageProps) {
 
       {detail.draft ? (
         <section className="section">
-          <SectionHeading eyebrow="Draft run" title="上传草稿" action={detail.draftStatus} />
+          <SectionHeading eyebrow="Draft run" title="上传草稿" action={displayStatus} />
           <div className="detail-grid">
             <article className="detail-card">
               <h3>{"输入文件"}</h3>
@@ -296,6 +296,39 @@ export default async function RunPage({ params }: PageProps) {
       </section>
 
       <section className="section">
+        <SectionHeading eyebrow="Preflight gate" title="硬门槛审查" />
+        {detail.preflightGates.length > 0 ? (
+          <div className="gate-grid">
+            {detail.preflightGates.map((gate) => {
+              const requirements = detail.requirementMatrix.filter((item) => item.jd_id === gate.jd_id);
+              return (
+                <article key={gate.jd_id} className={`detail-card gate-card gate-${gate.status}`}>
+                  <div className="gate-card-heading">
+                    <h3>{gate.jd_id}</h3>
+                    <span className="status-chip">{formatGateStatus(gate.status)}</span>
+                  </div>
+                  {gate.reasons.length > 0 ? <p className="risk-line">{gate.reasons.join(" / ")}</p> : null}
+                  <ul className="requirement-list">
+                    {requirements.slice(0, 4).map((item) => (
+                      <li key={item.requirement_id}>
+                        <span className="mono">{formatRequirementTier(item.tier)}</span>
+                        {" · "}
+                        {formatEvidenceStatus(item.evidence_status)}
+                        {" · "}
+                        {item.requirement_text}
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty">{"当前 run 暂无 v0.5.7 硬门槛产物，继续按历史评分产物兼容展示。"}</div>
+        )}
+      </section>
+
+      <section className="section">
         <SectionHeading eyebrow="阶段生成" title="生成阶段" />
         {detail.generate.isComplete ? (
           <div className="detail-grid">
@@ -318,10 +351,10 @@ export default async function RunPage({ params }: PageProps) {
           <div className="score-matrix">
             <div className="matrix-header">
               <div>
-                <p className="eyebrow">{"决策矩阵"}</p>
+                <p className="eyebrow">{"v0.6.0 决策矩阵"}</p>
                 <h3>{"岗位优先级矩阵"}</h3>
               </div>
-              <p className="muted">{"综合得分、证据覆盖和风险压力共同决定投递顺序。点击岗位标题可跳转到对应定制简历。"}</p>
+              <p className="muted">{"优先看真实匹配、改写潜力和风险压力，再用历史维度解释排序。点击岗位标题可跳转到对应定制简历。"}</p>
             </div>
             {detail.evaluate.topVariants
               .slice()
@@ -393,6 +426,9 @@ function ScoreMatrixRow({
 }: ScoreMatrixRowProps) {
   const score = toPercent(scorecard?.final_overall_score ?? scorecard?.overall_score ?? overallScore);
   const dimensions: DimensionItem[] = [
+    { key: "verified", label: "真实匹配", value: scorecard?.verified_fit_score, tone: "evidence" },
+    { key: "rewritePotential", label: "改写潜力", value: scorecard?.rewrite_potential_score, tone: "rewrite" },
+    { key: "riskScore", label: "风险压力", value: scorecard?.risk_score, tone: "risk" },
     { key: "fit", label: "岗位匹配", value: scorecard?.fit_score },
     { key: "ats", label: "关键词", value: scorecard?.ats_score },
     { key: "evidence", label: "证据覆盖", value: scorecard?.evidence_score },
@@ -400,7 +436,7 @@ function ScoreMatrixRow({
     { key: "risk", label: "风险压力", value: scorecard?.gap_risk_score, tone: "risk" },
     { key: "cost", label: "改写成本", value: scorecard?.rewrite_cost_score },
   ];
-  const riskScore = toPercent(scorecard?.gap_risk_score ?? 0);
+  const riskScore = toPercent(scorecard?.risk_score ?? scorecard?.gap_risk_score ?? 0);
   const signals = explanation?.positive_signals.length ? explanation.positive_signals : topReasons;
   const risks = explanation?.risk_flags ?? [];
   const evidenceRefs = explanation?.evidence_refs ?? [];
@@ -423,6 +459,7 @@ function ScoreMatrixRow({
           </div>
           <div className="matrix-actions">
             <span className="decision-badge">{"综合评分"}</span>
+            {scorecard?.gate_status ? <span className="status-chip">{formatGateStatus(scorecard.gate_status)}</span> : null}
             <details className="matrix-action-detail">
               <summary>{"适配度分析"}</summary>
               <div className="matrix-action-panel">
@@ -457,7 +494,7 @@ function ScoreMatrixRow({
         <DimensionBars dimensions={dimensions} />
         <div className="signal-grid">
           <div>
-            <span className="mini-label">{"证据覆盖"}</span>
+            <span className="mini-label">{"证据引用"}</span>
             <strong>{evidenceCount || "待检查"}</strong>
           </div>
           <div>
@@ -465,7 +502,7 @@ function ScoreMatrixRow({
             <strong>{riskScore}{"%"}</strong>
           </div>
           <div>
-            <span className="mini-label">{"Gap"}</span>
+            <span className="mini-label">{"缺口数"}</span>
             <strong>{gapCount}</strong>
           </div>
         </div>
@@ -507,7 +544,7 @@ function DimensionBars({ dimensions }: { dimensions: DimensionItem[] }) {
               <span>{dimension.label}</span>
               <strong>{dimension.value === undefined ? "--" : `${percent}%`}</strong>
             </div>
-            <div className={dimension.tone === "risk" ? "score-bar risk-bar" : "score-bar"}>
+            <div className={buildScoreBarClassName(dimension.tone)}>
               <span style={{ width: `${percent}%` }} />
             </div>
           </div>
@@ -525,6 +562,47 @@ function toPercent(value: number): number {
 
 function buildVariantAnchorId(variantId: string): string {
   return `variant-${variantId}`;
+}
+
+
+function formatGateStatus(status: string): string {
+  const labels: Record<string, string> = {
+    pass: "通过",
+    blocked: "阻断",
+    needs_review: "需复核",
+  };
+  return labels[status] ?? status;
+}
+
+
+function formatRequirementTier(tier: string): string {
+  const labels: Record<string, string> = {
+    hard_gate: "硬门槛",
+    high_priority: "高优先级",
+    medium_priority: "中优先级",
+    nice_to_have: "加分项",
+  };
+  return labels[tier] ?? tier;
+}
+
+
+function formatEvidenceStatus(status: string): string {
+  const labels: Record<string, string> = {
+    verified: "已验证",
+    inferred: "可推断",
+    missing: "缺失",
+    mismatch: "不匹配",
+    simulatable: "可模拟补强",
+    forbidden_to_fabricate: "禁止编造",
+  };
+  return labels[status] ?? status;
+}
+
+
+function buildScoreBarClassName(tone?: DimensionItem["tone"]): string {
+  return ["score-bar", tone === "risk" ? "risk-bar" : "", tone === "rewrite" ? "rewrite-bar" : "", tone === "evidence" ? "evidence-bar" : ""]
+    .filter(Boolean)
+    .join(" ");
 }
 
 

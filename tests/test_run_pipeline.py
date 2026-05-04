@@ -237,6 +237,52 @@ def test_ingest_run_records_unparseable_inputs_as_warnings(tmp_path: Path) -> No
     ]
 
 
+def test_ingest_run_logs_pdf_fallback_chain(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_path = tmp_path / "resume.pdf"
+    page_image = tmp_path / "resume-page-1.png"
+    jd_path = tmp_path / "jd.txt"
+    cv_path.write_bytes(b"%PDF-1.4 encoded")
+    page_image.write_bytes(b"image")
+    jd_path.write_text("Title: AI Engineer\nBody:\n- Build automation", encoding="utf-8")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_pdf_text",
+        lambda path: "> analyze -\nA\nB\nC\n\\001\\002\\003\\004\\005\\006\\007",
+    )
+    monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "Bachelor degree in Computer Science. Built Python Agent systems.",
+    )
+
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=cv_path,
+        jd_sources=[jd_path],
+        config_path=config_path,
+        vision_fallback_enabled=False,
+    )
+
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["candidate_inputs"][0]["extraction_status"] == "ocr"
+    events = [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    extracted = [event for event in events if event["event"] == "input_extracted" and event["role"] == "cv"][0]
+    assert extracted["provider"] == "local_ocr"
+    assert extracted["fallback_from"] == "local_pdf"
+    assert any(
+        event["event"] == "fallback_used"
+        and event["from_provider"] == "local_pdf"
+        and event["to_provider"] == "local_ocr"
+        for event in events
+    )
+
+
 def test_ingest_run_fails_when_all_cv_inputs_are_unparseable(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     config_path = _write_deterministic_config(tmp_path)

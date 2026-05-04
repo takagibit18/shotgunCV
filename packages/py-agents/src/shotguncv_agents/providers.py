@@ -174,14 +174,20 @@ class DeterministicAnalyzeProvider:
         self.runtime_model = model
 
     def analyze(self, candidate_id: str, candidate_resume_path: str, resume_text: str, jd_inputs: list[dict[str, str]]) -> AnalyzeFeedback:
-        bullet_lines = [line.strip("- ").strip() for line in resume_text.splitlines() if line.strip().startswith("-")]
-        lowered = " ".join(bullet_lines).lower()
+        resume_sections = _extract_resume_sections(resume_text)
+        evidence_lines = resume_sections["evidence"]
+        lowered = " ".join(evidence_lines).lower()
         skills = []
         for keyword, label in (
             ("python", "Python"),
             ("llm", "LLM workflows"),
             ("resume", "Resume evaluation"),
             ("product", "Product collaboration"),
+            ("computer science", "Computer Science"),
+            ("计算机", "计算机专业"),
+            ("pmp", "PMP"),
+            ("certificate", "Certificates"),
+            ("证书", "证书"),
         ):
             if keyword in lowered:
                 skills.append(label)
@@ -189,15 +195,15 @@ class DeterministicAnalyzeProvider:
         candidate = CandidateProfile(
             candidate_id=candidate_id,
             base_resume_path=candidate_resume_path,
-            experiences=bullet_lines,
-            projects=[line for line in bullet_lines if "prototype" in line.lower() or "tool" in line.lower()],
+            experiences=resume_sections["experiences"],
+            projects=resume_sections["projects"],
             skills=skills or ["AI workflow delivery"],
             industry_tags=["AI tooling", "Resume ops"],
-            strengths=bullet_lines[:2] or ["Structured AI workflow delivery"],
+            strengths=resume_sections["strengths"][:2] or ["Structured AI workflow delivery"],
             constraints=["No explicit production ML platform ownership yet"],
             preferences=["Product-oriented AI roles"],
-            core_claims=bullet_lines[:3],
-            verified_evidence=bullet_lines[:4],
+            core_claims=evidence_lines[:4],
+            verified_evidence=evidence_lines[:8],
             missing_evidence_areas=["Large-scale online experiment ownership"],
             preferred_role_tracks=["LLM Product Engineer", "Applied AI Ops"],
         )
@@ -473,6 +479,9 @@ class OpenAIAnalyzeProvider:
             "请仅返回严格 JSON（不要 markdown 代码块、不要额外解释），顶层键必须是："
             "candidate_profile,jd_profiles,evidence_map。\n"
             "candidate_profile 必须包含：core_claims,verified_evidence,missing_evidence_areas,preferred_role_tracks。\n"
+            "抽取 candidate_profile 时必须尽量保留 CV 中可追溯硬事实：学历、学校、专业、证书、语言、公司、岗位、年限、项目、技能。"
+            "不要因为 PDF 文本没有 bullet 就忽略段落；把教育/证书/语言等硬事实放入 verified_evidence 和 core_claims，"
+            "把工作和项目证据放入 experiences/projects/strengths。\n"
             "jd_profiles 必须包含：must_have_requirements,nice_to_have_requirements,hidden_signals,"
             "interview_focus_areas,role_level_confidence。\n"
             f"candidate_id={candidate_id}\nresume_path={candidate_resume_path}\n"
@@ -903,6 +912,138 @@ def _extract_body_lines(block: str) -> list[str]:
         if len(normalized) >= 6:
             lines.append(normalized)
     return lines[:24]
+
+
+def _extract_resume_sections(resume_text: str) -> dict[str, list[str]]:
+    lines = [_normalize_resume_line(line) for line in resume_text.splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return {"experiences": [], "projects": [], "strengths": [], "evidence": []}
+
+    experiences: list[str] = []
+    projects: list[str] = []
+    skills: list[str] = []
+    hard_facts: list[str] = []
+    current_section = ""
+    for line in lines:
+        section = _resume_section_name(line)
+        if section:
+            current_section = section
+            remainder = _strip_resume_heading(line)
+            if not remainder:
+                continue
+            line = remainder
+        target_section = current_section or _infer_resume_section(line)
+        if target_section == "project":
+            projects.append(line)
+        elif target_section == "skill":
+            skills.append(line)
+        elif target_section == "hard_fact":
+            hard_facts.append(line)
+        else:
+            experiences.append(line)
+
+    evidence = _dedupe_preserve_order(hard_facts + experiences + projects + skills)
+    strengths = _dedupe_preserve_order(experiences + projects + skills)
+    return {
+        "experiences": _dedupe_preserve_order(experiences)[:12] or evidence[:6],
+        "projects": _dedupe_preserve_order(projects)[:8],
+        "strengths": strengths[:6],
+        "evidence": evidence[:16],
+    }
+
+
+def _normalize_resume_line(line: str) -> str:
+    normalized = line.strip().lstrip("-*•·0123456789.、)） ").strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def _resume_section_name(line: str) -> str:
+    lowered = line.lower().strip(":：")
+    section_map = {
+        "education": "hard_fact",
+        "教育": "hard_fact",
+        "教育经历": "hard_fact",
+        "学历": "hard_fact",
+        "certifications": "hard_fact",
+        "certificates": "hard_fact",
+        "证书": "hard_fact",
+        "语言": "hard_fact",
+        "languages": "hard_fact",
+        "experience": "experience",
+        "work experience": "experience",
+        "工作经历": "experience",
+        "实习经历": "experience",
+        "professional experience": "experience",
+        "projects": "project",
+        "project experience": "project",
+        "项目经历": "project",
+        "项目": "project",
+        "skills": "skill",
+        "technical skills": "skill",
+        "技能": "skill",
+        "专业技能": "skill",
+    }
+    for heading, section in section_map.items():
+        if lowered == heading or lowered.startswith(f"{heading}:") or lowered.startswith(f"{heading}："):
+            return section
+    return ""
+
+
+def _strip_resume_heading(line: str) -> str:
+    return re.sub(
+        r"^(education|certifications?|languages?|experience|work experience|professional experience|projects?|skills|"
+        r"教育经历|教育|学历|证书|语言|工作经历|实习经历|项目经历|项目|专业技能|技能)\s*[:：]\s*",
+        "",
+        line,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def _infer_resume_section(line: str) -> str:
+    lowered = line.lower()
+    hard_fact_needles = [
+        "bachelor",
+        "master",
+        "phd",
+        "degree",
+        "university",
+        "college",
+        "computer science",
+        "certificate",
+        "certification",
+        "pmp",
+        "本科",
+        "硕士",
+        "博士",
+        "大学",
+        "学院",
+        "计算机",
+        "专业",
+        "证书",
+        "英语",
+    ]
+    if any(needle in lowered for needle in hard_fact_needles):
+        return "hard_fact"
+    if any(needle in lowered for needle in ["project", "prototype", "项目", "平台", "系统", "工具"]):
+        return "project"
+    if any(needle in lowered for needle in ["python", "llm", "sql", "java", "技能", "skills", "automation"]):
+        return "skill"
+    return "experience"
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        normalized = item.strip()
+        key = normalized.lower()
+        if not normalized or key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
 
 
 def _first_meaningful_line(block: str) -> str:

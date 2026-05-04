@@ -1,4 +1,4 @@
-# ShotgunCV v0.5.0-v0.5.6 落地规划
+# ShotgunCV v0.5.0-v0.5.7 落地规划
 
 ## Summary
 
@@ -140,6 +140,30 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - JD 原文非空但 analyze 后 `title/responsibilities/requirements` 为空时，run 至少进入 warning 状态，不能静默展示为完全可信的普通完成。
 - 日志不记录完整 chain-of-thought；只记录可审计 reasoning summary、decision inputs 和 tool execution summary。
 
+### v0.5.7 打分算法优化
+
+目标：将评估机制从“关键词规则分 + LLM final”升级为“岗位要求分级 + CV 证据追溯 + 生成前门禁 + 双分制/三分展示”。学历、专业、证书、工作许可、硬年限等可追溯硬门槛拥有最高优先级；硬门槛缺失或不匹配时按 JD 跳过后续生成和 LLM judge，节约成本并避免生成阶段编造硬事实。
+
+关键变化：
+- analyze 阶段新增岗位要求分级：`hard_gate` 覆盖学历、专业、证书、工作许可、明确硬年限、语言硬要求；`high_priority` 覆盖核心技术、框架、业务域；`medium_priority` 覆盖经历、项目、场景；`nice_to_have` 只作为加分项。
+- 新增 CV 证据矩阵：`verified`、`inferred`、`missing`、`mismatch`、`simulatable`、`forbidden_to_fabricate`，并为每条要求记录 evidence refs 与 fabrication policy。
+- 在 analyze 后、generate 前新增 per-JD preflight gate：`hard_gate mismatch` 进入 `blocked`，`hard_gate missing` 进入 `needs_review`，该 JD 跳过 generate/evaluate/LLM judge/plan，同批其他 JD 正常继续。
+- 评分改为三类主分：`verified_fit_score` 只看 CV 可追溯证据；`rewrite_potential_score` 只反映可补强空间；`risk_score` 由硬门槛、证据缺口、模拟补强、背调风险共同决定。
+- `final_overall_score` 默认公式为 `verified_fit_score * 0.65 + rewrite_potential_score * 0.20 + (1 - risk_score) * 0.15`；blocked/needs_review JD 使用 `final_decision_source = preflight-gate`，不计算普通 final。
+- generate 阶段读取 preflight/evidence matrix，严禁编造学历、专业、证书、公司、工作年限、论文、奖项等硬事实；经历/项目类中优先级要求可生成“待核实模拟补强”，但必须标注，且不能计入真实匹配分。
+- Web 详情页展示硬门槛状态、blocked/needs_review 原因、跳过的 JD、真实匹配分、改写潜力分和风险分，避免单一综合分误导。
+- CV PDF 解析质量增强：PDF 先走 `pypdf` 文本抽取；文本为空、有效字符过少或乱码比例高时，用 PyMuPDF 渲染页面，再复用本地 OCR/vision fallback。PDF OCR/vision 结果继续落入 `ingest/manifest.json` 的既有字段，不新增 manifest schema。
+- CV profile 结构化增强：deterministic analyze 不再只依赖 bullet 行，增加章节/段落解析，覆盖教育、工作经历、项目、技能、证书、语言等信息；OpenAI analyze prompt 要求完整保留可追溯硬事实，支撑 v0.5.7 hard gate 判断。
+
+验收标准：
+- 学历、专业、证书等要求能被识别为 `hard_gate`；经历、项目类要求能被识别为 `medium_priority`。
+- CV 明确满足、缺失、明确不符分别生成 `verified/missing/mismatch`；medium priority 缺失时可标记为 `simulatable`。
+- hard gate mismatch 时该 JD 进入 `blocked`，hard gate missing 时进入 `needs_review`，并跳过 generate/evaluate/LLM judge；多 JD run 中只跳过不合格 JD。
+- 关键词命中很高但 hard gate 缺失时，不允许出现高普通 `final_overall_score`；模拟补强只提高 `rewrite_potential_score`，不提高 `verified_fit_score`。
+- 生成产物区分 `safe_rewrites`、`simulated_supplements`、`forbidden_gaps`，且硬事实缺失时不生成伪造内容。
+- PDF CV 包含学历、专业、证书等硬事实时，解析后的 candidate profile 应能让 requirement matrix 判定为 `verified`；缺失硬事实时仍进入 `needs_review`，不能由解析器默认补齐。
+- 旧 run 缺少 v0.5.7 产物时，Web 和 pipeline 仍按历史 scorecard 兼容展示。
+
 ## Public Interfaces
 
 计划新增或稳定以下接口与文件契约：
@@ -151,6 +175,14 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - `run_dir/logs/*.jsonl`：阶段级结构化日志和最小审计记录。
 - Web API：保留草稿创建接口，新增 run 触发、状态读取、重试/继续执行相关接口。
 - CLI：继续以 `shotguncv run/ingest/analyze/generate/evaluate/plan/report --run-dir` 为执行入口。
+
+v0.5.7 计划新增以下评分与门禁产物：
+
+- `run_dir/analyze/requirement_matrix.json`：每个 JD 的 requirement tier、requirement text、evidence status、evidence refs、fabrication policy 和 risk weight。
+- `run_dir/analyze/preflight_gates.json`：每个 JD 的 gate status：`pass | blocked | needs_review`，以及原因、跳过阶段和用户可操作建议。
+- `run_dir/evaluate/scorecards.json`：在旧字段基础上新增 `verified_fit_score`、`rewrite_potential_score`、`risk_score`、`gate_status`、`gate_reasons`；blocked/needs_review JD 使用 `final_decision_source = preflight-gate`。
+- `run_dir/generate/resume_variants.json`：在旧字段基础上新增 `safe_rewrites`、`simulated_supplements`、`forbidden_gaps`，用于区分可安全改写、待核实模拟补强和严禁编造的缺口。
+- `pyproject.toml`：v0.5.7 CV PDF 解析增强新增 `PyMuPDF>=1.24`，用于低质量/扫描 PDF 的页面渲染；本地 OCR 和 vision fallback 沿用既有配置。
 
 v0.5.6 计划扩展以下日志和状态契约：
 
@@ -180,6 +212,14 @@ v0.5.6 计划扩展以下日志和状态契约：
 - v0.5.6 质量门槛测试：JD 原文非空但 analyze 后 `responsibilities/requirements/title` 为空时写入 `quality_gate_checked`，CV 文本控制字符比例过高时写入 `cv_text_quality` warning，规则分高但 evidence/profile 质量低时写入 `score_consistency` warning。
 - v0.5.6 Web 测试：run detail 显示 resolved model、token usage、tool call 次数、fallback 次数；`done` 且有质量 warning 时展示 `Done with warnings` 或等价提示；旧 run 缺少新增事件时仍兼容展示。
 
+- v0.5.7 analyze 测试：学历/专业/证书要求识别为 `hard_gate`，经历/项目类要求识别为 `medium_priority`，CV 明确满足、缺失、明确不符分别生成 `verified/missing/mismatch`。
+- v0.5.7 preflight gate 测试：hard gate mismatch 进入 `blocked`，hard gate missing 进入 `needs_review`，并按 JD 跳过 generate/evaluate/LLM judge；多 JD run 中只跳过不合格 JD。
+- v0.5.7 scoring 测试：hard gate 缺失时不允许高普通 final；模拟补强只提高 `rewrite_potential_score`，不提高 `verified_fit_score`；hard gate 缺失、不匹配、模拟补强过多时 `risk_score` 上升。
+- v0.5.7 generate safety 测试：学历、专业、证书、工作年限缺失时不生成伪造内容；medium priority 项目经历可生成待核实补强并明确标注。
+- v0.5.7 Web 测试：blocked/needs_review JD 显示原因和跳过阶段，分数矩阵展示 verified/rewrite/risk 三分，旧 run 缺少 v0.5.7 产物时仍兼容展示。
+- v0.5.7 PDF 解析测试：文本型 PDF 仍用 `pypdf`；低质量/扫描 PDF 渲染后走 OCR；OCR 空且 vision disabled 时记录 `unparseable`；vision enabled 时可回退到 vision。
+- v0.5.7 CV profile 测试：无 bullet 的 PDF/文本简历段落能抽出 experiences、skills、education/certificate 证据，并能支撑 hard gate `verified` 判断。
+
 ## Assumptions
 
 - v0.5 仍是本地单用户模式，不引入远程队列、多用户权限或数据库。
@@ -190,3 +230,6 @@ v0.5.6 计划扩展以下日志和状态契约：
 - v0.5.6 是 v0.5 收盘优化版本，只增强可观测性、质量门槛和文档边界，不新增远程队列、多用户、自动投递或 CRM 能力。
 - 默认日志等级为 `normal`；`debug` 和 `trace` 只影响日志详细度，不改变 pipeline 业务产物。
 - `trace` 仅用于本机私有调试，并要求脱敏。
+- v0.5.7 仍保持本地单用户、`run_dir` 唯一状态边界；不实现用户交互式补材料流程，只提示需要补充哪些硬门槛证据。
+- 硬门槛缺失默认不继续消耗生成和 LLM judge 成本，状态为 `needs_review`；硬门槛明确不符默认 `blocked`。
+- 中优先级经历/项目可生成待核实模拟补强，但必须标注，且不计入真实匹配分。

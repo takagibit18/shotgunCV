@@ -43,6 +43,28 @@ export type ResumeVariant = {
   emphasized_strengths: string[];
   stretch_points: string[];
   source_resume_path: string;
+  safe_rewrites?: string[];
+  simulated_supplements?: string[];
+  forbidden_gaps?: string[];
+};
+
+export type RequirementEvidence = {
+  jd_id: string;
+  requirement_id: string;
+  tier: "hard_gate" | "high_priority" | "medium_priority" | "nice_to_have" | string;
+  requirement_text: string;
+  evidence_status: "verified" | "inferred" | "missing" | "mismatch" | "simulatable" | "forbidden_to_fabricate" | string;
+  evidence_refs: string[];
+  fabrication_policy: "never_fabricate" | "rewrite_only" | "simulate_allowed" | string;
+  risk_weight: number;
+};
+
+export type PreflightGate = {
+  jd_id: string;
+  status: "pass" | "blocked" | "needs_review" | string;
+  reasons: string[];
+  skipped_stages: string[];
+  user_action: string;
 };
 
 export type ScoreCard = {
@@ -67,6 +89,11 @@ export type ScoreCard = {
   guardrail_flags: string[];
   provider: string;
   model: string;
+  verified_fit_score?: number;
+  rewrite_potential_score?: number;
+  risk_score?: number;
+  gate_status?: "pass" | "blocked" | "needs_review" | string;
+  gate_reasons?: string[];
 };
 
 export type LLMAssessment = {
