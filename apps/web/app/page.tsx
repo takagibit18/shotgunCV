@@ -22,9 +22,9 @@ export default async function HomePage() {
 
   return (
     <main className="app-shell">
-      <section className="workspace-hero">
+      <section className="workspace-hero editorial-hero">
         <div>
-          <p className="eyebrow">{"v0.5.7 本地 AI 简历运营工作台"}</p>
+          <p className="eyebrow">{"v0.5.8 本地 AI 简历运营工作台"}</p>
           <h1>{"ShotgunCV 投递运行台"}</h1>
           <p className="hero-copy">
             {
@@ -33,7 +33,7 @@ export default async function HomePage() {
           </p>
           <p className="sr-only">{"ShotgunCV \u8fd0\u884c\u67e5\u770b\u5668"}</p>
         </div>
-        <div className="hero-metrics" aria-label="\u8fd0\u884c\u603b\u89c8">
+        <div className="hero-metrics dark-product-surface" aria-label="\u8fd0\u884c\u603b\u89c8">
           <div className="metric-tile">
             <span className="metric-value">{totalRuns}</span>
             <span className="metric-label">{"\u8fd0\u884c\u6279\u6b21"}</span>
@@ -46,7 +46,7 @@ export default async function HomePage() {
             <span className="metric-value">{latestRun ? latestRun.completedStages.length : 0}</span>
             <span className="metric-label">{"\u6700\u65b0\u8fdb\u5ea6"}</span>
           </div>
-          <Link href="/upload" className="primary-link">
+          <Link href="/upload" className="primary-link coral-cta">
             {"创建草稿 run"}
           </Link>
         </div>

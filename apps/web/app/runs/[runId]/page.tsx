@@ -51,7 +51,7 @@ export default async function RunPage({ params }: PageProps) {
         {"返回运行列表"}
       </Link>
 
-      <section className="workspace-hero">
+      <section className="workspace-hero editorial-hero">
         <div>
           <p className="eyebrow">{"运行详情 · "}{detail.label || "未命名运行"}</p>
           <h1 className="page-title">{detail.runId}</h1>
@@ -71,7 +71,7 @@ export default async function RunPage({ params }: PageProps) {
             <span className="pill">{displayStatus}</span>
           </div>
         </div>
-        <div className="run-control-panel">
+        <div className="run-control-panel dark-product-surface">
           <div className="metric-tile">
             <span className="metric-value">
               {detail.completedStages.length}
@@ -79,7 +79,7 @@ export default async function RunPage({ params }: PageProps) {
             </span>
             <span className="metric-label">{"阶段完成"}</span>
           </div>
-          <Link href={`/runs/${detail.runId}/report`} className="primary-link">
+          <Link href={`/runs/${detail.runId}/report`} className="primary-link coral-cta">
             {"打开报告"}
           </Link>
           <RunActionPanel runId={detail.runId} draftStatus={detail.draftStatus} draft={detail.draft} />

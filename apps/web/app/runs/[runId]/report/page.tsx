@@ -24,13 +24,13 @@ export default async function ReportPage({ params }: PageProps) {
         {"返回运行详情"}
       </Link>
 
-      <section className="workspace-hero">
+      <section className="workspace-hero editorial-hero">
         <div>
           <p className="eyebrow">{"运行报告 · 投递复盘"}</p>
           <h1 className="page-title">{resolvedParams.runId}</h1>
           <p className="hero-copy">{"先呈现投递结论、关键证据和面试前补强点，再保留原始 Markdown 报告用于追溯。"}</p>
         </div>
-        <span className="status-chip">{"Markdown 原文"}</span>
+        <span className="status-chip dark-product-surface">{"Markdown 原文"}</span>
       </section>
 
       <section className="section report-summary">

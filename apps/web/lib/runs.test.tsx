@@ -768,7 +768,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("导入");
   });
 
-  it("renders the light SaaS run workspace language", async () => {
+  it("renders the Claude-like v0.5.8 run workspace language", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -776,8 +776,11 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("ShotgunCV 投递运行台");
-    expect(html).toContain("v0.5.7 本地 AI 简历运营工作台");
+    expect(html).toContain("v0.5.8 本地 AI 简历运营工作台");
     expect(html).toContain("阶段完成度");
+    expect(html).toContain("editorial-hero");
+    expect(html).toContain("dark-product-surface");
+    expect(html).toContain("coral-cta");
   });
 
   it("renders the draft upload entry point on the run index page", async () => {
@@ -790,7 +793,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("创建草稿 run");
   });
 
-  it("renders v0.5.7 polished Chinese workspace copy without mojibake", async () => {
+  it("renders v0.5.8 polished Chinese workspace copy without mojibake", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-v060", { includeV057Artifacts: true });
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -801,7 +804,7 @@ describe("run viewer pages", () => {
     const reportHtml = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
     const combinedHtml = [homeHtml, uploadHtml, runHtml, reportHtml].join("\n");
 
-    expect(combinedHtml).toContain("v0.5.7 本地 AI 简历运营工作台");
+    expect(combinedHtml).toContain("v0.5.8 本地 AI 简历运营工作台");
     expect(combinedHtml).toContain("运行队列");
     expect(combinedHtml).toContain("返回运行列表");
     expect(combinedHtml).toContain("上传输入");
@@ -812,6 +815,9 @@ describe("run viewer pages", () => {
     expect(combinedHtml).toContain("真实匹配");
     expect(combinedHtml).toContain("改写潜力");
     expect(combinedHtml).toContain("风险压力");
+    expect(combinedHtml).toContain("editorial-hero");
+    expect(combinedHtml).toContain("dark-product-surface");
+    expect(combinedHtml).toContain("coral-cta");
     expect(combinedHtml).not.toMatch(/[杩鏂鐢绋鐘宀]/);
   });
 
