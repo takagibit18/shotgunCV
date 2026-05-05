@@ -32,6 +32,8 @@ export function UploadForm() {
   const [result, setResult] = useState<DraftSuccess | null>(null);
   const [error, setError] = useState<DraftError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cvFiles, setCvFiles] = useState<JdFileEntry[]>([]);
+  const [nextCvFileId, setNextCvFileId] = useState(1);
   const [jdMode, setJdMode] = useState<"files" | "text">("files");
   const [jdFiles, setJdFiles] = useState<JdFileEntry[]>([]);
   const [nextFileId, setNextFileId] = useState(1);
@@ -46,10 +48,14 @@ export function UploadForm() {
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    formData.delete("cvFiles");
     formData.delete("jdFiles");
     formData.delete("jdFileDisplayNames");
     formData.delete("jdTexts");
     formData.delete("jdTextDisplayNames");
+    cvFiles.forEach((entry) => {
+      formData.append("cvFiles", entry.file);
+    });
     jdFiles.forEach((entry) => {
       formData.append("jdFiles", entry.file);
       formData.append("jdFileDisplayNames", entry.displayName);
@@ -71,10 +77,32 @@ export function UploadForm() {
     }
     setResult(payload as DraftSuccess);
     form.reset();
+    setCvFiles([]);
+    setNextCvFileId(1);
     setJdFiles([]);
     setNextFileId(1);
     setJdTexts([{ id: 1, displayName: "", value: "" }]);
     setNextTextId(2);
+  }
+
+  function appendCvFiles(files: FileList | File[]) {
+    const incoming = Array.from(files);
+    if (incoming.length === 0) {
+      return;
+    }
+    setCvFiles((current) => [
+      ...current,
+      ...incoming.map((file, index) => ({
+        id: nextCvFileId + index,
+        file,
+        displayName: "",
+      })),
+    ]);
+    setNextCvFileId((current) => current + incoming.length);
+  }
+
+  function removeCvFile(index: number) {
+    setCvFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   function appendJdFiles(files: FileList | File[]) {
@@ -123,6 +151,11 @@ export function UploadForm() {
 
   return (
     <div className="upload-workspace">
+      <ol className="stepper" aria-label="草稿创建步骤">
+        <li>1 候选人材料</li>
+        <li>2 JD 输入</li>
+        <li>3 草稿确认</li>
+      </ol>
       <form className="upload-form" onSubmit={handleSubmit}>
         <section className="upload-panel">
           <div className="upload-panel-heading">
@@ -134,8 +167,21 @@ export function UploadForm() {
           </div>
           <label className="field-label">
             <span>{"CV / 补充材料"}</span>
-            <input name="cvFiles" type="file" multiple required accept={ACCEPTED_INPUT_TYPES} />
+            <input
+              name="cvFiles"
+              type="file"
+              multiple
+              required={cvFiles.length === 0}
+              accept={ACCEPTED_INPUT_TYPES}
+              onChange={(event) => {
+                if (event.currentTarget.files) {
+                  appendCvFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }
+              }}
+            />
           </label>
+          <FileMetadataList files={cvFiles} emptyLabel="尚未选择 CV 或补充材料" onRemove={removeCvFile} />
         </section>
 
         <section className="upload-panel">
@@ -235,16 +281,40 @@ export function UploadForm() {
                 </li>
               ))}
             </ul>
-          ) : null}
+          ) : (
+            <FileMetadataList files={[]} emptyLabel="尚未选择 JD 文件" />
+          )}
         </section>
 
-        <button className="primary-link coral-cta" type="submit" disabled={isSubmitting}>
+        <section className="upload-panel confirmation-panel">
+          <div className="upload-panel-heading">
+            <div>
+              <p className="eyebrow">{"3 草稿确认"}</p>
+              <h3>{"确认后落盘"}</h3>
+            </div>
+            <span className="status-chip info">{"元数据写入"}</span>
+          </div>
+          <div className="metadata-table compact-table" aria-label="草稿确认字段">
+            <span>字段</span>
+            <span>状态</span>
+            <span>说明</span>
+            <span>CV 文件</span>
+            <strong>{cvFiles.length > 0 ? `${cvFiles.length} 个` : "待选择"}</strong>
+            <span>必须至少 1 个</span>
+            <span>JD 输入</span>
+            <strong>{jdMode === "files" ? `${jdFiles.length} 个文件` : `${jdTexts.filter((entry) => entry.value.trim()).length} 条文本`}</strong>
+            <span>每个 JD 需要显示名</span>
+          </div>
+        </section>
+
+        <button className="primary-link" type="submit" disabled={isSubmitting}>
           {isSubmitting ? "正在创建草稿" : "创建草稿 run"}
         </button>
       </form>
 
       {error ? (
         <div className="upload-result error" role="alert">
+          <p className="eyebrow">{"页面级错误摘要"}</p>
           <strong>{error.code}</strong>
           <p>{error.error}</p>
         </div>
@@ -253,6 +323,14 @@ export function UploadForm() {
       {result ? (
         <div className="upload-result" role="status">
           <h3>{result.runId}</h3>
+          <div className="row-actions">
+            <a className="primary-link" href={`/runs/${result.runId}`}>
+              {"打开草稿详情"}
+            </a>
+            <a className="secondary-link" href="/">
+              {"返回运行队列"}
+            </a>
+          </div>
           <p>
             {"草稿 manifest："}
             <span className="mono">{result.uploadManifestPath}</span>
@@ -262,4 +340,59 @@ export function UploadForm() {
       ) : null}
     </div>
   );
+}
+
+function FileMetadataList({
+  files,
+  emptyLabel,
+  onRemove,
+}: {
+  files: JdFileEntry[];
+  emptyLabel: string;
+  onRemove?: (index: number) => void;
+}) {
+  return (
+    <div className="metadata-table" aria-label="文件元数据列表">
+      <span>文件</span>
+      <span>文件类型</span>
+      <span>大小</span>
+      <span>校验状态</span>
+      {files.length === 0 ? (
+        <>
+          <span>{emptyLabel}</span>
+          <span>--</span>
+          <span>--</span>
+          <span>待选择</span>
+        </>
+      ) : (
+        files.map((entry, index) => (
+          <React.Fragment key={entry.id}>
+            <span>{entry.file.name}</span>
+            <span>{entry.file.type || inferFileType(entry.file.name)}</span>
+            <span>{formatFileSize(entry.file.size)}</span>
+            <span>
+              {"可写入"}
+              {onRemove ? (
+                <button type="button" className="inline-action" onClick={() => onRemove(index)}>
+                  移除
+                </button>
+              ) : null}
+            </span>
+          </React.Fragment>
+        ))
+      )}
+    </div>
+  );
+}
+
+function inferFileType(fileName: string): string {
+  const extension = fileName.split(".").pop();
+  return extension ? `.${extension}` : "unknown";
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  return `${(size / 1024).toFixed(1)} KB`;
 }

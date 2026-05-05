@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 
+import { AppShell } from "../../../AppShell";
 import { loadRunDetail, loadRunReport } from "../../../../lib/runs";
 
 
@@ -19,18 +20,34 @@ export default async function ReportPage({ params }: PageProps) {
   const reportSummary = buildReportSummary(detail);
 
   return (
-    <main className="app-shell">
+    <AppShell active="evaluation" eyebrow="评估结果 / 报告" freshnessText="本地数据">
+      <main className="app-shell operational-shell">
       <Link href={`/runs/${resolvedParams.runId}`} className="backlink">
         {"返回运行详情"}
       </Link>
 
-      <section className="workspace-hero editorial-hero">
+      <section className="page-header detail-header">
         <div>
           <p className="eyebrow">{"运行报告 · 投递复盘"}</p>
           <h1 className="page-title">{resolvedParams.runId}</h1>
           <p className="hero-copy">{"先呈现投递结论、关键证据和面试前补强点，再保留原始 Markdown 报告用于追溯。"}</p>
         </div>
-        <span className="status-chip dark-product-surface">{"Markdown 原文"}</span>
+        <span className="status-chip info">{"Markdown 原文"}</span>
+      </section>
+
+      <section className="status-strip" aria-label="报告目录">
+        <article className="status-strip-item info">
+          <span>报告目录</span>
+          <strong>摘要 / 原文 / 追溯</strong>
+        </article>
+        <article className="status-strip-item success">
+          <span>当前推荐岗位</span>
+          <strong>{reportSummary.topTitle}</strong>
+        </article>
+        <article className="status-strip-item">
+          <span>引用来源</span>
+          <strong>strategy / scorecard / gap_map</strong>
+        </article>
       </section>
 
       <section className="section report-summary">
@@ -57,17 +74,32 @@ export default async function ReportPage({ params }: PageProps) {
           <div className="empty">{"阶段未完成"}</div>
         )}
       </section>
-    </main>
+      </main>
+    </AppShell>
   );
 }
 
 
-function SummaryCard({ title, items }: { title: string; items: string[] }) {
+type SummaryItem = {
+  text: string;
+  source: string;
+};
+
+function SummaryCard({ title, items }: { title: string; items: SummaryItem[] }) {
   return (
     <article className="report-summary-card">
       <h3>{title}</h3>
       <ul>
-        {items.length > 0 ? items.map((item) => <li key={item}>{item}</li>) : <li>{"当前运行尚未提供可结构化展示的内容。"}</li>}
+        {items.length > 0 ? (
+          items.map((item) => (
+            <li key={`${item.source}-${item.text}`}>
+              <span>{item.text}</span>
+              <small>{"来源：" + item.source}</small>
+            </li>
+          ))
+        ) : (
+          <li>{"当前运行尚未提供可结构化展示的内容。"}</li>
+        )}
       </ul>
     </article>
   );
@@ -94,29 +126,43 @@ function buildReportSummary(detail: DetailForReport) {
     : detail.evaluate.gapMaps[0];
 
   return {
-    recommendations: uniqueText([
+    topTitle: topVariant?.title ?? topStrategy?.jd_id ?? "暂无推荐岗位",
+    recommendations: uniqueItems([
       topVariant
-        ? `优先投递 ${topVariant.title}，综合得分 ${Math.round(topVariant.overallScore * 100)}%。`
-        : "",
-      topStrategy ? `投递决策：${topStrategy.apply_decision}。${topStrategy.reason_summary}` : "",
+        ? { text: `优先投递 ${topVariant.title}，综合得分 ${Math.round(topVariant.overallScore * 100)}%。`, source: "scorecard" }
+        : null,
+      topStrategy ? { text: `投递决策：${topStrategy.apply_decision}。${topStrategy.reason_summary}`, source: "strategy" } : null,
     ]),
-    evidence: uniqueText([
-      ...(topExplanation?.evidence_refs ?? []),
-      ...(topExplanation?.positive_signals ?? []),
-      ...(topStrategy?.decision_drivers ?? []),
-      ...(topVariant?.topReasons ?? []),
+    evidence: uniqueItems([
+      ...(topExplanation?.evidence_refs.map((text) => ({ text, source: "ranking_explanations.evidence_refs" })) ?? []),
+      ...(topExplanation?.positive_signals.map((text) => ({ text, source: "ranking_explanations.positive_signals" })) ?? []),
+      ...(topStrategy?.decision_drivers.map((text) => ({ text, source: "strategy.decision_drivers" })) ?? []),
+      ...(topVariant?.topReasons.map((text) => ({ text, source: "eval_summary.top_reasons" })) ?? []),
     ]),
-    interviewPrep: uniqueText([
-      ...(topStrategy?.catch_up_notes ?? []),
-      ...(topStrategy?.interview_prep_points ?? []),
-      ...(topStrategy?.recommended_actions ?? []),
-      ...(topGapMap?.items.flatMap((item) => [...item.catch_up_concepts, ...item.weak_points]) ?? []),
-      ...(topExplanation?.risk_flags ?? []),
+    interviewPrep: uniqueItems([
+      ...(topStrategy?.catch_up_notes.map((text) => ({ text, source: "strategy.catch_up_notes" })) ?? []),
+      ...(topStrategy?.interview_prep_points.map((text) => ({ text, source: "strategy.interview_prep_points" })) ?? []),
+      ...(topStrategy?.recommended_actions.map((text) => ({ text, source: "strategy.recommended_actions" })) ?? []),
+      ...(topGapMap?.items.flatMap((item) => [
+        ...item.catch_up_concepts.map((text) => ({ text, source: "gap_map.catch_up_concepts" })),
+        ...item.weak_points.map((text) => ({ text, source: "gap_map.weak_points" })),
+      ]) ?? []),
+      ...(topExplanation?.risk_flags.map((text) => ({ text, source: "ranking_explanations.risk_flags" })) ?? []),
     ]),
   };
 }
 
 
-function uniqueText(items: string[]): string[] {
-  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+function uniqueItems(items: Array<SummaryItem | null>): SummaryItem[] {
+  const seen = new Set<string>();
+  const results: SummaryItem[] = [];
+  items.forEach((item) => {
+    const text = item?.text.trim();
+    if (!item || !text || seen.has(text)) {
+      return;
+    }
+    seen.add(text);
+    results.push({ text, source: item.source });
+  });
+  return results;
 }

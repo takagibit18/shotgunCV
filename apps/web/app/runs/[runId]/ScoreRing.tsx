@@ -35,10 +35,10 @@ export function ScoreRing({ score }: { score: number }) {
   return (
     <div
       ref={ringRef}
-      className={isVisible ? "score-ring score-ring-tech score-ring-orbit is-visible" : "score-ring score-ring-tech score-ring-orbit"}
+      className={isVisible ? "score-ring score-ring-operational is-visible" : "score-ring score-ring-operational"}
       style={{ "--target-score": `${score}%` } as React.CSSProperties}
       data-target-score={score}
-      aria-label={`综合得分 ${score}%`}
+      aria-label={`决策分 ${score}%`}
     >
       <span>{score}</span>
       <small>{"%"}</small>

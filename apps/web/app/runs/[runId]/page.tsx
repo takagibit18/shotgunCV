@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 
+import { AppShell, Icon } from "../../AppShell";
 import { loadRunDetail } from "../../../lib/runs";
 import type { ApplicationStrategy, RankingExplanation, ScoreCard } from "../../../lib/types";
 import { RunActionPanel } from "./RunActionPanel";
@@ -44,14 +45,19 @@ export default async function RunPage({ params }: PageProps) {
     detail.draftStatus === "done" && detail.runStatus?.quality_status === "warning"
       ? "完成但有警告"
       : STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus;
+  const qualityWarningCount = detail.observability.qualityWarnings.length + (detail.runStatus?.quality_summary ? 1 : 0);
+  const nextAction = buildNextAction(detail.draftStatus);
 
   return (
-    <main className="app-shell">
+    <AppShell active="evaluation" eyebrow="评估结果 / 阶段评估" freshnessText="本地数据">
+      <main className="app-shell operational-shell">
       <Link href="/" className="backlink">
         {"返回运行列表"}
       </Link>
 
-      <section className="workspace-hero editorial-hero">
+      <div className="workspace-grid">
+        <div className="workspace-main">
+      <section className="page-header detail-header">
         <div>
           <p className="eyebrow">{"运行详情 · "}{detail.label || "未命名运行"}</p>
           <h1 className="page-title">{detail.runId}</h1>
@@ -71,7 +77,7 @@ export default async function RunPage({ params }: PageProps) {
             <span className="pill">{displayStatus}</span>
           </div>
         </div>
-        <div className="run-control-panel dark-product-surface">
+        <div className="run-control-panel">
           <div className="metric-tile">
             <span className="metric-value">
               {detail.completedStages.length}
@@ -79,11 +85,26 @@ export default async function RunPage({ params }: PageProps) {
             </span>
             <span className="metric-label">{"阶段完成"}</span>
           </div>
-          <Link href={`/runs/${detail.runId}/report`} className="primary-link coral-cta">
+          <Link href={`/runs/${detail.runId}/report`} className="primary-link">
             {"打开报告"}
           </Link>
           <RunActionPanel runId={detail.runId} draftStatus={detail.draftStatus} draft={detail.draft} />
         </div>
+      </section>
+
+      <section className="status-strip" aria-label="运行首屏状态">
+        <StatusStripItem label="当前状态" value={displayStatus} tone={detail.draftStatus === "failed" ? "danger" : "info"} />
+        <StatusStripItem
+          label="是否可信"
+          value={qualityWarningCount > 0 ? `${qualityWarningCount} 个质量提示` : "暂无质量警告"}
+          tone={qualityWarningCount > 0 ? "warning" : "success"}
+        />
+        <StatusStripItem label="下一步动作" value={nextAction} tone="default" />
+        <StatusStripItem
+          label="硬门槛"
+          value={summarizeGates(detail.preflightGates.length, detail.preflightGates.filter((gate) => gate.status !== "pass").length)}
+          tone={detail.preflightGates.some((gate) => gate.status !== "pass") ? "warning" : "success"}
+        />
       </section>
 
       <section className="section">
@@ -225,7 +246,7 @@ export default async function RunPage({ params }: PageProps) {
             </article>
             <article className="detail-card">
               <h3>{"下一步 CLI"}</h3>
-              <p>{"Web 只创建草稿，不触发 pipeline。确认输入后在本地执行："}</p>
+              <p>{"Web 可以创建和管理本地草稿。确认输入后可在页面运行，或在本地执行："}</p>
               <pre className="command-block">{detail.draft.nextCommand}</pre>
             </article>
           </div>
@@ -351,7 +372,7 @@ export default async function RunPage({ params }: PageProps) {
           <div className="score-matrix">
             <div className="matrix-header">
               <div>
-                <p className="eyebrow">{"v0.6.0 决策矩阵"}</p>
+                <p className="eyebrow">{"决策矩阵"}</p>
                 <h3>{"岗位优先级矩阵"}</h3>
               </div>
               <p className="muted">{"优先看真实匹配、改写潜力和风险压力，再用历史维度解释排序。点击岗位标题可跳转到对应定制简历。"}</p>
@@ -382,7 +403,57 @@ export default async function RunPage({ params }: PageProps) {
           <div className="empty">{"阶段未完成"}</div>
         )}
       </section>
-    </main>
+        </div>
+
+        <aside className="insight-rail" aria-label="评估洞察">
+          <section className="rail-card purple">
+            <div className="metric-title">
+              <Icon name="sparkle" />
+              <h3>优化后简历摘要</h3>
+            </div>
+            <p className="muted">基于本次评估结果，生成的优化方向与核心改进点。</p>
+            <div className="insight-list">
+              <div className="insight-item">
+                <Icon name="check-square" />
+                <span>{detail.generate.variants[0]?.summary ?? "当前 run 尚未生成可展示的简历摘要。"}</span>
+              </div>
+              <div className="insight-item">
+                <Icon name="document" />
+                <span>{qualityWarningCount > 0 ? `${qualityWarningCount} 个质量提示需要复核。` : "暂无质量警告，可继续核对证据引用。"}</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="rail-card">
+            <div className="metric-title">
+              <Icon name="home" />
+              <h3>投递建议</h3>
+            </div>
+            <p className="muted">结合优先级、风险与改写成本，给出投递策略建议。</p>
+            <div className="recommendation-list">
+              {detail.plan.strategies.length > 0 ? (
+                detail.plan.strategies.slice(0, 3).map((strategy, index) => (
+                  <div className={index === 0 ? "recommendation-item priority" : "recommendation-item watch"} key={strategy.jd_id}>
+                    <Icon name="list" />
+                    <span>
+                      <strong>{strategy.jd_id}</strong>
+                      {" · "}
+                      {strategy.reason_summary || strategy.apply_decision}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="recommendation-item safe">
+                  <Icon name="check-square" />
+                  <span>{nextAction}</span>
+                </div>
+              )}
+            </div>
+          </section>
+        </aside>
+      </div>
+      </main>
+    </AppShell>
   );
 }
 
@@ -397,6 +468,49 @@ function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: st
       {action ? <span className="status-chip">{action}</span> : null}
     </div>
   );
+}
+
+function StatusStripItem({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "default" | "info" | "success" | "warning" | "danger";
+}) {
+  return (
+    <article className={`status-strip-item ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function buildNextAction(status: string): string {
+  if (status === "draft") {
+    return "确认输入后运行";
+  }
+  if (status === "failed") {
+    return "查看错误并重试";
+  }
+  if (status === "done") {
+    return "审查评分与报告";
+  }
+  if (status === "running" || status === "queued") {
+    return "等待阶段更新";
+  }
+  return "检查输入来源";
+}
+
+function summarizeGates(total: number, blockedOrReview: number): string {
+  if (total === 0) {
+    return "暂无门槛产物";
+  }
+  if (blockedOrReview > 0) {
+    return `${blockedOrReview}/${total} 需处理`;
+  }
+  return `${total}/${total} 通过`;
 }
 
 
@@ -458,7 +572,7 @@ function ScoreMatrixRow({
             </p>
           </div>
           <div className="matrix-actions">
-            <span className="decision-badge">{"综合评分"}</span>
+            <span className="decision-badge">{"决策分"}</span>
             {scorecard?.gate_status ? <span className="status-chip">{formatGateStatus(scorecard.gate_status)}</span> : null}
             <details className="matrix-action-detail">
               <summary>{"适配度分析"}</summary>

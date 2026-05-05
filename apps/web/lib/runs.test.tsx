@@ -763,24 +763,38 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await HomePage());
 
-    expect(html).toContain("ShotgunCV 运行查看器");
+    expect(html).toContain("AI Resume Ops 工作台");
     expect(html).toContain("demo");
     expect(html).toContain("导入");
   });
 
-  it("renders the Claude-like v0.5.8 run workspace language", async () => {
+  it("renders the v0.6 operational run workspace language and controls", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await HomePage());
 
-    expect(html).toContain("ShotgunCV 投递运行台");
-    expect(html).toContain("v0.5.8 本地 AI 简历运营工作台");
-    expect(html).toContain("阶段完成度");
-    expect(html).toContain("editorial-hero");
-    expect(html).toContain("dark-product-surface");
-    expect(html).toContain("coral-cta");
+    expect(html).toContain("AI Resume Ops 工作台");
+    expect(html).toContain("仪表盘");
+    expect(html).toContain("简历优化");
+    expect(html).toContain("运行队列");
+    expect(html).toContain("评估结果");
+    expect(html).toContain("模板库");
+    expect(html).toContain("设置");
+    expect(html).toContain("aria-disabled=\"true\"");
+    expect(html).toContain("近期活动");
+    expect(html).toContain("AI 洞察");
+    expect(html).toContain("搜索 run、标签、provider");
+    expect(html).toContain("状态筛选");
+    expect(html).toContain("阶段筛选");
+    expect(html).toContain("Provider 筛选");
+    expect(html).toContain("排序");
+    expect(html).toContain("operational-shell");
+    expect(html).not.toContain("editorial-hero");
+    expect(html).not.toContain("dark-product-surface");
+    expect(html).not.toContain("coral-cta");
+    expect(html).not.toContain("v0.5.8");
   });
 
   it("renders the draft upload entry point on the run index page", async () => {
@@ -793,7 +807,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("创建草稿 run");
   });
 
-  it("renders v0.5.8 polished Chinese workspace copy without mojibake", async () => {
+  it("renders v0.6 polished Chinese workspace copy without mojibake or temporary version labels", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-v060", { includeV057Artifacts: true });
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -804,10 +818,10 @@ describe("run viewer pages", () => {
     const reportHtml = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
     const combinedHtml = [homeHtml, uploadHtml, runHtml, reportHtml].join("\n");
 
-    expect(combinedHtml).toContain("v0.5.8 本地 AI 简历运营工作台");
+    expect(combinedHtml).toContain("AI Resume Ops 工作台");
     expect(combinedHtml).toContain("运行队列");
     expect(combinedHtml).toContain("返回运行列表");
-    expect(combinedHtml).toContain("上传输入");
+    expect(combinedHtml).toContain("三步创建草稿");
     expect(combinedHtml).toContain("运行详情");
     expect(combinedHtml).toContain("运行状态");
     expect(combinedHtml).toContain("投递决策摘要");
@@ -815,9 +829,12 @@ describe("run viewer pages", () => {
     expect(combinedHtml).toContain("真实匹配");
     expect(combinedHtml).toContain("改写潜力");
     expect(combinedHtml).toContain("风险压力");
-    expect(combinedHtml).toContain("editorial-hero");
-    expect(combinedHtml).toContain("dark-product-surface");
-    expect(combinedHtml).toContain("coral-cta");
+    expect(combinedHtml).toContain("operational-shell");
+    expect(combinedHtml).not.toContain("editorial-hero");
+    expect(combinedHtml).not.toContain("dark-product-surface");
+    expect(combinedHtml).not.toContain("coral-cta");
+    expect(combinedHtml).not.toContain("v0.5.8");
+    expect(combinedHtml).not.toContain("v0.6.0 决策矩阵");
     expect(combinedHtml).not.toMatch(/[杩鏂鐢绋鐘宀]/);
   });
 
@@ -835,13 +852,13 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: draft.runId }) }));
 
-    expect(html).toContain("Draft run");
+    expect(html).toContain("上传草稿");
     expect(html).toContain("shotguncv run");
     expect(html).toContain("input_files/cv");
     expect(html).toContain("输入来源");
     expect(html).toContain("resume.md");
     expect(html).toContain("Example - Draft Role");
-    expect(html).toContain("draft");
+    expect(html).toContain("草稿");
   });
 
   it("renders ingested input source metadata on the run detail page", async () => {
@@ -921,11 +938,18 @@ describe("run viewer pages", () => {
     expect(html).toContain("Tesseract is not installed.");
   });
 
-  it("renders the upload page with local-only draft copy", () => {
+  it("renders the upload page as a three-step draft workflow", () => {
     const html = renderToStaticMarkup(UploadPage());
 
     expect(html).toContain("创建投递草稿");
     expect(html).toContain("仅创建草稿");
+    expect(html).toContain("三步创建草稿");
+    expect(html).toContain("1 候选人材料");
+    expect(html).toContain("2 JD 输入");
+    expect(html).toContain("3 草稿确认");
+    expect(html).toContain("文件类型");
+    expect(html).toContain("大小");
+    expect(html).toContain("校验状态");
     expect(html).not.toContain("candidateId");
     expect(html).not.toContain("name=\"label\"");
     expect(html).toContain("cvFiles");
@@ -970,7 +994,7 @@ describe("run viewer pages", () => {
     expect(html).not.toContain('<p class="pill">岗位定制版本</p>');
   });
 
-  it("renders scorecards as a viewport-animated technology-style priority matrix", async () => {
+  it("renders scorecards as a v0.6 operational priority matrix", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -978,14 +1002,13 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
     expect(html).toContain("岗位优先级矩阵");
-    expect(html).toContain("综合得分");
+    expect(html).toContain("决策分");
     expect(html).toContain("维度矩阵");
     expect(html).toContain("证据引用展开");
     expect(html).toContain("风险解释展开");
-    expect(html).toContain("score-ring score-ring-tech");
+    expect(html).toContain("score-ring score-ring-operational");
     expect(html).toContain("--target-score:81%");
     expect(html).toContain('data-target-score="81"');
-    expect(html).toContain("score-ring-orbit");
     expect(html).toContain("81%");
     expect(html).not.toContain("移动端改成可纵向扫描的决策卡");
   });
@@ -1052,6 +1075,9 @@ describe("run viewer pages", () => {
     expect(html).toContain("推荐结论");
     expect(html).toContain("关键证据");
     expect(html).toContain("面试前突击内容");
+    expect(html).toContain("来源：");
+    expect(html).toContain("报告目录");
+    expect(html).toContain("当前推荐岗位");
     expect(html).toContain("离线评估指标");
     expect(html).not.toContain("主要风险");
   });
