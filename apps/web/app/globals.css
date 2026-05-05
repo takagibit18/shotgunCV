@@ -253,6 +253,21 @@ p {
   padding: 28px 32px 46px;
 }
 
+.app-shell,
+.operational-shell,
+.page-header,
+.section,
+.status-strip,
+.run-control-panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.page-header > *,
+.section-heading > * {
+  min-width: 0;
+}
+
 .app-commandbar {
   display: flex;
   justify-content: space-between;
@@ -324,6 +339,10 @@ p {
   min-width: 0;
 }
 
+.workspace-main > .detail-header {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .page-header {
   display: grid;
   gap: 8px;
@@ -354,12 +373,14 @@ p {
   font-weight: 860;
   line-height: 1.06;
   letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .hero-copy,
 .section-copy,
 .muted {
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .hero-copy {
@@ -367,6 +388,7 @@ p {
   margin: 12px 0 0;
   font-size: 15px;
   line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 
 .metric-grid,
@@ -647,6 +669,19 @@ p {
   border-top: 1px solid var(--border);
 }
 
+.evaluation-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(6, minmax(118px, 1fr)) auto;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.evaluation-reset {
+  align-self: end;
+  min-height: 38px;
+}
+
 .control-field,
 .field-label,
 .upload-form label {
@@ -694,6 +729,13 @@ p {
   background: var(--panel);
 }
 
+.evaluation-table {
+  display: grid;
+  overflow-x: auto;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
 .run-table-head,
 .run-row {
   display: grid;
@@ -711,6 +753,28 @@ p {
   font-weight: 850;
 }
 
+.evaluation-table-head,
+.evaluation-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.05fr) minmax(170px, 0.8fr) minmax(260px, 1.2fr) minmax(260px, 1.25fr) minmax(116px, 0.52fr);
+  gap: 14px;
+  align-items: center;
+  min-width: 1060px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.evaluation-table-head {
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.evaluation-row:hover {
+  background: #fbfdff;
+}
+
 .run-row:hover {
   background: #fbfdff;
 }
@@ -718,10 +782,45 @@ p {
 .run-primary,
 .run-status-cell,
 .provider-stack,
-.run-action-cell {
+.run-action-cell,
+.evaluation-primary,
+.evaluation-status-cell,
+.evaluation-evidence-cell {
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.evaluation-score-cell {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.score-pill {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.score-pill span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.score-pill strong {
+  color: var(--text);
+  font-size: 17px;
+}
+
+.score-pill.risk strong {
+  color: var(--danger);
 }
 
 .run-title-link strong {
@@ -1527,6 +1626,7 @@ p {
   .page-header,
   .detail-header,
   .queue-controls,
+  .evaluation-controls,
   .run-table-head,
   .run-row,
   .status-strip,
@@ -1539,6 +1639,10 @@ p {
   }
 
   .run-table-head {
+    display: none;
+  }
+
+  .evaluation-table-head {
     display: none;
   }
 
@@ -1555,6 +1659,11 @@ p {
 @media (max-width: 720px) {
   .app-frame {
     display: block;
+    overflow-x: hidden;
+  }
+
+  body {
+    overflow-x: hidden;
   }
 
   .app-sidebar {
@@ -1602,9 +1711,17 @@ p {
   }
 
   .app-commandbar,
+  .section-heading,
   .matrix-titleline,
   .upload-panel-heading {
     display: grid;
+  }
+
+  .pill,
+  .status-chip,
+  .decision-badge {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .commandbar-actions {
@@ -1629,6 +1746,11 @@ p {
   .page-header h1,
   .page-title {
     font-size: 34px;
+    word-break: break-all;
+  }
+
+  .hero-copy {
+    word-break: break-all;
   }
 
   .section {
@@ -1636,8 +1758,18 @@ p {
   }
 
   .queue-controls,
-  .run-row {
+  .run-row,
+  .evaluation-row {
     padding: 14px 16px;
+  }
+
+  .evaluation-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .evaluation-score-cell {
+    grid-template-columns: 1fr;
   }
 
   .timeline-row {
@@ -1649,7 +1781,8 @@ p {
   }
 
   .metadata-table {
-    min-width: 620px;
+    min-width: 0;
+    grid-template-columns: minmax(120px, 1fr) minmax(84px, 0.7fr) minmax(72px, 0.5fr) minmax(108px, 0.8fr);
   }
 
   .matrix-action-panel {

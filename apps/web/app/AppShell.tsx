@@ -20,7 +20,7 @@ const NAV_ITEMS: Array<{
   { key: "dashboard", label: "仪表盘", href: "/", icon: "home" },
   { key: "resume", label: "简历优化", href: "/upload", icon: "document" },
   { key: "queue", label: "运行队列", href: "/", icon: "list" },
-  { key: "evaluation", label: "评估结果", icon: "check-square", disabled: true },
+  { key: "evaluation", label: "评估结果", href: "/evaluations", icon: "check-square" },
   { key: "templates", label: "模板库", icon: "library", disabled: true },
   { key: "settings", label: "设置", icon: "settings", disabled: true },
 ];
@@ -68,7 +68,7 @@ export function AppShell({ active, children, eyebrow = "AI Resume Ops 工作台"
                 {content}
               </Link>
             ) : (
-              <span key={item.key} className={className} aria-disabled="true" title="即将支持">
+              <span key={item.key} className={className} aria-disabled="true" title={buildDisabledNavTitle(item.key)}>
                 {content}
               </span>
             );
@@ -113,6 +113,16 @@ export function AppShell({ active, children, eyebrow = "AI Resume Ops 工作台"
       </div>
     </div>
   );
+}
+
+function buildDisabledNavTitle(key: NavKey): string {
+  if (key === "templates") {
+    return "v0.6.3 规划中：本地模板库";
+  }
+  if (key === "settings") {
+    return "v0.6.4 规划中：本地设置与环境检查";
+  }
+  return "后续版本规划中";
 }
 
 export function Icon({ name }: { name: IconName }) {

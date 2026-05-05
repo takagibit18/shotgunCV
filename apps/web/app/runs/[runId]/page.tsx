@@ -389,6 +389,7 @@ export default async function RunPage({ params }: PageProps) {
                   overallScore={item.overallScore}
                   gapCount={item.gapCount}
                   topReasons={item.topReasons}
+                  jdId={item.jdId}
                   scorecard={detail.evaluate.scorecards.find(
                     (scorecard) => scorecard.jd_id === item.jdId && scorecard.variant_id === item.variantId,
                   )}
@@ -515,6 +516,7 @@ function summarizeGates(total: number, blockedOrReview: number): string {
 
 
 type ScoreMatrixRowProps = {
+  jdId: string;
   title: string;
   variantDisplayName: string;
   variantId: string;
@@ -528,6 +530,7 @@ type ScoreMatrixRowProps = {
 
 
 function ScoreMatrixRow({
+  jdId,
   title,
   variantDisplayName,
   variantId,
@@ -557,7 +560,7 @@ function ScoreMatrixRow({
   const evidenceCount = evidenceRefs.length;
 
   return (
-    <article className="matrix-row">
+    <article className="matrix-row" id={`evaluation-${jdId}`}>
       <ScoreRing score={score} />
       <div className="matrix-main">
         <div className="matrix-titleline">

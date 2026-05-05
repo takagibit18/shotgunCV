@@ -6,9 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 
 import HomePage from "../app/page";
+import EvaluationPage from "../app/evaluations/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
 import UploadPage from "../app/upload/page";
+import { filterEvaluationResults, loadEvaluationResults, sortEvaluationResults } from "./evaluations";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
 import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
 import { createRunDraft, DraftCreationError } from "./upload-drafts";
@@ -1081,6 +1083,108 @@ describe("run viewer pages", () => {
     expect(html).toContain("离线评估指标");
     expect(html).not.toContain("主要风险");
   });
+
+  it("aggregates v0.5.7 evaluation results as JD-level review rows", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const results = await loadEvaluationResults();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      runId: "demo-v057",
+      jdId: "jd-001",
+      title: "LLM Product Engineer",
+      variantId: "variant-jd-jd-001",
+      gateStatus: "pass",
+      finalScore: 0.81,
+      verifiedFitScore: 0.74,
+      rewritePotentialScore: 0.83,
+      riskScore: 0.22,
+      applyDecision: "apply",
+      provider: "openai",
+      reportHref: "/runs/demo-v057/report",
+      detailHref: "/runs/demo-v057#evaluation-jd-001",
+    });
+    expect(results[0].evidenceRefs).toContain("围绕 LLM 辅助工作流搭建过内部工具");
+    expect(results[0].riskFlags).toContain("缺少大规模 benchmark 经验");
+  });
+
+  it("keeps legacy evaluation rows with scorecard fallbacks", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-legacy");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const results = await loadEvaluationResults();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      runId: "demo-legacy",
+      jdId: "jd-001",
+      gateStatus: "legacy",
+      finalScore: 0.81,
+      verifiedFitScore: null,
+      rewritePotentialScore: null,
+      riskScore: 0.42,
+      artifactMode: "legacy",
+    });
+  });
+
+  it("filters and sorts evaluation rows by gate, risk, provider, score, and query", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "safe-run", { includeV057Artifacts: true });
+    await createCompleteRun(runsDir, "risky-run", { includeV057Artifacts: true });
+    await makeRunRisky(runsDir, "risky-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const results = await loadEvaluationResults();
+    const filtered = filterEvaluationResults(results, {
+      query: "学历硬门槛",
+      gate: "blocked",
+      risk: "high",
+      provider: "openai",
+      decision: "manual_review",
+      score: "low",
+    });
+    const sorted = sortEvaluationResults(results, "risk");
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].runId).toBe("risky-run");
+    expect(sorted[0].runId).toBe("risky-run");
+  });
+
+  it("renders the evaluation results page with review table and reachable navigation", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await EvaluationPage());
+    const homeHtml = renderToStaticMarkup(await HomePage());
+
+    expect(html).toContain("岗位评估队列");
+    expect(html).toContain("LLM Product Engineer");
+    expect(html).toContain("真实匹配");
+    expect(html).toContain("改写潜力");
+    expect(html).toContain("风险分");
+    expect(html).toContain('href="/runs/demo-v057#evaluation-jd-001"');
+    expect(html).toContain('href="/runs/demo-v057/report"');
+    expect(homeHtml).toContain('href="/evaluations"');
+    expect(homeHtml).toContain("评估结果");
+  });
+
+  it("renders an empty evaluation result state when no run has evaluate artifacts", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "draft-only");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const results = await loadEvaluationResults();
+    const html = renderToStaticMarkup(await EvaluationPage());
+
+    expect(results).toEqual([]);
+    expect(html).toContain("暂无评估结果");
+    expect(html).toContain("等待 run 完成 evaluate 阶段");
+  });
 });
 
 
@@ -1329,6 +1433,102 @@ async function createCompleteRun(
     "# ShotgunCV v0.3.0 LLM Eval Summary\n\n## Ranked Application Strategy\n\n### 1. LLM Product Engineer @ Example AI\n\n- Top Evidence: 围绕 LLM 辅助工作流搭建过内部工具\n",
     "utf-8",
   );
+}
+
+
+async function makeRunRisky(runsDir: string, runId: string): Promise<void> {
+  const runDir = path.join(runsDir, runId);
+  await writeJson(path.join(runDir, "analyze", "preflight_gates.json"), [
+    {
+      jd_id: "jd-001",
+      status: "blocked",
+      reasons: ["学历硬门槛缺失"],
+      skipped_stages: ["generate", "evaluate", "plan"],
+      user_action: "补充学历证据后再评估",
+    },
+  ]);
+  await writeJson(path.join(runDir, "analyze", "requirement_matrix.json"), [
+    {
+      jd_id: "jd-001",
+      requirement_id: "jd-001-req-001",
+      tier: "hard_gate",
+      requirement_text: "学历硬门槛：本科及以上学历，计算机相关专业",
+      evidence_status: "missing",
+      evidence_refs: [],
+      fabrication_policy: "never_fabricate",
+      risk_weight: 1,
+    },
+  ]);
+  await writeJson(path.join(runDir, "evaluate", "scorecards.json"), [
+    {
+      jd_id: "jd-001",
+      variant_id: "variant-jd-jd-001",
+      fit_score: 0.31,
+      ats_score: 0.4,
+      evidence_score: 0.2,
+      stretch_score: 0.6,
+      gap_risk_score: 0.88,
+      rewrite_cost_score: 0.7,
+      overall_score: 0.44,
+      ranking_version: "v0.5.7-gated",
+      judge_rationale: "学历硬门槛缺失，需要人工复核。",
+      llm_role_fit_score: 0,
+      llm_evidence_score: 0,
+      llm_persuasion_score: 0,
+      llm_risk_score: 0,
+      llm_overall_score: 0,
+      final_overall_score: 0.44,
+      final_decision_source: "preflight-gate",
+      guardrail_flags: ["hard_gate_missing"],
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      verified_fit_score: 0.31,
+      rewrite_potential_score: 0.58,
+      risk_score: 0.88,
+      gate_status: "blocked",
+      gate_reasons: ["学历硬门槛缺失"],
+    },
+  ]);
+  await writeJson(path.join(runDir, "evaluate", "ranking_explanations.json"), [
+    {
+      jd_id: "jd-001",
+      variant_id: "variant-jd-jd-001",
+      ranking_version: "v0.5.7-gated",
+      dimension_reasons: {
+        overall: "学历硬门槛缺失，需要人工复核。",
+      },
+      positive_signals: ["项目经验可迁移"],
+      risk_flags: ["学历硬门槛缺失"],
+      evidence_refs: [],
+      decision_summary: "先补证据，不建议直接投递。",
+    },
+  ]);
+  await writeJson(path.join(runDir, "plan", "application_strategies.json"), [
+    {
+      jd_id: "jd-001",
+      recommended_variant_id: "variant-jd-jd-001",
+      priority_rank: 9,
+      apply_decision: "manual_review",
+      reason_summary: "学历硬门槛缺失，需要人工复核。",
+      needs_jd_specific_variant: false,
+      decision_drivers: ["先补齐硬门槛证据"],
+      watchouts: ["学历硬门槛缺失"],
+      recommended_actions: ["补充学历证明后重跑"],
+      catch_up_notes: [],
+      decision_confidence: 0.44,
+      interview_prep_points: [],
+      resume_revision_tasks: [],
+    },
+  ]);
+  await writeJson(path.join(runDir, "evaluate", "eval_summary.json"), [
+    {
+      jd_id: "jd-001",
+      title: "Risky AI Manager",
+      top_variant_id: "variant-jd-jd-001",
+      gap_count: 3,
+      top_reasons: ["项目经验可迁移"],
+    },
+  ]);
 }
 
 
