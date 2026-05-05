@@ -12,7 +12,7 @@ export default function UploadPage() {
         {"返回运行列表"}
       </Link>
 
-      <section className="workspace-hero">
+      <section className="workspace-hero editorial-hero">
         <div>
           <p className="eyebrow">{"本地上传 · 草稿创建"}</p>
           <h1 className="page-title">{"创建投递草稿"}</h1>
@@ -20,7 +20,7 @@ export default function UploadPage() {
             {"将 CV、补充材料和 JD 输入整理为可复现的 run 草稿。Web 只负责落盘和元数据，不解析正文，也不直接承载业务判断。"}
           </p>
         </div>
-        <span className="status-chip">{"仅创建草稿"}</span>
+        <span className="status-chip dark-product-surface">{"仅创建草稿"}</span>
       </section>
 
       <section className="section">

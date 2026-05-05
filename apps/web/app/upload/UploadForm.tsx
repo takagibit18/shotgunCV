@@ -238,7 +238,7 @@ export function UploadForm() {
           ) : null}
         </section>
 
-        <button className="primary-link" type="submit" disabled={isSubmitting}>
+        <button className="primary-link coral-cta" type="submit" disabled={isSubmitting}>
           {isSubmitting ? "正在创建草稿" : "创建草稿 run"}
         </button>
       </form>
