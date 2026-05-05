@@ -72,7 +72,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
   return (
     <div className="run-action-stack">
       <div className="pill-row compact">
-        <button className="primary-link coral-cta" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run")}>
+        <button className="primary-link" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run")}>
           {"运行"}
         </button>
         <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("retry_full")}>
@@ -126,7 +126,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
             <input name="jdTextDisplayNames" placeholder="Company - Role" />
             <textarea name="jdTexts" rows={5} placeholder="粘贴 JD 文本" />
           </label>
-          <button className="primary-link coral-cta" type="submit" disabled={isBusy}>
+          <button className="primary-link" type="submit" disabled={isBusy}>
             {"更新草稿"}
           </button>
         </form>

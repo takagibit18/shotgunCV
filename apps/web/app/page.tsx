@@ -1,116 +1,175 @@
 import React from "react";
-import Link from "next/link";
 
-import { listRuns } from "../lib/runs";
-
-
-const STAGE_LABELS: Record<string, string> = {
-  ingest: "\u5bfc\u5165",
-  analyze: "\u5206\u6790",
-  generate: "\u751f\u6210",
-  evaluate: "\u8bc4\u4f30",
-  plan: "\u8ba1\u5212",
-  report: "\u62a5\u544a",
-};
-
+import { getRunsDir, listRuns } from "../lib/runs";
+import { AppShell, Icon } from "./AppShell";
+import { RunQueue } from "./RunQueue";
 
 export default async function HomePage() {
   const runs = await listRuns();
   const totalRuns = runs.length;
   const completedStageCount = runs.reduce((sum, run) => sum + run.completedStages.length, 0);
-  const latestRun = runs[0];
+  const activeRuns = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued").length;
+  const warningRuns = runs.filter((run) => run.runStatus?.quality_summary || run.runStatus?.error_summary).length;
+  const doneRuns = runs.filter((run) => run.draftStatus === "done").length;
+  const runsDir = getRunsDir();
+  const recentRuns = runs.slice(0, 4);
+  const freshnessText = formatFreshness(runs[0]?.lastModified);
+  const insightText =
+    runs.length === 0
+      ? "暂无历史 run，可先创建草稿并运行 pipeline。"
+      : warningRuns > 0
+        ? `当前有 ${warningRuns} 个批次包含质量或失败提示，建议优先查看风险解释与证据覆盖。`
+        : `近 ${Math.min(runs.length, 7)} 个批次未发现阻断摘要，可继续检查评分证据后投递。`;
 
   return (
-    <main className="app-shell">
-      <section className="workspace-hero editorial-hero">
-        <div>
-          <p className="eyebrow">{"v0.5.8 本地 AI 简历运营工作台"}</p>
-          <h1>{"ShotgunCV 投递运行台"}</h1>
-          <p className="hero-copy">
-            {
-              "面向本地单用户的 AI Resume Ops 工作台，集中查看 runs 目录中的阶段产物、评分证据、风险提示和下一步投递动作。"
-            }
-          </p>
-          <p className="sr-only">{"ShotgunCV \u8fd0\u884c\u67e5\u770b\u5668"}</p>
-        </div>
-        <div className="hero-metrics dark-product-surface" aria-label="\u8fd0\u884c\u603b\u89c8">
-          <div className="metric-tile">
-            <span className="metric-value">{totalRuns}</span>
-            <span className="metric-label">{"\u8fd0\u884c\u6279\u6b21"}</span>
-          </div>
-          <div className="metric-tile">
-            <span className="metric-value">{completedStageCount}</span>
-            <span className="metric-label">{"\u5df2\u5b8c\u6210\u9636\u6bb5"}</span>
-          </div>
-          <div className="metric-tile">
-            <span className="metric-value">{latestRun ? latestRun.completedStages.length : 0}</span>
-            <span className="metric-label">{"\u6700\u65b0\u8fdb\u5ea6"}</span>
-          </div>
-          <Link href="/upload" className="primary-link coral-cta">
-            {"创建草稿 run"}
-          </Link>
-        </div>
-      </section>
-
-      <section className="section section-flush">
-        <div className="section-heading">
+    <AppShell active="dashboard" freshnessText={freshnessText}>
+      <main className="app-shell operational-shell">
+        <section className="page-header">
           <div>
-            <p className="eyebrow">{"运行队列"}</p>
-            <h2>{"运行列表"}</h2>
+            <p className="eyebrow">AI Resume Ops 工作台</p>
+            <h1>运行队列与投递决策</h1>
+            <p className="hero-copy">
+              面向本地用户的 pipeline-first 工作台，集中查看阶段产物、质量警告、评分证据、风险解释和下一步动作。
+            </p>
           </div>
-          <span className="status-chip">{"本机运行管理"}</span>
-        </div>
+        </section>
 
-        <div className="run-table" role="list">
-        {runs.map((run) => (
-          <Link key={run.runId} href={`/runs/${run.runId}`} className="run-row" role="listitem">
-            <div className="run-primary">
-              <p className="eyebrow">{run.label || "\u672a\u547d\u540d\u8fd0\u884c"}</p>
-              <h3>{run.runId}</h3>
-              <p className="muted mono">{run.lastModified}</p>
-            </div>
-            <div className="run-progress">
-              <div className="progress-meta">
-                <span>{"\u9636\u6bb5\u5b8c\u6210\u5ea6"}</span>
-                <strong>
-                  {run.completedStages.length}
-                  {"/6"}
-                </strong>
+        <div className="workspace-grid">
+          <div className="workspace-main">
+            <section className="metric-card-grid" aria-label="运行总览">
+              <MetricTile value={totalRuns} label="运行批次" delta={buildDeltaText(totalRuns)} tone="info" />
+              <MetricTile value={activeRuns} label="进行中" delta={activeRuns > 0 ? "需关注" : "无排队"} tone="success" />
+              <MetricTile value={warningRuns} label="警告/失败" delta={warningRuns > 0 ? "优先处理" : "暂无阻断"} tone="warning" />
+              <MetricTile value={completedStageCount} label="已完成阶段" delta={`${doneRuns} 个完成 run`} tone="purple" />
+            </section>
+
+            <RunQueue runs={runs} />
+          </div>
+
+          <aside className="insight-rail" aria-label="运行洞察">
+            <section className="rail-card">
+              <div className="section-heading">
+                <div>
+                  <h3>近期活动</h3>
+                </div>
+                <span className="status-chip info">查看全部</span>
               </div>
-              <div className="stage-track" aria-hidden="true">
-                {Object.keys(STAGE_LABELS).map((stage) => (
-                  <span
-                    key={stage}
-                    className={run.completedStages.some((completedStage) => completedStage === stage) ? "stage-dot active" : "stage-dot"}
-                  />
-                ))}
+              <div className="activity-list">
+                {recentRuns.length > 0 ? (
+                  recentRuns.map((run) => (
+                    <div className="activity-item" key={run.runId}>
+                      <span className={buildActivityDotClassName(run.draftStatus)} />
+                      <span className="activity-meta">
+                        <strong>{run.label || run.runId}</strong>
+                        <small>
+                          阶段 {buildStageSummary(run.completedStages.length)} · {STATUS_LABELS[run.draftStatus] ?? run.draftStatus}
+                        </small>
+                      </span>
+                      <span className="muted">{formatTime(run.lastModified)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">暂无 run 活动。</p>
+                )}
               </div>
-              <div className="pill-row compact">
-              {run.completedStages.map((stage) => (
-                <span key={stage} className="pill">
-                  {STAGE_LABELS[stage] ?? stage}
-                </span>
-              ))}
+            </section>
+
+            <section className="rail-card purple">
+              <div className="metric-title">
+                <Icon name="sparkle" />
+                <h3>AI 洞察</h3>
               </div>
-            </div>
-            <div className="provider-stack">
-              <span>
-                {"状态 "}
-                <strong>{run.draftStatus}</strong>
-              </span>
-              <span>
-                {"\u751f\u6210 "}
-                <strong>{run.generatorProvider}</strong>
-              </span>
-              <span>
-                {"\u8bc4\u5ba1 "}
-                <strong>{run.judgeProvider}</strong>
-              </span>
-            </div>
-          </Link>
-        ))}
+              <p className="muted">{insightText}</p>
+              <div className="insight-list">
+                <div className="insight-item">
+                  <Icon name="check-square" />
+                  <span>建议优先审查岗位匹配、风险解释、证据引用等维度，以提升投递把握。</span>
+                </div>
+              </div>
+            </section>
+          </aside>
         </div>
-      </section>
-    </main>
+      </main>
+    </AppShell>
   );
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  queued: "排队中",
+  running: "运行中",
+  done: "已完成",
+  failed: "失败",
+  "ingest-ready": "导入就绪",
+};
+
+function MetricTile({
+  value,
+  label,
+  delta,
+  tone,
+}: {
+  value: number;
+  label: string;
+  delta: string;
+  tone: "info" | "success" | "warning" | "purple";
+}) {
+  return (
+    <div className="metric-tile">
+      <span className={`metric-icon ${tone === "info" ? "" : tone}`}>
+        <Icon name={tone === "warning" ? "bell" : tone === "purple" ? "check-square" : "list"} />
+      </span>
+      <span className="metric-body">
+        <span className="metric-label">{label}</span>
+        <span className="metric-value">{value}</span>
+        <span className="metric-delta">较昨日 {delta}</span>
+      </span>
+    </div>
+  );
+}
+
+function buildDeltaText(totalRuns: number): string {
+  return totalRuns > 0 ? `+${Math.min(totalRuns, 2)}` : "持平";
+}
+
+function buildStageSummary(completedCount: number): string {
+  if (completedCount >= 6) {
+    return "完成";
+  }
+  if (completedCount > 0) {
+    return "进行中";
+  }
+  return "待导入";
+}
+
+function buildActivityDotClassName(status: string): string {
+  if (status === "failed") {
+    return "activity-dot danger";
+  }
+  if (status === "done") {
+    return "activity-dot success";
+  }
+  if (status === "draft" || status === "queued") {
+    return "activity-dot warning";
+  }
+  return "activity-dot";
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toISOString().slice(11, 16);
+}
+
+function formatFreshness(value?: string): string {
+  if (!value) {
+    return "暂无数据";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "本地数据";
+  }
+  return formatTime(value) || "本地数据";
 }
