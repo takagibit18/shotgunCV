@@ -682,6 +682,118 @@ p {
   min-height: 38px;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr);
+  gap: 18px;
+}
+
+.settings-panel {
+  min-width: 0;
+}
+
+.settings-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.settings-list div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-list div:last-child {
+  border-bottom: 0;
+}
+
+.settings-list dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.settings-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.settings-list.compact {
+  margin-top: 12px;
+}
+
+.settings-config {
+  display: grid;
+  gap: 14px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-card {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.provider-card span,
+.provider-card small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.provider-card strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.settings-check-list {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings-check-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.settings-check-row strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.settings-check-row p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-empty {
+  margin: 16px 20px 20px;
+}
+
 .control-field,
 .field-label,
 .upload-form label {
@@ -1634,7 +1746,9 @@ p {
   .matrix-header,
   .matrix-expansion,
   .report-summary-grid,
-  .insight-rail {
+  .insight-rail,
+  .settings-grid,
+  .provider-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1773,6 +1887,11 @@ p {
   }
 
   .timeline-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-list div,
+  .settings-check-row {
     grid-template-columns: 1fr;
   }
 

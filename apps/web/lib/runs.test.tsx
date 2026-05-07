@@ -9,16 +9,19 @@ import HomePage from "../app/page";
 import EvaluationPage from "../app/evaluations/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
+import SettingsPage from "../app/settings/page";
 import UploadPage from "../app/upload/page";
 import { filterEvaluationResults, loadEvaluationResults, sortEvaluationResults } from "./evaluations";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
 import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
+import { loadSettingsOverview } from "./settings";
 import { createRunDraft, DraftCreationError } from "./upload-drafts";
 
 
 describe("run viewer data loading", () => {
   afterEach(() => {
     delete process.env.SHOTGUNCV_RUNS_DIR;
+    delete process.env.OPENAI_API_KEY;
   });
 
   it("lists runs with completed stages and provider labels", async () => {
@@ -782,9 +785,10 @@ describe("run viewer pages", () => {
     expect(html).toContain("简历优化");
     expect(html).toContain("运行队列");
     expect(html).toContain("评估结果");
-    expect(html).toContain("模板库");
     expect(html).toContain("设置");
-    expect(html).toContain("aria-disabled=\"true\"");
+    expect(html).toContain('href="/settings"');
+    expect(html).not.toContain("模板库");
+    expect(html).not.toContain("sidebar-nav-item disabled");
     expect(html).toContain("近期活动");
     expect(html).toContain("AI 洞察");
     expect(html).toContain("搜索 run、标签、provider");
@@ -1184,6 +1188,103 @@ describe("run viewer pages", () => {
     expect(results).toEqual([]);
     expect(html).toContain("暂无评估结果");
     expect(html).toContain("等待 run 完成 evaluate 阶段");
+  });
+
+  it("loads settings overview from local runs without leaking sensitive values", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-settings", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    process.env.OPENAI_API_KEY = "sk-sensitive-test-key";
+    const configPath = path.join(runsDir, "demo-settings", "config", "run_config.json");
+    const config = JSON.parse(await readFile(configPath, "utf-8"));
+    config.openai = {
+      base_url: "https://api.openai.com/v1",
+      api_key_env: "OPENAI_API_KEY",
+      env_file: ".env",
+    };
+    config.input_extraction = {
+      ocr_provider: "local_ocr",
+      vision_provider: "openai_vision",
+      vision_model: "gpt-5.4-mini",
+      ocr_languages: "eng+chi_sim",
+    };
+    await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+
+    const overview = await loadSettingsOverview();
+    const html = renderToStaticMarkup(await SettingsPage());
+
+    expect(overview).toMatchObject({
+      runsDirSource: "env",
+      runCount: 1,
+      configSnapshotCount: 1,
+      configIssueCount: 0,
+      latestConfig: {
+        runId: "demo-settings",
+        baseUrlHost: "api.openai.com",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+    });
+    expect(overview.displayRunsDir).not.toContain(runsDir);
+    expect(html).toContain("v0.6.3 设置");
+    expect(html).toContain("本地设置与环境检查");
+    expect(html).toContain("api.openai.com");
+    expect(html).toContain("OPENAI_API_KEY");
+    expect(html).toContain("local_ocr");
+    expect(html).toContain("openai_vision");
+    expect(html).toContain("环境检查");
+    expect(html).not.toContain(runsDir);
+    expect(html).not.toContain("sk-sensitive-test-key");
+    expect(html).not.toContain("resume text");
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  it("reports empty and missing runs directories on the settings page", async () => {
+    const emptyRunsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = emptyRunsDir;
+
+    const emptyOverview = await loadSettingsOverview();
+    const emptyHtml = renderToStaticMarkup(await SettingsPage());
+
+    expect(emptyOverview).toMatchObject({
+      runCount: 0,
+      configSnapshotCount: 0,
+      configIssueCount: 0,
+    });
+    expect(emptyHtml).toContain("暂无 run");
+
+    process.env.SHOTGUNCV_RUNS_DIR = path.join(emptyRunsDir, "missing-runs-root");
+    const missingOverview = await loadSettingsOverview();
+    const missingHtml = renderToStaticMarkup(await SettingsPage());
+
+    expect(missingOverview.runsDirReadable).toBe(false);
+    expect(missingHtml).toContain("runs 目录不可读");
+  });
+
+  it("surfaces missing config, malformed json artifacts, and unknown providers in settings", async () => {
+    const runsDir = await createTempRunsDir();
+    const missingConfigDir = path.join(runsDir, "missing-config");
+    const malformedRunDir = path.join(runsDir, "malformed-run");
+    await mkdir(missingConfigDir, { recursive: true });
+    await createIncompleteRun(runsDir, "unknown-provider");
+    await createCompleteRun(runsDir, "malformed-run");
+    const unknownConfigPath = path.join(runsDir, "unknown-provider", "config", "run_config.json");
+    const unknownConfig = JSON.parse(await readFile(unknownConfigPath, "utf-8"));
+    unknownConfig.analyzer.provider = "unknown";
+    await writeFile(unknownConfigPath, JSON.stringify(unknownConfig, null, 2), "utf-8");
+    await writeFile(path.join(malformedRunDir, "evaluate", "scorecards.json"), "{broken", "utf-8");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const overview = await loadSettingsOverview();
+    const html = renderToStaticMarkup(await SettingsPage());
+
+    expect(overview.runCount).toBe(3);
+    expect(overview.configIssueCount).toBeGreaterThanOrEqual(1);
+    expect(overview.artifactIssueCount).toBeGreaterThanOrEqual(1);
+    expect(html).toContain("配置缺失或异常");
+    expect(html).toContain("artifact 解析异常");
+    expect(html).toContain("unknown-provider");
+    expect(html).toContain("unknown");
+    expect(html).not.toContain("jd text");
   });
 });
 
