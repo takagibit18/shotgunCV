@@ -1,11 +1,14 @@
 import React from "react";
 import Link from "next/link";
 
+import { loadLocalConfig } from "../../lib/local-config";
 import { loadSettingsOverview, type SettingsCheck, type SettingsOverview } from "../../lib/settings";
 import { AppShell, Icon } from "../AppShell";
+import { LocalConfigPanel } from "./LocalConfigPanel";
 
 export default async function SettingsPage() {
   const overview = await loadSettingsOverview();
+  const localConfig = await loadLocalConfig();
 
   return (
     <AppShell active="settings" eyebrow="设置 / 环境检查" freshnessText={overview.runsDirReadable ? "本地可读" : "需要检查"}>
@@ -51,6 +54,8 @@ export default async function SettingsPage() {
             <strong>{overview.artifactIssueCount}</strong>
           </article>
         </section>
+
+        <LocalConfigPanel initialConfig={localConfig} />
 
         <section className="settings-grid" aria-label="本地设置摘要">
           <section className="section settings-panel">
