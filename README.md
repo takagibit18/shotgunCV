@@ -41,7 +41,7 @@ python -m shotguncv_cli.main run --run-dir ./runs/demo --candidate-id cand-001 -
 - 文本型 `.pdf`
 - 图片文件（`.png` / `.jpg` / `.jpeg` / `.webp` 等），默认先走本地 OCR，再走 OpenAI-compatible 视觉兜底，最后使用同名 `.txt` 或 `.md` sidecar 兜底
 
-图片 OCR 依赖本机安装 Tesseract 可执行程序及语言包；Python 依赖由项目安装提供。默认 OCR 语言为 `eng+chi_sim`，可通过 `--ocr-languages` 或 `.env` 中的 `SHOTGUNCV_OCR_LANGUAGES` 覆盖。
+图片 OCR 依赖本机安装 Tesseract 可执行程序及语言包；Python 依赖由项目安装提供。默认 OCR 语言为 `chi+eng`，可通过 `--ocr-languages` 或 `.env` 中的 `SHOTGUNCV_OCR_LANGUAGES` 覆盖。
 
 如果本地 OCR 提取为空或失败，系统会自动尝试视觉模型。视觉兜底沿用项目 `.env` 的 OpenAI-compatible 配置，可通过 `SHOTGUNCV_VISION_MODEL` 指定模型。若希望完全本地运行，可传入 `--no-vision-fallback`。
 
@@ -81,7 +81,7 @@ python -m shotguncv_cli.main run --run-dir ./runs/openai-demo --candidate-id can
 OPENAI_API_KEY=your-real-key
 # Optional for image vision fallback
 SHOTGUNCV_VISION_MODEL=gpt-5.4-mini
-SHOTGUNCV_OCR_LANGUAGES=eng+chi_sim
+SHOTGUNCV_OCR_LANGUAGES=chi+eng
 ```
 
 说明：

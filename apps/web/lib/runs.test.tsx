@@ -9,9 +9,20 @@ import HomePage from "../app/page";
 import EvaluationPage from "../app/evaluations/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
+import {
+  GET as getLocalConfigRoute,
+  POST as resetLocalConfigRoute,
+  PUT as putLocalConfigRoute,
+} from "../app/api/settings/local-config/route";
 import SettingsPage from "../app/settings/page";
 import UploadPage from "../app/upload/page";
 import { filterEvaluationResults, loadEvaluationResults, sortEvaluationResults } from "./evaluations";
+import {
+  LocalConfigError,
+  loadLocalConfig,
+  resetLocalConfig,
+  saveLocalConfig,
+} from "./local-config";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
 import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
 import { loadSettingsOverview } from "./settings";
@@ -22,6 +33,7 @@ describe("run viewer data loading", () => {
   afterEach(() => {
     delete process.env.SHOTGUNCV_RUNS_DIR;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.SHOTGUNCV_WEB_PROJECT_ROOT;
   });
 
   it("lists runs with completed stages and provider labels", async () => {
@@ -1286,11 +1298,183 @@ describe("run viewer pages", () => {
     expect(html).toContain("unknown");
     expect(html).not.toContain("jd text");
   });
+
+  it("loads missing local env config as a recoverable settings state", async () => {
+    const projectRoot = await createTempProjectRoot();
+
+    const config = await loadLocalConfig({ projectRoot });
+
+    expect(config.envExists).toBe(false);
+    expect(config.envReadable).toBe(false);
+    expect(config.envWritable).toBe(false);
+    expect(config.restoreAvailable).toBe(true);
+    expect(config.apiKey.configured).toBe(false);
+    expect(config.values.openaiApiKey).toBe("");
+  });
+
+  it("updates supported env fields without leaking the API key", async () => {
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(
+      path.join(projectRoot, ".env"),
+      [
+        "# custom header",
+        "OPENAI_API_KEY=sk-existing-secret-0000",
+        "OPENAI_MODEL=old-model",
+        "CUSTOM_FLAG=keep-me",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const saved = await saveLocalConfig(
+      {
+        openaiApiKey: "sk-new-secret-9999",
+        openaiBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        openaiModel: "qwen3.6-27b",
+        generatorModel: "generator-model",
+        judgeModel: "",
+        visionModel: "vision-model",
+        openaiApiKeyEnv: "OPENAI_API_KEY",
+      },
+      { projectRoot },
+    );
+    const envText = await readFile(path.join(projectRoot, ".env"), "utf-8");
+
+    expect(envText).toContain("# custom header");
+    expect(envText).toContain("CUSTOM_FLAG=keep-me");
+    expect(envText).toContain("OPENAI_API_KEY=sk-new-secret-9999");
+    expect(envText).toContain("OPENAI_MODEL=qwen3.6-27b");
+    expect(saved.apiKey).toMatchObject({ configured: true, suffix: "9999" });
+    expect(saved.values.openaiApiKey).toBe("");
+    expect(JSON.stringify(saved)).not.toContain("sk-new-secret-9999");
+  });
+
+  it("renders local model configuration on settings without leaking the API key", async () => {
+    const runsDir = await createTempRunsDir();
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(
+      path.join(projectRoot, ".env"),
+      "OPENAI_API_KEY=sk-page-secret-7777\nOPENAI_BASE_URL=https://api.openai.com/v1\nOPENAI_MODEL=gpt-5.4-mini\n",
+      "utf-8",
+    );
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    process.env.SHOTGUNCV_WEB_PROJECT_ROOT = projectRoot;
+
+    const html = renderToStaticMarkup(await SettingsPage());
+
+    expect(html).toContain("本地模型配置");
+    expect(html).toContain("API key 与模型运行参数");
+    expect(html).toContain("已配置 · ****7777");
+    expect(html).toContain("api.openai.com");
+    expect(html).toContain("gpt-5.4-mini");
+    expect(html).not.toContain("OCR 语言");
+    expect(html).not.toContain("eng+chi_sim");
+    expect(html).not.toContain("sk-page-secret-7777");
+  });
+
+  it("preserves an existing API key unless the clear action sends an empty value", async () => {
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(path.join(projectRoot, ".env"), "OPENAI_API_KEY=sk-preserve-1234\nOPENAI_MODEL=old\n", "utf-8");
+
+    await saveLocalConfig({ openaiModel: "new-model" }, { projectRoot });
+    let envText = await readFile(path.join(projectRoot, ".env"), "utf-8");
+    expect(envText).toContain("OPENAI_API_KEY=sk-preserve-1234");
+
+    await saveLocalConfig({ openaiApiKey: "" }, { projectRoot });
+    envText = await readFile(path.join(projectRoot, ".env"), "utf-8");
+    expect(envText).toContain("OPENAI_API_KEY=");
+    expect(envText).not.toContain("sk-preserve-1234");
+  });
+
+  it("rejects invalid local env config inputs with stable error codes", async () => {
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(path.join(projectRoot, ".env"), "OPENAI_API_KEY=\n", "utf-8");
+
+    await expect(saveLocalConfig({ openaiBaseUrl: "not a url" }, { projectRoot })).rejects.toMatchObject({
+      code: "invalid_base_url",
+    });
+    await expect(saveLocalConfig({ openaiApiKeyEnv: "OPENAI API KEY" }, { projectRoot })).rejects.toMatchObject({
+      code: "invalid_key_env",
+    });
+  });
+
+  it("restores the default env structure without copying a real key", async () => {
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(path.join(projectRoot, ".env"), "OPENAI_API_KEY=sk-real-key-5555\nCUSTOM_FLAG=remove\n", "utf-8");
+
+    const restored = await resetLocalConfig({ projectRoot });
+    const envText = await readFile(path.join(projectRoot, ".env"), "utf-8");
+
+    expect(envText).toContain("# Project-level model runtime settings");
+    expect(envText).toContain("OPENAI_API_KEY=");
+    expect(envText).not.toContain("sk-real-key-5555");
+    expect(envText).not.toContain("CUSTOM_FLAG=remove");
+    expect(restored.apiKey.configured).toBe(false);
+  });
+
+  it("serves local config API responses without returning the full API key", async () => {
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(path.join(projectRoot, ".env"), "OPENAI_API_KEY=sk-route-secret-8888\nOPENAI_MODEL=old\n", "utf-8");
+    process.env.SHOTGUNCV_WEB_PROJECT_ROOT = projectRoot;
+
+    const putResponse = await putLocalConfigRoute(
+      new Request("http://localhost/api/settings/local-config", {
+        method: "PUT",
+        body: JSON.stringify({ openaiApiKey: "sk-route-secret-9999", openaiModel: "new-model" }),
+      }),
+    );
+    const putBody = await putResponse.json();
+    const getBody = await (await getLocalConfigRoute()).json();
+
+    expect(putResponse.status).toBe(200);
+    expect(putBody.apiKey).toMatchObject({ configured: true, suffix: "9999" });
+    expect(getBody.values.openaiApiKey).toBe("");
+    expect(getBody.values.openaiModel).toBe("new-model");
+    expect(JSON.stringify(getBody)).not.toContain("sk-route-secret-9999");
+    expect(JSON.stringify(getBody)).not.toContain(projectRoot);
+  });
+
+  it("restores local config through the API route", async () => {
+    const projectRoot = await createTempProjectRoot();
+    await writeFile(path.join(projectRoot, ".env"), "OPENAI_API_KEY=sk-route-secret-1111\nCUSTOM_FLAG=remove\n", "utf-8");
+    process.env.SHOTGUNCV_WEB_PROJECT_ROOT = projectRoot;
+
+    const response = await resetLocalConfigRoute();
+    const body = await response.json();
+    const envText = await readFile(path.join(projectRoot, ".env"), "utf-8");
+
+    expect(response.status).toBe(200);
+    expect(body.apiKey.configured).toBe(false);
+    expect(envText).not.toContain("sk-route-secret-1111");
+    expect(envText).not.toContain("CUSTOM_FLAG=remove");
+  });
 });
 
 
 async function createTempRunsDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "shotguncv-runs-"));
+}
+
+
+async function createTempProjectRoot(): Promise<string> {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "shotguncv-project-"));
+  await writeFile(
+    path.join(projectRoot, ".env.example"),
+    [
+      "# Project-level model runtime settings",
+      "OPENAI_API_KEY=",
+      "OPENAI_BASE_URL=",
+      "OPENAI_MODEL=",
+      "SHOTGUNCV_GENERATOR_MODEL=",
+      "SHOTGUNCV_JUDGE_MODEL=",
+      "SHOTGUNCV_VISION_MODEL=",
+      "SHOTGUNCV_OCR_LANGUAGES=chi+eng",
+      "OPENAI_API_KEY_ENV=",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  return projectRoot;
 }
 
 

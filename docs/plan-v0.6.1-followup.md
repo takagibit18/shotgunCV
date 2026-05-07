@@ -39,21 +39,43 @@ v0.6.0 已经完成 Web 体验的主要重构：统一 `AppShell`、冷白 SaaS 
 - 筛选和排序行为有单元测试覆盖。
 - 长 JD 标题、长风险说明、空证据引用均不破坏布局。
 
-### v0.6.3 设置真实页面
+### v0.6.3 设置真实页面与模板页清理
 
-目标：新增 `/settings`，把本地运行边界、路径、provider 配置和环境检查集中展示，降低用户理解和排障成本。
+目标：新增 `/settings`，把本地运行边界、路径、provider 配置和环境检查集中展示，降低用户理解和排障成本；同时移除模板 Settings 页和模板导航残留，让 v0.6.3 的设置入口成为真实可用页面。
 
 关键变化：
+- 删除默认模板库 Settings 页面内容，避免用户进入无业务含义的占位页。
+- 更新 AppShell 导航，使设置入口指向真实 `/settings` 页面，并保持与现有本地单用户工作台视觉体系一致。
 - 展示当前 runs 根目录、Web 读取路径、Python CLI 调用边界和本地单用户模式说明。
 - 展示 provider 配置摘要：analyzer、generator、judge、planner、OpenAI-compatible base URL host、OCR/vision 配置。
 - 提供环境检查区：runs 目录是否可读、关键 artifacts 是否可解析、`shotguncv` CLI 是否可用、OCR/vision 依赖是否配置。
 - 设置页不保存 API key，不在页面输出完整密钥、完整 CV/JD 原文或敏感路径。
-- 若未来需要可编辑设置，必须先明确持久化文件、权限边界和脱敏策略。
+- 设置页只读取本地元数据和 run artifacts，不执行 pipeline，不修改 `.env`，不写入 provider 配置。
+- 若未来需要可编辑设置，必须作为单独小版本明确持久化文件、权限边界和脱敏策略。
 
 验收标准：
+- `/settings` 不再显示 Next.js 或模板库占位内容，导航中设置入口可达。
 - 缺少 runs 目录、空目录、配置不完整、provider unknown 时均显示可操作解释。
 - 环境检查失败不导致页面崩溃。
 - 敏感配置只展示摘要，不泄露 API key。
+
+### v0.6.3.x Web 端本地配置闭环
+
+目标：在 v0.6.3 只读设置页稳定后，新增 Web 端本地模型配置闭环，让用户可以在浏览器里完成 API key、OpenAI-compatible endpoint 和模型配置的本地保存、校验与回退；该能力仍限定在开源、本地单用户、不部署的项目边界内。
+
+关键变化：
+- 将入口放在 `/settings` 的独立配置区或子页面中，命名为“本地模型配置”，避免使用“上传 API key”这类容易暗示远端传输的文案。
+- 以项目根目录 `.env` 作为首选持久化目标，继续由 `.gitignore` 排除；Web 不把密钥写入 `run_config.json`、run artifacts、日志或浏览器 localStorage。
+- 支持配置 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`SHOTGUNCV_GENERATOR_MODEL`、`SHOTGUNCV_JUDGE_MODEL`、`SHOTGUNCV_VISION_MODEL`，并保留 `OPENAI_API_KEY_ENV` 的高级用法。
+- 保存前展示将要写入的字段摘要，API key 输入框默认掩码，仅显示已配置/未配置和末尾少量字符；不回显完整密钥。
+- 提供连接检查或最小模型探测动作，但检查结果只写入 UI 状态，不落盘保存完整响应、prompt、CV/JD 原文或密钥。
+- 提供清空、覆盖、恢复到 `.env.example` 默认结构的操作，并说明这些操作只影响本地项目配置。
+
+验收标准：
+- 首次打开时能识别 `.env` 不存在、缺少 key、base URL 非法、模型为空等状态，并给出可操作提示。
+- 保存后 CLI pipeline 能继续通过现有 `.env` 读取逻辑获得配置，Web 不引入第二套 provider 真源。
+- API key 不进入客户端持久存储、run artifacts、测试快照或日志摘要。
+- 配置写入失败、权限不足、`.env` 格式异常时，页面不崩溃，并提供明确恢复路径。
 
 ### v0.6.4 简历优化完整业务页
 
