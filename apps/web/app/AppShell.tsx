@@ -1,7 +1,7 @@
 import React, { type ReactNode } from "react";
 import Link from "next/link";
 
-type NavKey = "dashboard" | "resume" | "queue" | "evaluation" | "templates" | "settings";
+type NavKey = "dashboard" | "resume" | "queue" | "evaluation" | "settings";
 
 type AppShellProps = {
   active: NavKey;
@@ -21,8 +21,7 @@ const NAV_ITEMS: Array<{
   { key: "resume", label: "简历优化", href: "/upload", icon: "document" },
   { key: "queue", label: "运行队列", href: "/", icon: "list" },
   { key: "evaluation", label: "评估结果", href: "/evaluations", icon: "check-square" },
-  { key: "templates", label: "模板库", icon: "library", disabled: true },
-  { key: "settings", label: "设置", icon: "settings", disabled: true },
+  { key: "settings", label: "设置", href: "/settings", icon: "settings" },
 ];
 
 type IconName =
@@ -32,7 +31,6 @@ type IconName =
   | "check-square"
   | "document"
   | "home"
-  | "library"
   | "list"
   | "refresh"
   | "settings"
@@ -116,12 +114,6 @@ export function AppShell({ active, children, eyebrow = "AI Resume Ops 工作台"
 }
 
 function buildDisabledNavTitle(key: NavKey): string {
-  if (key === "templates") {
-    return "v0.6.3 规划中：本地模板库";
-  }
-  if (key === "settings") {
-    return "v0.6.4 规划中：本地设置与环境检查";
-  }
   return "后续版本规划中";
 }
 
@@ -163,12 +155,6 @@ export function Icon({ name }: { name: IconName }) {
     home: (
       <>
         <path d="m4 10 8-6.5 8 6.5v10a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1V10Z" />
-      </>
-    ),
-    library: (
-      <>
-        <path d="M5 5.5h9a2 2 0 0 1 2 2v11H7a2 2 0 0 0-2 2v-15Z" />
-        <path d="M8 3.5h9a2 2 0 0 1 2 2v13" />
       </>
     ),
     list: (
