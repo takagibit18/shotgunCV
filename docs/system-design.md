@@ -95,3 +95,13 @@ Web 只读取 `logs/run_events.jsonl` 并渲染 run timeline，不引入集中�
 ## v0.5.5 稳定性与回归边界
 
 v0.5.5 的稳定性基线由 targeted Python/Web 测试承担：CLI 覆盖状态文件、失败记录和结构化日志；Web 覆盖草稿编辑、删除、run action、状态读取、timeline 读取和报告展示。文档表述保持本地单用户边界，不承诺自动投递、CRM、远程队列或多用户协作。
+
+## v0.6.4 简历优化工作台边界
+
+`/resume` 是 Web 端的简历优化 artifact 编排页，不是新的生成入口。它聚合 `generate/resume_variants.json`、`analyze/requirement_matrix.json`、`analyze/preflight_gates.json`、`plan/application_strategies.json` 与 `run_status.json`，用于展示版本摘要、证据约束、改写边界、投递前检查和下一步动作。
+
+Web 不在 `/resume` 重新生成简历、不改写候选人材料、不调用 Python 内部业务函数，也不展示完整 CV/JD 原文。`/upload` 继续保留为创建草稿入口；完整 pipeline 仍由 CLI 或既有 run action 触发，Python pipeline 仍是唯一业务真源。
+
+## v0.6.5 数据密度展示边界
+
+首页运行队列和评估结果列表可以在 Web 层增加轻量趋势摘要和客户端分页，用于承载更多 run 与更多 JD。趋势指标只从现有 `run_dir` metadata、状态文件和评估 artifacts 推导，不新增持久化趋势文件，不影响排序、评分或投递策略的业务判断。

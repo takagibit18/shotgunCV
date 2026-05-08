@@ -18,7 +18,7 @@ const NAV_ITEMS: Array<{
   disabled?: boolean;
 }> = [
   { key: "dashboard", label: "仪表盘", href: "/", icon: "home" },
-  { key: "resume", label: "简历优化", href: "/upload", icon: "document" },
+  { key: "resume", label: "简历优化", href: "/resume", icon: "document" },
   { key: "queue", label: "运行队列", href: "/", icon: "list" },
   { key: "evaluation", label: "评估结果", href: "/evaluations", icon: "check-square" },
   { key: "settings", label: "设置", href: "/settings", icon: "settings" },

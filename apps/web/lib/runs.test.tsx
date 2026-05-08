@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import HomePage from "../app/page";
 import EvaluationPage from "../app/evaluations/page";
+import ResumePage from "../app/resume/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
 import {
@@ -23,6 +24,7 @@ import {
   resetLocalConfig,
   saveLocalConfig,
 } from "./local-config";
+import { loadResumeWorkspace } from "./resume";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
 import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
 import { loadSettingsOverview } from "./settings";
@@ -798,6 +800,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("运行队列");
     expect(html).toContain("评估结果");
     expect(html).toContain("设置");
+    expect(html).toContain('href="/resume"');
     expect(html).toContain('href="/settings"');
     expect(html).not.toContain("模板库");
     expect(html).not.toContain("sidebar-nav-item disabled");
@@ -823,6 +826,25 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("/upload");
     expect(html).toContain("创建草稿 run");
+  });
+
+  it("renders run pagination and trend summary for dense queues", async () => {
+    const runsDir = await createTempRunsDir();
+    for (let index = 0; index < 12; index += 1) {
+      await createIncompleteRun(runsDir, `dense-run-${String(index + 1).padStart(2, "0")}`);
+    }
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await HomePage());
+
+    expect(html).toContain("趋势概览");
+    expect(html).toContain("完成率");
+    expect(html).toContain("警告/失败");
+    expect(html).toContain("第 1 / 2 页");
+    expect(html).toContain("每页 10 条");
+    expect(html).toContain("共 12 条");
+    expect(html).toContain("dense-run-12");
+    expect(html).not.toContain("dense-run-01");
   });
 
   it("renders v0.6 polished Chinese workspace copy without mojibake or temporary version labels", async () => {
@@ -1200,6 +1222,81 @@ describe("run viewer pages", () => {
     expect(results).toEqual([]);
     expect(html).toContain("暂无评估结果");
     expect(html).toContain("等待 run 完成 evaluate 阶段");
+  });
+
+  it("renders evaluation pagination and score trend summary for dense JD queues", async () => {
+    const runsDir = await createTempRunsDir();
+    for (let index = 0; index < 12; index += 1) {
+      await createCompleteRun(runsDir, `eval-run-${String(index + 1).padStart(2, "0")}`, { includeV057Artifacts: true });
+    }
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await EvaluationPage());
+
+    expect(html).toContain("趋势概览");
+    expect(html).toContain("平均最终分");
+    expect(html).toContain("平均风险分");
+    expect(html).toContain("第 1 / 2 页");
+    expect(html).toContain("每页 10 条");
+    expect(html).toContain("共 12 条");
+  });
+
+  it("loads resume workspace rows with variant and evidence constraint sources", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-v057", { includeV057Artifacts: true });
+    await createIncompleteRun(runsDir, "resume-legacy");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const workspace = await loadResumeWorkspace();
+
+    expect(workspace.rows).toHaveLength(2);
+    expect(workspace.rows[0]).toMatchObject({
+      runId: "resume-v057",
+      status: "done",
+      variantCount: 1,
+      evidenceConstraintCount: 1,
+      preflightStatus: "pass",
+      nextAction: "查看报告或评估矩阵",
+    });
+    expect(workspace.rows[0].variants[0]).toMatchObject({
+      variantId: "variant-jd-jd-001",
+      variantDisplayName: "岗位定制版本（jd-001）",
+      safeRewriteItems: ["Keep education and employer facts unchanged."],
+      simulatedSupplementItems: ["待核实模拟补强：风控项目复盘"],
+      forbiddenGapItems: ["Do not fabricate certificates."],
+      sourceLabel: "来源：variant",
+    });
+    expect(workspace.rows[0].constraints[0]).toMatchObject({
+      category: "可安全改写",
+      requirementText: "本科及以上学历，计算机相关专业",
+      sourceLabel: "来源：requirement matrix / preflight gate",
+    });
+    expect(workspace.rows[1]).toMatchObject({
+      runId: "resume-legacy",
+      status: "running",
+      artifactMode: "legacy",
+    });
+  });
+
+  it("renders the resume workspace without exposing raw resume or JD text", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-v057", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await ResumePage());
+
+    expect(html).toContain("简历优化工作台");
+    expect(html).toContain("创建草稿 run");
+    expect(html).toContain('href="/upload"');
+    expect(html).toContain("岗位定制版本（jd-001）");
+    expect(html).toContain("可安全改写");
+    expect(html).toContain("待核实模拟补强");
+    expect(html).toContain("禁止编造缺口");
+    expect(html).toContain("来源：variant");
+    expect(html).toContain("来源：requirement matrix / preflight gate");
+    expect(html).toContain("来源：strategy / status");
+    expect(html).not.toContain("resume text");
+    expect(html).not.toContain("jd text");
   });
 
   it("loads settings overview from local runs without leaking sensitive values", async () => {

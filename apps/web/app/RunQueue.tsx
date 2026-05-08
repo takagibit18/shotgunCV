@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import type { RunSummary } from "../lib/runs";
@@ -33,6 +33,8 @@ const STATUS_LABELS: Record<string, string> = {
   "ingest-ready": "导入就绪",
 };
 
+const PAGE_SIZE = 10;
+
 export function RunQueue({ runs }: { runs: RunSummary[] }) {
   const [filters, setFilters] = useState<RunListFilterState>({
     query: "",
@@ -41,6 +43,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
     provider: "all",
   });
   const [sortKey, setSortKey] = useState<RunSortKey>("recent");
+  const [page, setPage] = useState(1);
 
   const providerOptions = useMemo(
     () =>
@@ -78,8 +81,15 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       })
       .sort((left, right) => compareRuns(left, right, sortKey));
   }, [filters, runs, sortKey]);
+  const pageCount = Math.max(1, Math.ceil(visibleRuns.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paginatedRuns = visibleRuns.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const onlyDrafts = runs.length > 0 && runs.every((run) => run.draftStatus === "draft");
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters, sortKey]);
 
   return (
     <section className="section section-flush queue-section">
@@ -187,6 +197,16 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
         </div>
       ) : null}
 
+      {visibleRuns.length > PAGE_SIZE ? (
+        <PaginationSummary
+          currentPage={currentPage}
+          pageCount={pageCount}
+          totalCount={visibleRuns.length}
+          onPrevious={() => setPage((current) => Math.max(1, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount, current + 1))}
+        />
+      ) : null}
+
       {visibleRuns.length > 0 ? (
         <div className="run-table" role="table" aria-label="运行队列">
           <div className="run-table-head" role="row">
@@ -197,7 +217,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
             <span role="columnheader">风险与动作</span>
             <span role="columnheader">操作</span>
           </div>
-          {visibleRuns.map((run) => (
+          {paginatedRuns.map((run) => (
             <article key={run.runId} className="run-row" role="row">
               <div className="run-primary" role="cell">
                 <Link href={`/runs/${run.runId}`} className="run-title-link">
@@ -272,6 +292,36 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PaginationSummary({
+  currentPage,
+  pageCount,
+  totalCount,
+  onPrevious,
+  onNext,
+}: {
+  currentPage: number;
+  pageCount: number;
+  totalCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="pagination-bar" aria-label="运行队列分页">
+      <span>
+        第 {currentPage} / {pageCount} 页 · 每页 {PAGE_SIZE} 条 · 共 {totalCount} 条
+      </span>
+      <div className="row-actions">
+        <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={onPrevious}>
+          上一页
+        </button>
+        <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={onNext}>
+          下一页
+        </button>
+      </div>
+    </div>
   );
 }
 

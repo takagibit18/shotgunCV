@@ -11,6 +11,8 @@ export default async function EvaluationPage() {
   const blockedOrReview = results.filter((item) => item.gateStatus === "blocked" || item.gateStatus === "needs_review").length;
   const highRisk = results.filter((item) => (item.riskScore ?? 0) >= 0.7).length;
   const legacy = results.filter((item) => item.artifactMode === "legacy").length;
+  const averageScore = averagePercent(results.map((item) => item.finalScore));
+  const averageRisk = averagePercent(results.map((item) => item.riskScore));
   const freshnessText = formatFreshness(results[0]?.lastModified);
 
   return (
@@ -58,10 +60,38 @@ export default async function EvaluationPage() {
           </article>
         </section>
 
+        <section className="trend-strip" aria-label="趋势概览">
+          <div>
+            <p className="eyebrow">趋势概览</p>
+            <h2>评分与风险密度</h2>
+          </div>
+          <TrendMetric label="JD 数" value={total} />
+          <TrendMetric label="平均最终分" value={averageScore} />
+          <TrendMetric label="平均风险分" value={averageRisk} tone={highRisk > 0 ? "warning" : "success"} />
+        </section>
+
         <EvaluationQueue results={results} />
       </main>
     </AppShell>
   );
+}
+
+function TrendMetric({ label, value, tone }: { label: string; value: string | number; tone?: "warning" | "success" }) {
+  return (
+    <div className={tone ? `trend-metric ${tone}` : "trend-metric"}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function averagePercent(values: Array<number | null>): string {
+  const numericValues = values.filter((value): value is number => typeof value === "number");
+  if (numericValues.length === 0) {
+    return "--";
+  }
+  const average = numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+  return `${Math.round(average * 100)}%`;
 }
 
 function formatFreshness(value?: string): string {

@@ -11,6 +11,7 @@ export default async function HomePage() {
   const activeRuns = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued").length;
   const warningRuns = runs.filter((run) => run.runStatus?.quality_summary || run.runStatus?.error_summary).length;
   const doneRuns = runs.filter((run) => run.draftStatus === "done").length;
+  const completionRate = totalRuns === 0 ? 0 : Math.round((doneRuns / totalRuns) * 100);
   const runsDir = getRunsDir();
   const recentRuns = runs.slice(0, 4);
   const freshnessText = formatFreshness(runs[0]?.lastModified);
@@ -41,6 +42,16 @@ export default async function HomePage() {
               <MetricTile value={activeRuns} label="进行中" delta={activeRuns > 0 ? "需关注" : "无排队"} tone="success" />
               <MetricTile value={warningRuns} label="警告/失败" delta={warningRuns > 0 ? "优先处理" : "暂无阻断"} tone="warning" />
               <MetricTile value={completedStageCount} label="已完成阶段" delta={`${doneRuns} 个完成 run`} tone="purple" />
+            </section>
+
+            <section className="trend-strip" aria-label="趋势概览">
+              <div>
+                <p className="eyebrow">趋势概览</p>
+                <h2>批次容量与健康度</h2>
+              </div>
+              <TrendMetric label="Run 数" value={totalRuns} />
+              <TrendMetric label="完成率" value={`${completionRate}%`} />
+              <TrendMetric label="警告/失败" value={warningRuns} tone={warningRuns > 0 ? "warning" : "success"} />
             </section>
 
             <RunQueue runs={runs} />
@@ -91,6 +102,15 @@ export default async function HomePage() {
         </div>
       </main>
     </AppShell>
+  );
+}
+
+function TrendMetric({ label, value, tone }: { label: string; value: number | string; tone?: "warning" | "success" }) {
+  return (
+    <div className={tone ? `trend-metric ${tone}` : "trend-metric"}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
