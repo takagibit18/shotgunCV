@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import type { EvaluationResult } from "../../lib/evaluations";
@@ -12,9 +12,12 @@ import {
   type EvaluationSortKey,
 } from "../../lib/evaluation-filters";
 
+const PAGE_SIZE = 10;
+
 export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
   const [filters, setFilters] = useState<EvaluationFilterState>(DEFAULT_EVALUATION_FILTERS);
   const [sortKey, setSortKey] = useState<EvaluationSortKey>("recent");
+  const [page, setPage] = useState(1);
 
   const providerOptions = useMemo(
     () => Array.from(new Set(results.map((item) => item.provider).filter((provider) => provider !== "unknown"))).sort(),
@@ -28,6 +31,13 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
     () => sortEvaluationResults(filterEvaluationResults(results, filters), sortKey),
     [filters, results, sortKey],
   );
+  const pageCount = Math.max(1, Math.ceil(visibleResults.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paginatedResults = visibleResults.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters, sortKey]);
 
   return (
     <section className="section section-flush evaluation-section">
@@ -158,6 +168,16 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
         </div>
       ) : null}
 
+      {visibleResults.length > PAGE_SIZE ? (
+        <PaginationSummary
+          currentPage={currentPage}
+          pageCount={pageCount}
+          totalCount={visibleResults.length}
+          onPrevious={() => setPage((current) => Math.max(1, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount, current + 1))}
+        />
+      ) : null}
+
       {visibleResults.length > 0 ? (
         <div className="evaluation-table" role="table" aria-label="岗位评估队列">
           <div className="evaluation-table-head" role="row">
@@ -167,7 +187,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
             <span role="columnheader">证据与风险</span>
             <span role="columnheader">操作</span>
           </div>
-          {visibleResults.map((item) => (
+          {paginatedResults.map((item) => (
             <article key={`${item.runId}-${item.jdId}-${item.variantId}`} className="evaluation-row" role="row">
               <div className="evaluation-primary" role="cell">
                 <Link href={item.detailHref} className="run-title-link">
@@ -209,6 +229,36 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PaginationSummary({
+  currentPage,
+  pageCount,
+  totalCount,
+  onPrevious,
+  onNext,
+}: {
+  currentPage: number;
+  pageCount: number;
+  totalCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="pagination-bar" aria-label="评估结果分页">
+      <span>
+        第 {currentPage} / {pageCount} 页 · 每页 {PAGE_SIZE} 条 · 共 {totalCount} 条
+      </span>
+      <div className="row-actions">
+        <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={onPrevious}>
+          上一页
+        </button>
+        <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={onNext}>
+          下一页
+        </button>
+      </div>
+    </div>
   );
 }
 

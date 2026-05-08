@@ -618,6 +618,53 @@ p {
   overflow: hidden;
 }
 
+.trend-strip {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) repeat(3, minmax(120px, 0.6fr));
+  gap: 12px;
+  align-items: stretch;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--shadow-soft);
+}
+
+.trend-strip h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.trend-metric {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.trend-metric span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.trend-metric strong {
+  font-size: 20px;
+}
+
+.trend-metric.success {
+  border-color: rgba(13, 155, 99, 0.2);
+  background: var(--success-bg);
+}
+
+.trend-metric.warning {
+  border-color: rgba(184, 104, 0, 0.2);
+  background: var(--warning-bg);
+}
+
 .status-strip-item {
   display: grid;
   gap: 4px;
@@ -667,6 +714,19 @@ p {
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid var(--border);
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .evaluation-controls {
@@ -797,6 +857,89 @@ p {
 .settings-local-config {
   display: grid;
   gap: 16px;
+}
+
+.resume-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.resume-card {
+  display: grid;
+  gap: 16px;
+}
+
+.resume-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.resume-card-header h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.resume-card-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(220px, 1fr) minmax(220px, 1fr) minmax(220px, 0.9fr);
+  gap: 12px;
+}
+
+.resume-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.resume-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.resume-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.resume-boundary-group {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.resume-boundary-group:last-of-type {
+  border-bottom: 0;
+}
+
+.resume-boundary-group ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.resume-constraint-list {
+  display: grid;
+  gap: 8px;
+}
+
+.resume-constraint-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .local-config-form {
@@ -1824,11 +1967,13 @@ p {
   .metric-card-grid,
   .page-header,
   .detail-header,
+  .trend-strip,
   .queue-controls,
   .evaluation-controls,
   .run-table-head,
   .run-row,
   .status-strip,
+  .resume-card-grid,
   .matrix-row,
   .matrix-header,
   .matrix-expansion,
@@ -1853,6 +1998,11 @@ p {
   }
 
   .matrix-header {
+    display: grid;
+  }
+
+  .resume-card-header,
+  .pagination-bar {
     display: grid;
   }
 }
