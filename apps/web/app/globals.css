@@ -1346,7 +1346,6 @@ label.primary-link {
 .upload-workspace,
 .upload-form,
 .jd-text-stack,
-.timeline-list,
 .score-matrix,
 .requirement-list {
   display: grid;
@@ -1398,17 +1397,6 @@ label.primary-link {
 
 .stage-pending {
   color: var(--subtle);
-}
-
-.timeline-row {
-  display: grid;
-  grid-template-columns: minmax(170px, 0.9fr) minmax(130px, 0.7fr) minmax(100px, 0.7fr) minmax(80px, auto) minmax(0, 1.2fr);
-  gap: 10px;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel-soft);
 }
 
 .input-source-table {
@@ -2233,10 +2221,6 @@ label.primary-link {
   }
 
   .evaluation-score-cell {
-    grid-template-columns: 1fr;
-  }
-
-  .timeline-row {
     grid-template-columns: 1fr;
   }
 

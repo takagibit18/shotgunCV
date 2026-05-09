@@ -220,3 +220,29 @@ v0.6.0 已经完成 Web 体验的主要重构：统一 `AppShell`、冷白 SaaS 
 - Web 继续作为本地单用户工作台，pipeline artifacts 仍是唯一业务来源。
 - 后续页面可以增加 UI-only 状态，但不能引入第二套业务判断、自动投递、远程队列、CRM 或多用户权限。
 - API key、完整 CV/JD 原文和敏感路径不应出现在设置页或日志摘要中。
+
+### v0.7.5 移除 Web 端运行时间线展示
+
+目标：删除 run detail 页的运行时间线 section，Web 端不需要逐条展示 pipeline 内部日志。
+
+关键变化：
+- 删除 `runs/[runId]/page.tsx` 中整段 timeline section（SectionHeading + timeline-list + timeline-row 渲染）。
+- 移除 `globals.css` 中 `.timeline-list`、`.timeline-row` 样式定义及响应式覆盖。
+- 保留 `readTimeline()` 和 `buildObservabilitySummary()` 数据层函数，Observability 区域继续提供聚合摘要（token、fallback、quality warnings）。
+
+验收标准：
+- run detail 页面不再出现时间线区块。
+- Observability 区域正常展示模型与 token、工具与质量摘要。
+- `npm test` 与 `tsc --noEmit` 通过。
+
+### v0.7.6 清理评估结果页冗余 chips
+
+目标：精简 EvaluationQueue 行内与分数列信息重复的 applyDecision chip。
+
+关键变化：
+- 删除 `EvaluationQueue.tsx` 中 applyDecision chip 渲染及 `buildDecisionClassName` 函数。
+- 保留 gateStatus chip（每个 JD 独立 gate 状态）和 artifactMode pill（数据版本标识）。
+
+验收标准：
+- 评估队列行内仅保留 gateStatus chip + artifactMode pill + 分数列。
+- `npm test` 与 `tsc --noEmit` 通过。

@@ -201,29 +201,6 @@ export default async function RunPage({ params }: PageProps) {
         </div>
       </section>
 
-      <section className="section">
-        <SectionHeading eyebrow="Run timeline" title="运行时间线" action={`${detail.timeline.length} events`} />
-        {detail.timeline.length > 0 ? (
-          <div className="timeline-list">
-            {detail.timeline.map((event, index) => (
-              <article key={`${event.timestamp}-${event.event}-${index}`} className="timeline-row">
-                <span className="mono">{event.timestamp}</span>
-                <strong>{event.event}</strong>
-                <span>{event.stage ?? event.status ?? event.trigger_entrypoint ?? ""}</span>
-                {event.operation ? <span>{event.operation}</span> : null}
-                {event.resolved_model ? <span>{event.resolved_model}</span> : null}
-                {typeof event.total_tokens === "number" ? <span>{`${event.total_tokens} tokens`}</span> : null}
-                {typeof event.duration_ms === "number" ? <span>{`${event.duration_ms} ms`}</span> : null}
-                {event.error_summary ? <span className="risk-line">{event.error_summary}</span> : null}
-                {event.reason ? <span className="risk-line">{event.reason}</span> : null}
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty">{"暂无结构化运行日志"}</div>
-        )}
-      </section>
-
       {detail.draft ? (
         <section className="section">
           <SectionHeading eyebrow="Draft run" title="上传草稿" action={displayStatus} />

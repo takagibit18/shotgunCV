@@ -627,13 +627,11 @@ describe("run viewer data loading", () => {
       stage: "analyze",
       resolvedModel: "gpt-5.4-mini",
     });
-    expect(html).toContain("Run timeline");
+    expect(html).not.toContain("Run timeline");
     expect(html).toContain("运行观测");
     expect(html).toContain("gpt-5.4-mini");
     expect(html).toContain("125");
     expect(html).toContain("完成但有警告");
-    expect(html).toContain("stage_failed");
-    expect(html).toContain("simulated failure");
   });
 
   it("updates draft metadata, replaces CV files, and appends JD inputs", async () => {
