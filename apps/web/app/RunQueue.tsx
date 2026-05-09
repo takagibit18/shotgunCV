@@ -170,9 +170,6 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
             <option value="label">标签名称</option>
           </select>
         </label>
-        <button className="filter-button" type="button" aria-label="更多筛选条件">
-          <Icon name="settings" />
-        </button>
       </div>
 
       {runs.length === 0 ? (
