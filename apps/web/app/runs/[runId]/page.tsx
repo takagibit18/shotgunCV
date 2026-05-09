@@ -268,7 +268,7 @@ export default async function RunPage({ params }: PageProps) {
             </div>
             {detail.inputSources.map((source) => (
               <div key={`${source.role}-${source.relativePath}-${source.originalName}`} className="input-source-row" role="row">
-                <span className="status-chip" role="cell">{source.role}</span>
+                <span role="cell">{source.role}</span>
                 <span role="cell">{source.sourceOrigin}</span>
                 <span role="cell">{source.displayName || source.originalName}</span>
                 <span role="cell">{source.originalName}</span>
@@ -326,7 +326,7 @@ export default async function RunPage({ params }: PageProps) {
                 <article key={gate.jd_id} className={`detail-card gate-card gate-${gate.status}`}>
                   <div className="gate-card-heading">
                     <h3>{gate.jd_id}</h3>
-                    <span className="status-chip">{formatGateStatus(gate.status)}</span>
+                    <span className={buildGateClassName(gate.status)}>{formatGateStatus(gate.status)}</span>
                   </div>
                   {gate.reasons.length > 0 ? <p className="risk-line">{gate.reasons.join(" / ")}</p> : null}
                   <ul className="requirement-list">
@@ -367,7 +367,7 @@ export default async function RunPage({ params }: PageProps) {
       </section>
 
       <section className="section">
-        <SectionHeading eyebrow="阶段评估" title="评估阶段" action="岗位优先级矩阵" />
+        <SectionHeading eyebrow="阶段评估" title="评估阶段" />
         {detail.evaluate.isComplete ? (
           <div className="score-matrix">
             <div className="matrix-header">
@@ -469,6 +469,19 @@ function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: st
       {action ? <span className="status-chip">{action}</span> : null}
     </div>
   );
+}
+
+function buildGateClassName(status: string): string {
+  if (status === "blocked") {
+    return "status-chip danger";
+  }
+  if (status === "needs_review") {
+    return "status-chip warning";
+  }
+  if (status === "pass") {
+    return "status-chip success";
+  }
+  return "status-chip";
 }
 
 function StatusStripItem({
@@ -576,7 +589,7 @@ function ScoreMatrixRow({
           </div>
           <div className="matrix-actions">
             <span className="decision-badge">{"决策分"}</span>
-            {scorecard?.gate_status ? <span className="status-chip">{formatGateStatus(scorecard.gate_status)}</span> : null}
+            {scorecard?.gate_status ? <span className={buildGateClassName(scorecard.gate_status)}>{formatGateStatus(scorecard.gate_status)}</span> : null}
             <details className="matrix-action-detail">
               <summary>{"适配度分析"}</summary>
               <div className="matrix-action-panel">

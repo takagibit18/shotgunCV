@@ -47,7 +47,6 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           <h2>岗位评估队列</h2>
           <p className="section-copy">按 JD 聚合 scorecard、gate、证据、风险和投递建议，优先处理高风险或需复核岗位。</p>
         </div>
-        <span className="status-chip info">{visibleResults.length}/{results.length} 条结果</span>
       </div>
 
       <div className="evaluation-controls" aria-label="评估结果筛选">
@@ -199,7 +198,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
               </div>
               <div className="evaluation-status-cell" role="cell">
                 <span className={buildGateClassName(item.gateStatus)}>{formatGateStatus(item.gateStatus)}</span>
-                <span className="status-chip">{item.applyDecision}</span>
+                <span className={buildDecisionClassName(item.applyDecision)}>{item.applyDecision}</span>
                 <span className="pill">{item.artifactMode}</span>
                 {item.gateReasons.length > 0 ? <p className="risk-line">{item.gateReasons.join(" / ")}</p> : null}
               </div>
@@ -303,6 +302,19 @@ function buildGateClassName(status: string): string {
   }
   if (status === "pass") {
     return "status-chip success";
+  }
+  return "status-chip";
+}
+
+function buildDecisionClassName(decision: string): string {
+  if (decision === "强烈推荐") {
+    return "status-chip success";
+  }
+  if (decision === "可投递") {
+    return "status-chip info";
+  }
+  if (decision === "不建议") {
+    return "status-chip warning";
   }
   return "status-chip";
 }
