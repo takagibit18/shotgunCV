@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 type DraftSuccess = {
   runId: string;
@@ -39,6 +39,7 @@ export function UploadForm() {
   const [nextFileId, setNextFileId] = useState(1);
   const [jdTexts, setJdTexts] = useState<JdTextEntry[]>([{ id: 1, displayName: "", value: "" }]);
   const [nextTextId, setNextTextId] = useState(2);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,9 +166,18 @@ export function UploadForm() {
             </div>
             <span className="status-chip">{"自动生成 Candidate ID"}</span>
           </div>
-          <label className="field-label">
-            <span>{"CV / 补充材料"}</span>
+          <div
+            className="jd-dropzone"
+            onDragOver={(event) => {
+              event.preventDefault();
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              appendCvFiles(event.dataTransfer.files);
+            }}
+          >
             <input
+              id="cvFiles"
               name="cvFiles"
               type="file"
               multiple
@@ -180,8 +190,30 @@ export function UploadForm() {
                 }
               }}
             />
-          </label>
-          <FileMetadataList files={cvFiles} emptyLabel="尚未选择 CV 或补充材料" onRemove={removeCvFile} />
+            <div>
+              <strong>{"将 CV 文件拖拽到此区域"}</strong>
+              <p>{"拖拽到此处，或点击按钮选择文件；支持 PDF、Markdown、文本和图片文件。"}</p>
+            </div>
+            <label className="primary-link" htmlFor="cvFiles">
+              {"选择本地 CV 文件（可多选）"}
+            </label>
+          </div>
+          {cvFiles.length > 0 ? (
+            <ul className="upload-file-list" aria-label="已选择 CV 文件">
+              {cvFiles.map((entry, index) => (
+                <li key={entry.id}>
+                  <div>
+                    <span>{entry.file.name}</span>
+                  </div>
+                  <button type="button" onClick={() => removeCvFile(index)}>
+                    {"移除"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="upload-empty-hint">{"尚未选择 CV 或补充材料"}</p>
+          )}
         </section>
 
         <section className="upload-panel">
@@ -236,27 +268,29 @@ export function UploadForm() {
           ) : (
             <div className="jd-text-stack">
               {jdTexts.map((entry, index) => (
-                <label className="field-label" key={entry.id}>
-                  <span>{`JD 文本 ${index + 1}`}</span>
-                  <input
-                    name="jdTextDisplayNames"
-                    value={entry.displayName}
-                    placeholder="公司/岗位显示名，例如 OpenAI - Product Manager"
-                    onChange={(event) => updateJdTextDisplayName(entry.id, event.currentTarget.value)}
-                  />
-                  <textarea
-                    name="jdTexts"
-                    value={entry.value}
-                    rows={6}
-                    placeholder="粘贴岗位标题、公司、职责和要求"
-                    onChange={(event) => updateJdTextEntry(entry.id, event.currentTarget.value)}
-                  />
-                  <button type="button" className="secondary-link" onClick={() => removeJdTextEntry(entry.id)}>
+                <div className="jd-text-entry" key={entry.id}>
+                  <label className="field-label">
+                    <span>{`JD 文本 ${index + 1}`}</span>
+                    <input
+                      name="jdTextDisplayNames"
+                      value={entry.displayName}
+                      placeholder="公司/岗位显示名，例如 OpenAI - Product Manager"
+                      onChange={(event) => updateJdTextDisplayName(entry.id, event.currentTarget.value)}
+                    />
+                    <textarea
+                      name="jdTexts"
+                      value={entry.value}
+                      rows={6}
+                      placeholder="粘贴岗位标题、公司、职责和要求"
+                      onChange={(event) => updateJdTextEntry(entry.id, event.currentTarget.value)}
+                    />
+                  </label>
+                  <button type="button" className="inline-action" onClick={() => removeJdTextEntry(entry.id)}>
                     {"删除"}
                   </button>
-                </label>
+                </div>
               ))}
-              <button type="button" className="secondary-link" onClick={addJdTextEntry}>
+              <button type="button" className="primary-link" onClick={addJdTextEntry}>
                 {"添加 JD 文本"}
               </button>
             </div>
@@ -266,8 +300,8 @@ export function UploadForm() {
             <ul className="upload-file-list" aria-label="已选择 JD 文件">
               {jdFiles.map((entry, index) => (
                 <li key={entry.id}>
-                  <div>
-                    <span>{entry.file.name}</span>
+                  <div className="upload-file-item">
+                    <FileThumbnail file={entry.file} onClick={setLightboxUrl} />
                     <input
                       name="jdFileDisplayNames"
                       value={entry.displayName}
@@ -282,7 +316,7 @@ export function UploadForm() {
               ))}
             </ul>
           ) : (
-            <FileMetadataList files={[]} emptyLabel="尚未选择 JD 文件" />
+            <p className="upload-empty-hint">{"尚未选择 JD 文件"}</p>
           )}
         </section>
 
@@ -292,18 +326,22 @@ export function UploadForm() {
               <p className="eyebrow">{"3 草稿确认"}</p>
               <h3>{"确认后落盘"}</h3>
             </div>
-            <span className="status-chip info">{"元数据写入"}</span>
           </div>
-          <div className="metadata-table compact-table" aria-label="草稿确认字段">
-            <span>字段</span>
-            <span>状态</span>
-            <span>说明</span>
-            <span>CV 文件</span>
-            <strong>{cvFiles.length > 0 ? `${cvFiles.length} 个` : "待选择"}</strong>
-            <span>必须至少 1 个</span>
-            <span>JD 输入</span>
-            <strong>{jdMode === "files" ? `${jdFiles.length} 个文件` : `${jdTexts.filter((entry) => entry.value.trim()).length} 条文本`}</strong>
-            <span>每个 JD 需要显示名</span>
+          <div className="confirmation-summary" aria-label="草稿确认字段">
+            <div className="confirmation-row">
+              <span className="confirmation-label">{"CV 文件"}</span>
+              <span className="confirmation-value">
+                <strong>{cvFiles.length > 0 ? `${cvFiles.length} 个` : "待选择"}</strong>
+                <span className="confirmation-hint">{" · 必须至少 1 个"}</span>
+              </span>
+            </div>
+            <div className="confirmation-row">
+              <span className="confirmation-label">{"JD 输入"}</span>
+              <span className="confirmation-value">
+                <strong>{jdMode === "files" ? `${jdFiles.length} 个文件` : `${jdTexts.filter((entry) => entry.value.trim()).length} 条文本`}</strong>
+                <span className="confirmation-hint">{" · 每个 JD 需要显示名"}</span>
+              </span>
+            </div>
           </div>
         </section>
 
@@ -338,61 +376,52 @@ export function UploadForm() {
           <pre className="command-block">{result.nextCommand}</pre>
         </div>
       ) : null}
+
+      {lightboxUrl ? (
+        <div className="lightbox-overlay" onClick={() => setLightboxUrl(null)}>
+          <button className="lightbox-close" type="button" onClick={() => setLightboxUrl(null)} aria-label="关闭预览">
+            {"X"}
+          </button>
+          <img src={lightboxUrl} alt="预览" onClick={(event) => event.stopPropagation()} />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function FileMetadataList({
-  files,
-  emptyLabel,
-  onRemove,
-}: {
-  files: JdFileEntry[];
-  emptyLabel: string;
-  onRemove?: (index: number) => void;
-}) {
-  return (
-    <div className="metadata-table" aria-label="文件元数据列表">
-      <span>文件</span>
-      <span>文件类型</span>
-      <span>大小</span>
-      <span>校验状态</span>
-      {files.length === 0 ? (
-        <>
-          <span>{emptyLabel}</span>
-          <span>--</span>
-          <span>--</span>
-          <span>待选择</span>
-        </>
-      ) : (
-        files.map((entry, index) => (
-          <React.Fragment key={entry.id}>
-            <span>{entry.file.name}</span>
-            <span>{entry.file.type || inferFileType(entry.file.name)}</span>
-            <span>{formatFileSize(entry.file.size)}</span>
-            <span>
-              {"可写入"}
-              {onRemove ? (
-                <button type="button" className="inline-action" onClick={() => onRemove(index)}>
-                  移除
-                </button>
-              ) : null}
-            </span>
-          </React.Fragment>
-        ))
-      )}
-    </div>
-  );
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp|bmp)$/i;
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/") || IMAGE_EXTENSIONS.test(file.name);
 }
 
-function inferFileType(fileName: string): string {
-  const extension = fileName.split(".").pop();
-  return extension ? `.${extension}` : "unknown";
-}
+function FileThumbnail({ file, onClick }: { file: File; onClick: (url: string) => void }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-function formatFileSize(size: number): string {
-  if (size < 1024) {
-    return `${size} B`;
+  useEffect(() => {
+    if (isImageFile(file)) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    }
+    return;
+  }, [file]);
+
+  if (!previewUrl) {
+    return <span className="upload-file-name">{file.name}</span>;
   }
-  return `${(size / 1024).toFixed(1)} KB`;
+
+  return (
+    <img
+      src={previewUrl}
+      alt={file.name}
+      className="upload-thumbnail"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick(previewUrl);
+      }}
+    />
+  );
 }

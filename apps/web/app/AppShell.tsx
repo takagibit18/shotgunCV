@@ -98,13 +98,6 @@ export function AppShell({ active, children, eyebrow = "AI Resume Ops 工作台"
               <Icon name="refresh" />
               数据更新：{freshnessText}
             </span>
-            <span className="icon-button" aria-label="通知">
-              <Icon name="bell" />
-            </span>
-            <span className="icon-button" aria-label="使用手册">
-              <Icon name="book" />
-            </span>
-            <span className="avatar-mark compact">N</span>
           </div>
         </header>
         {children}

@@ -109,6 +109,82 @@ v0.6.0 已经完成 Web 体验的主要重构：统一 `AppShell`、冷白 SaaS 
 - 分页、筛选、排序组合行为稳定。
 - 桌面与移动端截图中无明显重叠、错位或不可读文本。
 
+### v0.6.6 上传页交互优化与 SaaS 痕迹清理
+
+目标：打磨上传草稿页的 UX 细节（CV-JD 视觉一致性、截图缩略图预览、按钮可读性与对齐），删除 AppShell 和 RunQueue 中未实装的 SaaS 占位元素，使界面语言对齐项目"开源工具、用户自带 API key、全本地化"的定位。
+
+关键变化：
+- CV 上传区改为与 JD 一致的 dropzone + `.upload-file-list` 结构：隐藏原生 `<input>`，使用 styled label 作为触发器，增加拖拽支持（`onDragOver`/`onDrop`），移除冗余的 4 列 `.metadata-table`。
+- JD 文件列表中为图片文件（PNG/JPG）生成客户端缩略图预览（`URL.createObjectURL`），点击缩略图弹出 lightbox 查看原图；非图片文件保持纯文本文件名展示。
+- 确保"选择本地 JD 文件"按钮文字在 `.primary-link` 蓝紫渐变背景上对比度足够（`color: #fff`），与"创建草稿 run"按钮视觉对齐。
+- 删除 `AppShell.tsx` 命令栏中未实装的铃铛和书本图标按钮（仅删除渲染调用，保留 Icon 组件定义）。
+- 删除 `RunQueue.tsx` 中无功能的"更多筛选条件" filter-button。
+- 删除后验证命令栏右区仅保留 freshness-pill + avatar compact，排版在各断点下自然美观。
+
+验收标准：
+- CV 和 JD 上传区使用一致的 dropzone + file-list 视觉结构，均支持拖拽。
+- 图片文件（PNG/JPG）在 JD 文件列表中显示缩略图，点击可查看大图；非图片文件展示文件名。
+- "选择本地 JD 文件"按钮文字清晰可读，与"创建草稿 run"按钮视觉协调。
+- AppShell 命令栏不再出现铃铛和书本占位图标，RunQueue 筛选栏不再出现无功能筛选按钮。
+- 删除 SaaS 占位后，命令栏和筛选栏在各断点（1180px / 980px / 720px）下排版正常，无错位或空白异常。
+- `npm test` 与 `tsc --noEmit` 通过。
+
+### v0.7 全页面 status-chip 清理与视觉规范统一
+
+目标：审计并清理全页面中滥用 `status-chip` 的静态装饰标签，建立"status-chip 仅用于动态状态展示"的使用规范；将确认面板重排为 2 列简洁布局。
+
+#### v0.7.0 — 确认面板重排 + 上传页 chip 清理
+
+关键变化：
+- 确认面板由 3 列 `.metadata-table.compact-table` 改为 2 列 `.confirmation-summary` 行布局（字段名 | 状态值 · 说明），字体统一 13px。
+- 删除 `upload/page.tsx` 中 "仅创建草稿"、"本地单用户" 两个静态状态 chip。
+- 删除 `UploadForm.tsx` 中 "自动生成 Candidate ID"、"元数据写入" 两个静态状态 chip。
+- 删除 `report/page.tsx` 中 "Markdown 原文"、"保留原文 Markdown" 两个静态状态 chip。
+
+验收标准：
+- 上传页和报告页无静态装饰 chip。
+- 确认面板字体与 upload-file-list 统一（13px），2 列排版清晰。
+- `npm test` 与 `tsc --noEmit` 通过。
+
+#### v0.7.1 — 首页和运行队列 chip 清理
+
+关键变化：
+- 删除 `page.tsx` 右侧 "近期活动" 栏中 "查看全部" 静态 chip。
+- 删除 `RunQueue.tsx` 标题行中 "本机运行管理" 静态 chip。
+
+验收标准：
+- 首页和运行队列页面无静态装饰 chip。
+- 删除后各区域标题排版自然，无空白异常。
+
+#### v0.7.2 — 设置页和评估页 chip 清理
+
+关键变化：
+- 删除 `settings/page.tsx` 中 "X 项检查" 计数器 chip。
+- 删除 `EvaluationQueue.tsx` 中 "X/Y 条结果" 计数器 chip。
+
+验收标准：
+- 设置页和评估页无静态装饰 chip。
+- 计数器信息如有需要以其他方式展示（如普通文本）。
+
+#### v0.7.3 — Run Detail 页 chip 规范化
+
+关键变化：
+- `runs/[runId]/page.tsx` line 271: `source.role` chip 改为普通 `<span>` 文本。
+- `runs/[runId]/page.tsx` line 329 和 579: gate status chip 增加颜色编码（复用 `buildGateClassName` 模式）。
+- `SectionHeading` 组件：清理静态 `action` prop 调用，只保留动态状态值传参。
+
+验收标准：
+- run detail 页所有 status-chip 均为动态状态 + 带颜色编码。
+- `SectionHeading` 不再渲染静态字符串 chip。
+
+#### v0.7.4 — EvaluationQueue applyDecision 颜色编码
+
+关键变化：
+- `EvaluationQueue.tsx` line 202: applyDecision chip 新增颜色映射（强烈推荐→success, 可投递→info, 不建议→warning）。
+
+验收标准：
+- 评估列表决策列有颜色区分，正向/中性/负向决策视觉明确。
+
 ## Public Interfaces
 
 后续版本默认新增或稳定以下 Web 路由：

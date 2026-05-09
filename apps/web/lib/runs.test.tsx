@@ -987,9 +987,6 @@ describe("run viewer pages", () => {
     expect(html).toContain("1 候选人材料");
     expect(html).toContain("2 JD 输入");
     expect(html).toContain("3 草稿确认");
-    expect(html).toContain("文件类型");
-    expect(html).toContain("大小");
-    expect(html).toContain("校验状态");
     expect(html).not.toContain("candidateId");
     expect(html).not.toContain("name=\"label\"");
     expect(html).toContain("cvFiles");
@@ -997,6 +994,8 @@ describe("run viewer pages", () => {
     expect(html).toContain("本地文件");
     expect(html).toContain("粘贴文本");
     expect(html).toContain("公司/岗位显示名");
+    expect(html).toContain("选择本地 CV 文件（可多选）");
+    expect(html).toContain("将 CV 文件拖拽到此区域");
     expect(html).toContain("选择本地 JD 文件（可多选）");
     expect(html).toContain("input_files/");
   });
