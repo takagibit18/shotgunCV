@@ -198,7 +198,6 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
               </div>
               <div className="evaluation-status-cell" role="cell">
                 <span className={buildGateClassName(item.gateStatus)}>{formatGateStatus(item.gateStatus)}</span>
-                <span className={buildDecisionClassName(item.applyDecision)}>{item.applyDecision}</span>
                 <span className="pill">{item.artifactMode}</span>
                 {item.gateReasons.length > 0 ? <p className="risk-line">{item.gateReasons.join(" / ")}</p> : null}
               </div>
@@ -302,19 +301,6 @@ function buildGateClassName(status: string): string {
   }
   if (status === "pass") {
     return "status-chip success";
-  }
-  return "status-chip";
-}
-
-function buildDecisionClassName(decision: string): string {
-  if (decision === "强烈推荐") {
-    return "status-chip success";
-  }
-  if (decision === "可投递") {
-    return "status-chip info";
-  }
-  if (decision === "不建议") {
-    return "status-chip warning";
   }
   return "status-chip";
 }
