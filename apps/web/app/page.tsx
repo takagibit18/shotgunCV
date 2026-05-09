@@ -63,7 +63,6 @@ export default async function HomePage() {
                 <div>
                   <h3>近期活动</h3>
                 </div>
-                <span className="status-chip info">查看全部</span>
               </div>
               <div className="activity-list">
                 {recentRuns.length > 0 ? (

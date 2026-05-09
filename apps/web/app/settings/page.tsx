@@ -93,7 +93,6 @@ export default async function SettingsPage() {
               <h2>本地依赖与 artifacts</h2>
               <p className="section-copy">失败项不会导致页面崩溃，只给出可操作解释。</p>
             </div>
-            <span className="status-chip info">{overview.checks.length} 项检查</span>
           </div>
           <div className="settings-check-list">
             {overview.checks.map((check) => (

@@ -99,7 +99,6 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           <h2>本地 run 工作队列</h2>
           <p className="section-copy">按状态、阶段和 provider 快速定位需要处理的批次。</p>
         </div>
-        <span className="status-chip">本机运行管理</span>
       </div>
 
       <div className="queue-controls" aria-label="运行队列筛选">
