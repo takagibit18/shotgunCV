@@ -164,7 +164,6 @@ export function UploadForm() {
               <p className="eyebrow">{"CV"}</p>
               <h3>{"候选人材料"}</h3>
             </div>
-            <span className="status-chip">{"自动生成 Candidate ID"}</span>
           </div>
           <div
             className="jd-dropzone"

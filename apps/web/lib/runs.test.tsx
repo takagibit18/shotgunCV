@@ -982,7 +982,7 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(UploadPage());
 
     expect(html).toContain("创建投递草稿");
-    expect(html).toContain("仅创建草稿");
+    expect(html).not.toContain("仅创建草稿");
     expect(html).toContain("三步创建草稿");
     expect(html).toContain("1 候选人材料");
     expect(html).toContain("2 JD 输入");

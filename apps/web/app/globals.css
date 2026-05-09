@@ -1871,36 +1871,6 @@ label.primary-link {
   background: rgba(255, 255, 255, 0.22);
 }
 
-.metadata-table {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(110px, 0.7fr) minmax(90px, 0.5fr) minmax(130px, 0.8fr);
-  gap: 0;
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
-}
-
-.metadata-table > span,
-.metadata-table > strong {
-  min-width: 0;
-  padding: 10px 12px;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  overflow-wrap: anywhere;
-}
-
-.metadata-table > span:nth-child(-n + 4) {
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.compact-table {
-  grid-template-columns: minmax(120px, 0.7fr) minmax(120px, 0.6fr) minmax(180px, 1fr);
-}
-
 .confirmation-summary {
   display: grid;
   gap: 0;
@@ -2279,11 +2249,6 @@ label.primary-link {
 
   .input-source-row {
     min-width: 760px;
-  }
-
-  .metadata-table {
-    min-width: 0;
-    grid-template-columns: minmax(120px, 1fr) minmax(84px, 0.7fr) minmax(72px, 0.5fr) minmax(108px, 0.8fr);
   }
 
   .matrix-action-panel {

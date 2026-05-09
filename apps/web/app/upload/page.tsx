@@ -22,7 +22,6 @@ export default function UploadPage() {
             {"将 CV、补充材料和 JD 输入整理为可复现的 run 草稿。Web 只负责落盘和元数据，不解析正文，也不直接承载业务判断。"}
           </p>
         </div>
-        <span className="status-chip info">{"仅创建草稿"}</span>
       </section>
 
       <section className="section">
@@ -31,7 +30,6 @@ export default function UploadPage() {
             <p className="eyebrow">{"Draft workflow"}</p>
             <h2>{"新建 run 草稿"}</h2>
           </div>
-          <span className="status-chip">{"本地单用户"}</span>
         </div>
         <UploadForm />
         <div className="detail-card upload-note">

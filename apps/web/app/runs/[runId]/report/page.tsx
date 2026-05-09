@@ -32,7 +32,6 @@ export default async function ReportPage({ params }: PageProps) {
           <h1 className="page-title">{resolvedParams.runId}</h1>
           <p className="hero-copy">{"先呈现投递结论、关键证据和面试前补强点，再保留原始 Markdown 报告用于追溯。"}</p>
         </div>
-        <span className="status-chip info">{"Markdown 原文"}</span>
       </section>
 
       <section className="status-strip" aria-label="报告目录">
@@ -56,7 +55,6 @@ export default async function ReportPage({ params }: PageProps) {
             <p className="eyebrow">{"结构化摘要"}</p>
             <h2>{"投递决策摘要"}</h2>
           </div>
-          <span className="status-chip">{"保留原文 Markdown"}</span>
         </div>
         <div className="report-summary-grid">
           <SummaryCard title="推荐结论" items={reportSummary.recommendations} />
