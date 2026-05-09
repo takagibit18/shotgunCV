@@ -109,6 +109,26 @@ v0.6.0 已经完成 Web 体验的主要重构：统一 `AppShell`、冷白 SaaS 
 - 分页、筛选、排序组合行为稳定。
 - 桌面与移动端截图中无明显重叠、错位或不可读文本。
 
+### v0.6.6 上传页交互优化与 SaaS 痕迹清理
+
+目标：打磨上传草稿页的 UX 细节（CV-JD 视觉一致性、截图缩略图预览、按钮可读性与对齐），删除 AppShell 和 RunQueue 中未实装的 SaaS 占位元素，使界面语言对齐项目"开源工具、用户自带 API key、全本地化"的定位。
+
+关键变化：
+- CV 上传区改为与 JD 一致的 dropzone + `.upload-file-list` 结构：隐藏原生 `<input>`，使用 styled label 作为触发器，增加拖拽支持（`onDragOver`/`onDrop`），移除冗余的 4 列 `.metadata-table`。
+- JD 文件列表中为图片文件（PNG/JPG）生成客户端缩略图预览（`URL.createObjectURL`），点击缩略图弹出 lightbox 查看原图；非图片文件保持纯文本文件名展示。
+- 确保"选择本地 JD 文件"按钮文字在 `.primary-link` 蓝紫渐变背景上对比度足够（`color: #fff`），与"创建草稿 run"按钮视觉对齐。
+- 删除 `AppShell.tsx` 命令栏中未实装的铃铛和书本图标按钮（仅删除渲染调用，保留 Icon 组件定义）。
+- 删除 `RunQueue.tsx` 中无功能的"更多筛选条件" filter-button。
+- 删除后验证命令栏右区仅保留 freshness-pill + avatar compact，排版在各断点下自然美观。
+
+验收标准：
+- CV 和 JD 上传区使用一致的 dropzone + file-list 视觉结构，均支持拖拽。
+- 图片文件（PNG/JPG）在 JD 文件列表中显示缩略图，点击可查看大图；非图片文件展示文件名。
+- "选择本地 JD 文件"按钮文字清晰可读，与"创建草稿 run"按钮视觉协调。
+- AppShell 命令栏不再出现铃铛和书本占位图标，RunQueue 筛选栏不再出现无功能筛选按钮。
+- 删除 SaaS 占位后，命令栏和筛选栏在各断点（1180px / 980px / 720px）下排版正常，无错位或空白异常。
+- `npm test` 与 `tsc --noEmit` 通过。
+
 ## Public Interfaces
 
 后续版本默认新增或稳定以下 Web 路由：
