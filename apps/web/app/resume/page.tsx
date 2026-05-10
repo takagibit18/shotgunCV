@@ -164,8 +164,8 @@ function BoundaryList({ title, items }: { title: string; items: string[] }) {
       <strong>{title}</strong>
       {items.length > 0 ? (
         <ul>
-          {items.map((item) => (
-            <li key={item}>{item}</li>
+          {items.map((item, i) => (
+            <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
           ))}
         </ul>
       ) : (
