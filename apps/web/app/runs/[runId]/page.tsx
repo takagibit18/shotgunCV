@@ -1,22 +1,14 @@
-﻿import React from "react";
+import React from "react";
 import Link from "next/link";
 
 import { AppShell } from "../../AppShell";
 import { loadRunDetail } from "../../../lib/runs";
-import type { ApplicationStrategy, RankingExplanation, ScoreCard } from "../../../lib/types";
 import { RunActionPanel } from "./RunActionPanel";
-import { ScoreRing } from "./ScoreRing";
+import { ScoreMatrixRow } from "./ScoreMatrixRow";
 
 
 type PageProps = {
   params: Promise<{ runId: string }>;
-};
-
-type DimensionItem = {
-  key: string;
-  label: string;
-  value?: number;
-  tone?: "default" | "evidence" | "rewrite" | "risk";
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -344,13 +336,6 @@ export default async function RunPage({ params }: PageProps) {
         <SectionHeading eyebrow="阶段评估" title="评估阶段" />
         {detail.evaluate.isComplete ? (
           <div className="score-matrix">
-            <div className="matrix-header">
-              <div>
-                <p className="eyebrow">{"决策矩阵"}</p>
-                <h3>{"岗位优先级矩阵"}</h3>
-              </div>
-              <p className="muted">{"优先看真实匹配、改写潜力和风险压力，再用历史维度解释排序。点击岗位标题可跳转到对应定制简历。"}</p>
-            </div>
             {detail.evaluate.topVariants
               .slice()
               .sort((left, right) => right.overallScore - left.overallScore)
@@ -455,168 +440,6 @@ function summarizeGates(total: number, blockedOrReview: number): string {
 }
 
 
-type ScoreMatrixRowProps = {
-  jdId: string;
-  title: string;
-  variantDisplayName: string;
-  variantId: string;
-  overallScore: number;
-  gapCount: number;
-  topReasons: string[];
-  scorecard?: ScoreCard;
-  explanation?: RankingExplanation;
-  strategy?: ApplicationStrategy;
-};
-
-
-function ScoreMatrixRow({
-  jdId,
-  title,
-  variantDisplayName,
-  variantId,
-  overallScore,
-  gapCount,
-  topReasons,
-  scorecard,
-  explanation,
-  strategy,
-}: ScoreMatrixRowProps) {
-  const score = toPercent(scorecard?.final_overall_score ?? scorecard?.overall_score ?? overallScore);
-  const dimensions: DimensionItem[] = [
-    { key: "verified", label: "真实匹配", value: scorecard?.verified_fit_score, tone: "evidence" },
-    { key: "rewritePotential", label: "改写潜力", value: scorecard?.rewrite_potential_score, tone: "rewrite" },
-    { key: "riskScore", label: "风险压力", value: scorecard?.risk_score, tone: "risk" },
-    { key: "fit", label: "岗位匹配", value: scorecard?.fit_score },
-    { key: "ats", label: "关键词", value: scorecard?.ats_score },
-    { key: "evidence", label: "证据覆盖", value: scorecard?.evidence_score },
-    { key: "stretch", label: "拉伸可控", value: scorecard?.stretch_score },
-    { key: "risk", label: "风险压力", value: scorecard?.gap_risk_score, tone: "risk" },
-    { key: "cost", label: "改写成本", value: scorecard?.rewrite_cost_score },
-  ];
-  const riskScore = toPercent(scorecard?.risk_score ?? scorecard?.gap_risk_score ?? 0);
-  const signals = explanation?.positive_signals.length ? explanation.positive_signals : topReasons;
-  const risks = explanation?.risk_flags ?? [];
-  const evidenceRefs = explanation?.evidence_refs ?? [];
-  const evidenceCount = evidenceRefs.length;
-
-  return (
-    <article className="matrix-row" id={`evaluation-${jdId}`}>
-      <ScoreRing score={score} />
-      <div className="matrix-main">
-        <div className="matrix-titleline">
-          <div>
-            <a className="matrix-title-link" href={`#${buildVariantAnchorId(variantId)}`} title="打开对应定制简历">
-              <h4>{title}</h4>
-            </a>
-            <p className="muted">
-              {variantDisplayName}
-              {" · "}
-              <span className="mono">{variantId}</span>
-            </p>
-          </div>
-          <div className="matrix-actions">
-            <span className="decision-badge">{"决策分"}</span>
-            {scorecard?.gate_status ? <span className={buildGateClassName(scorecard.gate_status)}>{formatGateStatus(scorecard.gate_status)}</span> : null}
-            <details className="matrix-action-detail">
-              <summary>{"适配度分析"}</summary>
-              <div className="matrix-action-panel">
-                <h5>{"适配度分析"}</h5>
-                <p>{explanation?.dimension_reasons.overall ?? "当前运行未生成评估解释文件，旧版产物仍可继续阅读，评分矩阵会使用 scorecards 降级展示。"}</p>
-                <p>
-                  {"风险标记："}
-                  {risks.join(" / ") || "无明显风险标记"}
-                </p>
-              </div>
-            </details>
-            <details className="matrix-action-detail">
-              <summary>{"投递建议"}</summary>
-              <div className="matrix-action-panel">
-                <h5>{"投递建议"}</h5>
-                <p>
-                  {"投递决策："}
-                  {strategy?.apply_decision ?? "暂无投递决策"}
-                </p>
-                <p>
-                  {"决策驱动："}
-                  {strategy?.decision_drivers.join(" / ") || "暂无决策驱动"}
-                </p>
-                <p>
-                  {"建议动作："}
-                  {strategy?.recommended_actions.join(" / ") || "暂无建议动作"}
-                </p>
-              </div>
-            </details>
-          </div>
-        </div>
-        <DimensionBars dimensions={dimensions} />
-        <div className="signal-grid">
-          <div>
-            <span className="mini-label">{"证据引用"}</span>
-            <strong>{evidenceCount || "待检查"}</strong>
-          </div>
-          <div>
-            <span className="mini-label">{"风险压力"}</span>
-            <strong>{riskScore}{"%"}</strong>
-          </div>
-          <div>
-            <span className="mini-label">{"缺口数"}</span>
-            <strong>{gapCount}</strong>
-          </div>
-        </div>
-        <p className="reason-line">{signals.join(" / ") || "未记录主要原因"}</p>
-        <p className="risk-line">{risks.join(" / ") || "无明显风险标记"}</p>
-        <div className="matrix-expansion">
-          <div className="matrix-expansion-card">
-            <h5>{"证据引用展开"}</h5>
-            <ul>
-              {(evidenceRefs.length ? evidenceRefs : signals).map((item, i) => (
-                <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="matrix-expansion-card">
-            <h5>{"风险解释展开"}</h5>
-            <ul>
-              {(risks.length ? risks : ["当前岗位未记录显著风险，建议继续核对岗位要求与证据覆盖。"]).map((item, i) => (
-                <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-
-function DimensionBars({ dimensions }: { dimensions: DimensionItem[] }) {
-  return (
-    <div className="dimension-grid" aria-label="维度矩阵">
-      <span className="dimension-caption">{"维度矩阵"}</span>
-      {dimensions.map((dimension) => {
-        const percent = dimension.value === undefined ? 0 : toPercent(dimension.value);
-        return (
-          <div key={dimension.key} className="dimension-cell">
-            <div className="dimension-label">
-              <span>{dimension.label}</span>
-              <strong>{dimension.value === undefined ? "--" : `${percent}%`}</strong>
-            </div>
-            <div className={buildScoreBarClassName(dimension.tone)}>
-              <span style={{ width: `${percent}%` }} />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-
-function toPercent(value: number): number {
-  return Math.round(Math.max(0, Math.min(1, value)) * 100);
-}
-
-
 function buildVariantAnchorId(variantId: string): string {
   return `variant-${variantId}`;
 }
@@ -653,13 +476,6 @@ function formatEvidenceStatus(status: string): string {
     forbidden_to_fabricate: "禁止编造",
   };
   return labels[status] ?? status;
-}
-
-
-function buildScoreBarClassName(tone?: DimensionItem["tone"]): string {
-  return ["score-bar", tone === "risk" ? "risk-bar" : "", tone === "rewrite" ? "rewrite-bar" : "", tone === "evidence" ? "evidence-bar" : ""]
-    .filter(Boolean)
-    .join(" ");
 }
 
 
