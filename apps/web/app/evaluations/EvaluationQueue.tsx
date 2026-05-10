@@ -35,19 +35,18 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
   const currentPage = Math.min(page, pageCount);
   const paginatedResults = visibleResults.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
+  const riskInPage =
+    results.length > 0 &&
+    (paginatedResults.some((item) => item.gateStatus === "blocked" || item.gateStatus === "needs_review") ||
+      paginatedResults.some((item) => (item.riskScore ?? 0) >= 0.7));
+
   useEffect(() => {
     setPage(1);
   }, [filters, sortKey]);
 
   return (
     <section className="section section-flush evaluation-section">
-      <div className="section-heading queue-heading">
-        <div>
-          <p className="eyebrow">评估结果</p>
-          <h2>岗位评估队列</h2>
-          <p className="section-copy">按 JD 聚合 scorecard、gate、证据、风险和投递建议，优先处理高风险或需复核岗位。</p>
-        </div>
-      </div>
+      <h3 className="eval-filter-heading">筛选与排序</h3>
 
       <div className="evaluation-controls" aria-label="评估结果筛选">
         <label className="control-field evaluation-search">
@@ -163,7 +162,17 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
       {results.length > 0 && visibleResults.length === 0 ? (
         <div className="empty-state">
           <h3>没有匹配的评估结果</h3>
-          <p>清空搜索词或放宽 gate、风险、分数、provider 与投递建议筛选。</p>
+          <p>
+            当前筛选：{filters.gate !== "all" ? `Gate=${filters.gate} ` : ""}
+            {filters.risk !== "all" ? `风险=${filters.risk} ` : ""}
+            {filters.score !== "all" ? `分数=${filters.score} ` : ""}
+            {filters.provider !== "all" ? `Provider=${filters.provider} ` : ""}
+            {filters.decision !== "all" ? `建议=${filters.decision} ` : ""}
+            {filters.query ? `搜索="${filters.query}" ` : ""}
+          </p>
+          <button className="secondary-button" type="button" onClick={() => setFilters(DEFAULT_EVALUATION_FILTERS)}>
+            重置筛选
+          </button>
         </div>
       ) : null}
 
@@ -175,6 +184,12 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           onPrevious={() => setPage((current) => Math.max(1, current - 1))}
           onNext={() => setPage((current) => Math.min(pageCount, current + 1))}
         />
+      ) : null}
+
+      {riskInPage ? (
+        <div className="eval-risk-banner" role="alert">
+          当前页面存在高风险或需复核的 gate 岗位，建议优先处理。
+        </div>
       ) : null}
 
       {visibleResults.length > 0 ? (
@@ -198,7 +213,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
               </div>
               <div className="evaluation-status-cell" role="cell">
                 <span className={buildGateClassName(item.gateStatus)}>{formatGateStatus(item.gateStatus)}</span>
-                <span className="pill">{item.artifactMode}</span>
+                {item.artifactMode === "legacy" ? <span className="pill">legacy</span> : null}
                 {item.gateReasons.length > 0 ? <p className="risk-line">{item.gateReasons.join(" / ")}</p> : null}
               </div>
               <div className="evaluation-score-cell" role="cell">
@@ -212,7 +227,6 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
                 <p className={item.riskFlags.length > 0 ? "risk-line" : "muted"}>
                   {firstText(item.riskFlags, item.requirementSummaries, "暂无显著风险")}
                 </p>
-                <small className="muted">来源：scorecard / gate / evidence / strategy</small>
               </div>
               <div className="row-actions" role="cell">
                 <Link href={item.detailHref} className="secondary-link">
