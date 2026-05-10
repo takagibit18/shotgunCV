@@ -87,6 +87,11 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
 
   const onlyDrafts = runs.length > 0 && runs.every((run) => run.draftStatus === "draft");
 
+  function handleReset() {
+    setFilters({ query: "", status: "all", stage: "all", provider: "all" });
+    setSortKey("recent");
+  }
+
   useEffect(() => {
     setPage(1);
   }, [filters, sortKey]);
@@ -169,6 +174,9 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
             <option value="label">标签名称</option>
           </select>
         </label>
+        <button className="secondary-button queue-reset" type="button" onClick={handleReset}>
+          重置
+        </button>
       </div>
 
       {runs.length === 0 ? (
@@ -217,9 +225,9 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
             <article key={run.runId} className="run-row" role="row">
               <div className="run-primary" role="cell">
                 <Link href={`/runs/${run.runId}`} className="run-title-link">
-                  <strong>{run.label || "未命名运行"}</strong>
+                  <strong title={run.label || ""}>{run.label || "未命名运行"}</strong>
                 </Link>
-                <span className="mono">{run.runId}</span>
+                <span className="mono" title={run.runId}>{truncateText(run.runId, 28)}</span>
                 <span className="muted">{formatDateTime(run.lastModified)}</span>
               </div>
               <div className="run-status-cell" role="cell">
@@ -254,16 +262,19 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
                 </div>
               </div>
               <div className="provider-stack" role="cell">
-                <span>
-                  生成 <strong>{run.generatorProvider}</strong>
+                <span title={run.generatorProvider}>
+                  生成 <strong>{truncateText(run.generatorProvider, 16)}</strong>
                 </span>
-                <span>
-                  评审 <strong>{run.judgeProvider}</strong>
+                <span title={run.judgeProvider}>
+                  评审 <strong>{truncateText(run.judgeProvider, 16)}</strong>
                 </span>
               </div>
               <div className="run-action-cell" role="cell">
-                <p className={run.runStatus?.error_summary ? "risk-line" : "muted"}>
-                  {run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? "暂无阻断风险"}
+                <p
+                  className={run.runStatus?.error_summary ? "risk-line" : "muted"}
+                  title={run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? ""}
+                >
+                  {truncateText(run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? "暂无阻断风险", 30)}
                 </p>
                 <span className={run.runStatus?.error_summary ? "status-chip danger" : "status-chip success"}>
                   {run.runStatus?.error_summary ? "需处理" : "健康"}
@@ -357,6 +368,13 @@ function buildStatusClassName(status: string): string {
     return "status-chip info";
   }
   return "status-chip";
+}
+
+function truncateText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) {
+    return text;
+  }
+  return text.slice(0, maxLen - 1) + "…";
 }
 
 function formatDateTime(value: string): string {

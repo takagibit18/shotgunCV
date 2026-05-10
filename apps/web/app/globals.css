@@ -602,6 +602,27 @@ p {
   flex: 0 0 auto;
 }
 
+.insight-item strong,
+.insight-item p,
+.recommendation-item strong,
+.recommendation-item p {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.recommendation-item strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.recommendation-item p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .recommendation-item.priority {
   border-color: rgba(217, 45, 75, 0.18);
   background: var(--danger-bg);
@@ -716,10 +737,14 @@ p {
 
 .queue-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(126px, 1fr)) 42px;
+  grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(126px, 1fr)) minmax(64px, auto);
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid var(--border);
+}
+
+.queue-reset {
+  align-self: end;
 }
 
 .pagination-bar {
@@ -1087,7 +1112,7 @@ p {
 .run-table-head,
 .run-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1.18fr) minmax(96px, 0.58fr) minmax(260px, 1.35fr) minmax(150px, 0.78fr) minmax(190px, 1fr) minmax(132px, 0.58fr);
+  grid-template-columns: minmax(210px, 1.12fr) minmax(96px, 0.52fr) minmax(200px, 1.08fr) minmax(136px, 0.68fr) minmax(170px, 0.86fr) minmax(120px, 0.56fr);
   gap: 14px;
   align-items: center;
   padding: 14px 20px;
@@ -1137,6 +1162,15 @@ p {
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.run-primary .mono,
+.run-primary strong,
+.provider-stack strong,
+.run-action-cell p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .evaluation-score-cell {
