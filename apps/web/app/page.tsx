@@ -1,18 +1,16 @@
 import React from "react";
 
-import { getRunsDir, listRuns } from "../lib/runs";
+import { listRuns, type RunSummary } from "../lib/runs";
 import { AppShell, Icon } from "./AppShell";
 import { RunQueue } from "./RunQueue";
 
 export default async function HomePage() {
   const runs = await listRuns();
   const totalRuns = runs.length;
-  const completedStageCount = runs.reduce((sum, run) => sum + run.completedStages.length, 0);
   const activeRuns = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued").length;
   const warningRuns = runs.filter((run) => run.runStatus?.quality_summary || run.runStatus?.error_summary).length;
   const doneRuns = runs.filter((run) => run.draftStatus === "done").length;
   const completionRate = totalRuns === 0 ? 0 : Math.round((doneRuns / totalRuns) * 100);
-  const runsDir = getRunsDir();
   const recentRuns = runs.slice(0, 4);
 
   return (
@@ -27,10 +25,10 @@ export default async function HomePage() {
         <div className="workspace-grid">
           <div className="workspace-main">
             <section className="metric-card-grid" aria-label="运行总览">
-              <MetricTile value={totalRuns} label="运行批次" delta={buildDeltaText(totalRuns)} tone="info" />
-              <MetricTile value={activeRuns} label="进行中" delta={activeRuns > 0 ? "需关注" : "无排队"} tone="success" />
-              <MetricTile value={warningRuns} label="警告/失败" delta={warningRuns > 0 ? "优先处理" : "暂无阻断"} tone="warning" />
-              <MetricTile value={completedStageCount} label="已完成阶段" delta={`${doneRuns} 个完成 run`} tone="purple" />
+              <MetricTile value={totalRuns} label="运行批次" tone="info" />
+              <MetricTile value={activeRuns} label="进行中" tone="success" />
+              <MetricTile value={warningRuns} label="警告/失败" tone="warning" />
+              <MetricTile value={doneRuns} label="已完成" tone="purple" />
             </section>
 
             <section className="trend-strip" aria-label="趋势概览">
@@ -59,7 +57,7 @@ export default async function HomePage() {
                     <div className="activity-item" key={run.runId}>
                       <span className={buildActivityDotClassName(run.draftStatus)} />
                       <span className="activity-meta">
-                        <strong>{run.label || run.runId}</strong>
+                        <strong title={run.label || run.runId}>{truncateText(run.label || run.runId, 24)}</strong>
                         <small>
                           阶段 {buildStageSummary(run.completedStages.length)} · {STATUS_LABELS[run.draftStatus] ?? run.draftStatus}
                         </small>
@@ -72,6 +70,25 @@ export default async function HomePage() {
                 )}
               </div>
             </section>
+
+            {buildPrimaryInsight(runs) ? (
+              <section className="rail-card purple">
+                <div className="section-heading">
+                  <div>
+                    <h3>AI 洞察</h3>
+                  </div>
+                </div>
+                <div className="recommendation-list">
+                  <div className={buildPrimaryInsight(runs)!.tone}>
+                    <Icon name="sparkle" />
+                    <div>
+                      <strong>{buildPrimaryInsight(runs)!.title}</strong>
+                      <p>{buildPrimaryInsight(runs)!.reason}</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
 
           </aside>
         </div>
@@ -101,12 +118,10 @@ const STATUS_LABELS: Record<string, string> = {
 function MetricTile({
   value,
   label,
-  delta,
   tone,
 }: {
   value: number;
   label: string;
-  delta: string;
   tone: "info" | "success" | "warning" | "purple";
 }) {
   return (
@@ -117,14 +132,56 @@ function MetricTile({
       <span className="metric-body">
         <span className="metric-label">{label}</span>
         <span className="metric-value">{value}</span>
-        <span className="metric-delta">较昨日 {delta}</span>
       </span>
     </div>
   );
 }
 
-function buildDeltaText(totalRuns: number): string {
-  return totalRuns > 0 ? `+${Math.min(totalRuns, 2)}` : "持平";
+function truncateText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) {
+    return text;
+  }
+  return text.slice(0, maxLen - 1) + "…";
+}
+
+function buildPrimaryInsight(runs: RunSummary[]): {
+  title: string;
+  reason: string;
+  tone: string;
+} | null {
+  const failedRuns = runs.filter((run) => run.draftStatus === "failed");
+  const warningRuns = runs.filter((run) => run.runStatus?.quality_summary || run.runStatus?.error_summary);
+  const runningRuns = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued");
+
+  if (failedRuns.length > 0) {
+    return {
+      title: `${failedRuns.length} 个 run 运行失败`,
+      reason: "查看详情排查错误摘要，修复后重新运行。",
+      tone: "recommendation-item priority",
+    };
+  }
+  if (warningRuns.length > warningRuns.filter((r) => r.draftStatus === "failed").length) {
+    return {
+      title: `${warningRuns.length} 个 run 有质量警告`,
+      reason: "优先复查警告项，确认是否需要调整输入或模型配置。",
+      tone: "recommendation-item watch",
+    };
+  }
+  if (runningRuns.length > 0) {
+    return {
+      title: `${runningRuns.length} 个 run 正在执行`,
+      reason: "关注阶段进度，完成后进入评估与报告。",
+      tone: "recommendation-item safe",
+    };
+  }
+  if (runs.length === 0) {
+    return {
+      title: "尚无运行数据",
+      reason: "创建草稿 run 开始评估。",
+      tone: "recommendation-item safe",
+    };
+  }
+  return null;
 }
 
 function buildStageSummary(completedCount: number): string {
