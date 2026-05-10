@@ -692,6 +692,65 @@ p {
   background: var(--warning-bg);
 }
 
+/* v0.7.9 compact eval summary strip */
+.eval-summary-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-size: 13px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.eval-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.eval-summary-item strong {
+  color: var(--text);
+  font-weight: 760;
+}
+
+.eval-summary-hint {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.eval-filter-heading {
+  padding: 16px 16px 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 760;
+  color: var(--muted);
+}
+
+.eval-risk-banner {
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(209, 77, 49, 0.25);
+  border-radius: var(--radius);
+  background: rgba(209, 77, 49, 0.06);
+  color: var(--warning-text, #8b3a1a);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .eval-summary-strip {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .eval-summary-hint {
+    margin-left: 0;
+  }
+}
+
 .status-strip-item {
   display: grid;
   gap: 4px;

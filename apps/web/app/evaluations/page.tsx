@@ -46,28 +46,21 @@ export default async function EvaluationPage() {
           </article>
         </section>
 
-        <section className="trend-strip" aria-label="趋势概览">
-          <div>
-            <p className="eyebrow">趋势概览</p>
-            <h2>评分与风险密度</h2>
-          </div>
-          <TrendMetric label="JD 数" value={total} />
-          <TrendMetric label="平均最终分" value={averageScore} />
-          <TrendMetric label="平均风险分" value={averageRisk} tone={highRisk > 0 ? "warning" : "success"} />
-        </section>
+        <div className="eval-summary-strip" aria-label="趋势与评估边界">
+          <span className="eval-summary-item">
+            平均最终分 <strong>{averageScore}</strong>
+          </span>
+          <span className="eval-summary-item">
+            平均风险分 <strong>{averageRisk}</strong>
+          </span>
+          <span className="eval-summary-hint">
+            评估基于已固化 scorecard 快照，不包含实时策略变更。
+          </span>
+        </div>
 
         <EvaluationQueue results={results} />
       </main>
     </AppShell>
-  );
-}
-
-function TrendMetric({ label, value, tone }: { label: string; value: string | number; tone?: "warning" | "success" }) {
-  return (
-    <div className={tone ? `trend-metric ${tone}` : "trend-metric"}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
   );
 }
 
