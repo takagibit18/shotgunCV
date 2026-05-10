@@ -1,7 +1,7 @@
-import React from "react";
+﻿import React from "react";
 import Link from "next/link";
 
-import { AppShell, Icon } from "../../AppShell";
+import { AppShell } from "../../AppShell";
 import { loadRunDetail } from "../../../lib/runs";
 import type { ApplicationStrategy, RankingExplanation, ScoreCard } from "../../../lib/types";
 import { RunActionPanel } from "./RunActionPanel";
@@ -49,21 +49,18 @@ export default async function RunPage({ params }: PageProps) {
   const nextAction = buildNextAction(detail.draftStatus);
 
   return (
-    <AppShell active="evaluation" eyebrow="评估结果 / 阶段评估" freshnessText="本地数据">
+    <AppShell active="evaluation" eyebrow="运行详情">
       <main className="app-shell operational-shell">
       <Link href="/" className="backlink">
         {"返回运行列表"}
       </Link>
 
-      <div className="workspace-grid">
-        <div className="workspace-main">
+      <div>
+        <div>
       <section className="page-header detail-header">
         <div>
-          <p className="eyebrow">{"运行详情 · "}{detail.label || "未命名运行"}</p>
+          <p className="eyebrow">{detail.label || "未命名运行"}</p>
           <h1 className="page-title">{detail.runId}</h1>
-          <p className="hero-copy">
-            {"把阶段状态、模型观测、硬门槛审查和投递评分放在同一条工作流里，优先回答“现在能不能投、风险在哪里”。"}
-          </p>
           <div className="pill-row">
             <span className="pill">{"分析器："}{detail.analyzerProvider}</span>
             <span className="pill">{"生成器："}{detail.generatorProvider}</span>
@@ -382,53 +379,6 @@ export default async function RunPage({ params }: PageProps) {
         )}
       </section>
         </div>
-
-        <aside className="insight-rail" aria-label="评估洞察">
-          <section className="rail-card purple">
-            <div className="metric-title">
-              <Icon name="sparkle" />
-              <h3>优化后简历摘要</h3>
-            </div>
-            <p className="muted">基于本次评估结果，生成的优化方向与核心改进点。</p>
-            <div className="insight-list">
-              <div className="insight-item">
-                <Icon name="check-square" />
-                <span>{detail.generate.variants[0]?.summary ?? "当前 run 尚未生成可展示的简历摘要。"}</span>
-              </div>
-              <div className="insight-item">
-                <Icon name="document" />
-                <span>{qualityWarningCount > 0 ? `${qualityWarningCount} 个质量提示需要复核。` : "暂无质量警告，可继续核对证据引用。"}</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="rail-card">
-            <div className="metric-title">
-              <Icon name="home" />
-              <h3>投递建议</h3>
-            </div>
-            <p className="muted">结合优先级、风险与改写成本，给出投递策略建议。</p>
-            <div className="recommendation-list">
-              {detail.plan.strategies.length > 0 ? (
-                detail.plan.strategies.slice(0, 3).map((strategy, index) => (
-                  <div className={index === 0 ? "recommendation-item priority" : "recommendation-item watch"} key={strategy.jd_id}>
-                    <Icon name="list" />
-                    <span>
-                      <strong>{strategy.jd_id}</strong>
-                      {" · "}
-                      {strategy.reason_summary || strategy.apply_decision}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="recommendation-item safe">
-                  <Icon name="check-square" />
-                  <span>{nextAction}</span>
-                </div>
-              )}
-            </div>
-          </section>
-        </aside>
       </div>
       </main>
     </AppShell>

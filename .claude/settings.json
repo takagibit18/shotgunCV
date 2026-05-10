@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\" -Depth 0)",
+      "Bash(Format-Table Name, Mode)",
+      "Read(//c/Users/Lenovo/Downloads/**)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\Lenovo\\\\Downloads\\\\ChatGPT Image 2026年5月10日 17_0*.png\")",
+      "Bash(Select-Object Name, LastWriteTime)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\" -Depth 1 -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(Format-Table -HideTableHeaders)"
     ]
   }
 }

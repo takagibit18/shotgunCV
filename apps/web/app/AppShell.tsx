@@ -36,7 +36,7 @@ type IconName =
   | "settings"
   | "sparkle";
 
-export function AppShell({ active, children, eyebrow = "AI Resume Ops 工作台", freshnessText = "本地数据" }: AppShellProps) {
+export function AppShell({ active, children, eyebrow = "", freshnessText = "本地数据" }: AppShellProps) {
   return (
     <div className="app-frame">
       <aside className="app-sidebar" aria-label="主导航">

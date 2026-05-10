@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 
 import { loadEvaluationResults } from "../../lib/evaluations";
-import { AppShell, Icon } from "../AppShell";
+import { AppShell } from "../AppShell";
 import { EvaluationQueue } from "./EvaluationQueue";
 
 export default async function EvaluationPage() {
@@ -13,31 +13,17 @@ export default async function EvaluationPage() {
   const legacy = results.filter((item) => item.artifactMode === "legacy").length;
   const averageScore = averagePercent(results.map((item) => item.finalScore));
   const averageRisk = averagePercent(results.map((item) => item.riskScore));
-  const freshnessText = formatFreshness(results[0]?.lastModified);
 
   return (
-    <AppShell active="evaluation" eyebrow="评估结果 / 岗位队列" freshnessText={freshnessText}>
+    <AppShell active="evaluation" eyebrow="评估结果">
       <main className="app-shell operational-shell">
         <Link href="/" className="backlink">
           返回运行队列
         </Link>
 
-        <section className="page-header detail-header">
+        <section className="page-header">
           <div>
-            <p className="eyebrow">v0.6.2 评估结果</p>
-            <h1 className="page-title">独立评估结果列表</h1>
-            <p className="hero-copy">
-              将所有 run 的 JD 评估结果聚合成可筛选、可排序、可回溯的工作队列。每条结果都保留 scorecard、gate、证据、风险和投递建议来源。
-            </p>
-          </div>
-          <div className="rail-card purple">
-            <div className="metric-title">
-              <Icon name="sparkle" />
-              <h3>可信评估边界</h3>
-            </div>
-            <p className="muted">
-              本页只读取本地 artifacts，不重新判断业务结论；缺少 v0.5.7 gate 或三分制产物时按历史 scorecard 降级展示。
-            </p>
+            <h1 className="page-title">评估结果列表</h1>
           </div>
         </section>
 
@@ -92,15 +78,4 @@ function averagePercent(values: Array<number | null>): string {
   }
   const average = numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
   return `${Math.round(average * 100)}%`;
-}
-
-function formatFreshness(value?: string): string {
-  if (!value) {
-    return "暂无评估";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "本地数据";
-  }
-  return date.toISOString().slice(11, 16);
 }

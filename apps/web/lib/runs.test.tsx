@@ -1282,7 +1282,7 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await ResumePage());
 
-    expect(html).toContain("简历优化工作台");
+    expect(html).toContain("简历优化");
     expect(html).toContain("创建草稿 run");
     expect(html).toContain('href="/upload"');
     expect(html).toContain("岗位定制版本（jd-001）");
@@ -1331,7 +1331,7 @@ describe("run viewer pages", () => {
       },
     });
     expect(overview.displayRunsDir).not.toContain(runsDir);
-    expect(html).toContain("v0.6.3 设置");
+    expect(html).toContain("设置");
     expect(html).toContain("本地设置与环境检查");
     expect(html).toContain("api.openai.com");
     expect(html).toContain("OPENAI_API_KEY");

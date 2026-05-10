@@ -6,18 +6,13 @@ import { AppShell, Icon } from "../AppShell";
 
 export default async function ResumePage() {
   const workspace = await loadResumeWorkspace();
-  const freshnessText = formatFreshness(workspace.rows[0]?.lastModified);
 
   return (
-    <AppShell active="resume" eyebrow="简历优化 / Artifact 工作台" freshnessText={freshnessText}>
+    <AppShell active="resume" eyebrow="简历优化">
       <main className="app-shell operational-shell">
         <section className="page-header with-actions">
           <div>
-            <p className="eyebrow">v0.6.4 简历优化</p>
-            <h1 className="page-title">简历优化工作台</h1>
-            <p className="hero-copy">
-              聚合本地 run 的简历版本、证据约束、投递前检查和下一步动作；本页只读取 artifacts，不生成或改写 pipeline 产物。
-            </p>
+            <h1 className="page-title">简历优化</h1>
           </div>
           <Link href="/upload" className="primary-link">
             创建草稿 run
@@ -178,17 +173,6 @@ function BoundaryList({ title, items }: { title: string; items: string[] }) {
       )}
     </div>
   );
-}
-
-function formatFreshness(value?: string): string {
-  if (!value) {
-    return "暂无数据";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "本地数据";
-  }
-  return date.toISOString().slice(11, 16);
 }
 
 function formatStatus(status: string): string {
