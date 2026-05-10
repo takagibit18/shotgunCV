@@ -569,16 +569,16 @@ function ScoreMatrixRow({
           <div className="matrix-expansion-card">
             <h5>{"证据引用展开"}</h5>
             <ul>
-              {(evidenceRefs.length ? evidenceRefs : signals).map((item) => (
-                <li key={item}>{item}</li>
+              {(evidenceRefs.length ? evidenceRefs : signals).map((item, i) => (
+                <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
               ))}
             </ul>
           </div>
           <div className="matrix-expansion-card">
             <h5>{"风险解释展开"}</h5>
             <ul>
-              {(risks.length ? risks : ["当前岗位未记录显著风险，建议继续核对岗位要求与证据覆盖。"]).map((item) => (
-                <li key={item}>{item}</li>
+              {(risks.length ? risks : ["当前岗位未记录显著风险，建议继续核对岗位要求与证据覆盖。"]).map((item, i) => (
+                <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
               ))}
             </ul>
           </div>

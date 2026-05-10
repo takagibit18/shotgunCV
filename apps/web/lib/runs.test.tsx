@@ -1230,9 +1230,9 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await EvaluationPage());
 
-    expect(html).toContain("趋势概览");
     expect(html).toContain("平均最终分");
     expect(html).toContain("平均风险分");
+    expect(html).toContain("评估基于已固化");
     expect(html).toContain("第 1 / 2 页");
     expect(html).toContain("每页 10 条");
     expect(html).toContain("共 12 条");
