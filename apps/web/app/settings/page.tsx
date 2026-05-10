@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { loadLocalConfig } from "../../lib/local-config";
 import { loadSettingsOverview, type SettingsCheck, type SettingsOverview } from "../../lib/settings";
-import { AppShell, Icon } from "../AppShell";
+import { AppShell } from "../AppShell";
 import { LocalConfigPanel } from "./LocalConfigPanel";
 
 export default async function SettingsPage() {
@@ -11,28 +11,15 @@ export default async function SettingsPage() {
   const localConfig = await loadLocalConfig();
 
   return (
-    <AppShell active="settings" eyebrow="设置 / 环境检查" freshnessText={overview.runsDirReadable ? "本地可读" : "需要检查"}>
+    <AppShell active="settings" eyebrow="设置">
       <main className="app-shell operational-shell">
         <Link href="/" className="backlink">
           返回运行队列
         </Link>
 
-        <section className="page-header detail-header">
+        <section className="page-header">
           <div>
-            <p className="eyebrow">v0.6.3 设置</p>
             <h1 className="page-title">本地设置与环境检查</h1>
-            <p className="hero-copy">
-              汇总本地 runs 边界、provider 快照和关键 artifacts 健康度。此页面只读取本地元数据，不保存设置、不执行 pipeline，也不显示完整密钥或 CV/JD 原文。
-            </p>
-          </div>
-          <div className="rail-card purple">
-            <div className="metric-title">
-              <Icon name="settings" />
-              <h3>只读排障边界</h3>
-            </div>
-            <p className="muted">
-              provider 与模型以最新可解析 run_config.json 为准；密钥仅显示环境变量名，OpenAI-compatible endpoint 仅显示 host。
-            </p>
           </div>
         </section>
 

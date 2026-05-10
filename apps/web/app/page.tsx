@@ -14,24 +14,13 @@ export default async function HomePage() {
   const completionRate = totalRuns === 0 ? 0 : Math.round((doneRuns / totalRuns) * 100);
   const runsDir = getRunsDir();
   const recentRuns = runs.slice(0, 4);
-  const freshnessText = formatFreshness(runs[0]?.lastModified);
-  const insightText =
-    runs.length === 0
-      ? "暂无历史 run，可先创建草稿并运行 pipeline。"
-      : warningRuns > 0
-        ? `当前有 ${warningRuns} 个批次包含质量或失败提示，建议优先查看风险解释与证据覆盖。`
-        : `近 ${Math.min(runs.length, 7)} 个批次未发现阻断摘要，可继续检查评分证据后投递。`;
 
   return (
-    <AppShell active="dashboard" freshnessText={freshnessText}>
+    <AppShell active="dashboard" eyebrow="仪表盘">
       <main className="app-shell operational-shell">
         <section className="page-header">
           <div>
-            <p className="eyebrow">AI Resume Ops 工作台</p>
-            <h1>运行队列与投递决策</h1>
-            <p className="hero-copy">
-              面向本地用户的 pipeline-first 工作台，集中查看阶段产物、质量警告、评分证据、风险解释和下一步动作。
-            </p>
+            <h1>运行队列</h1>
           </div>
         </section>
 
@@ -84,19 +73,6 @@ export default async function HomePage() {
               </div>
             </section>
 
-            <section className="rail-card purple">
-              <div className="metric-title">
-                <Icon name="sparkle" />
-                <h3>AI 洞察</h3>
-              </div>
-              <p className="muted">{insightText}</p>
-              <div className="insight-list">
-                <div className="insight-item">
-                  <Icon name="check-square" />
-                  <span>建议优先审查岗位匹配、风险解释、证据引用等维度，以提升投递把握。</span>
-                </div>
-              </div>
-            </section>
           </aside>
         </div>
       </main>
@@ -180,15 +156,4 @@ function formatTime(value: string): string {
     return "";
   }
   return date.toISOString().slice(11, 16);
-}
-
-function formatFreshness(value?: string): string {
-  if (!value) {
-    return "暂无数据";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "本地数据";
-  }
-  return formatTime(value) || "本地数据";
 }
