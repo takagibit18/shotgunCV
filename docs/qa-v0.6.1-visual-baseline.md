@@ -1,8 +1,8 @@
-# ShotgunCV v0.6.1 视觉 QA 基线
+# ShotgunCV 视觉 QA 基线
 
 ## 目标
 
-v0.6.1 的 QA 基线用于验证 v0.6 Web 工作台在新增页面前的稳定性。检查对象包括 AppShell、首页运行队列、运行详情、上传页、报告页和 v0.6.2 新增的评估结果页。
+v0.7.12 视觉规范清理后的 QA 基线，验证全页面样式一致性。检查对象包括 AppShell、首页、运行队列、运行详情、上传页、报告页、评估结果页、设置页、简历优化工作台。
 
 本基线只验证本地 Web 工作台展示，不改变 Python pipeline、`run_dir` artifact 合约或本地单用户边界。
 
@@ -37,3 +37,12 @@ v0.6.1 的 QA 基线用于验证 v0.6 Web 工作台在新增页面前的稳定�
 - legacy artifact 缺少 v0.5.7 gate 或三分制字段时，页面必须标注历史产物并降级展示历史 scorecard。
 - 空态必须说明下一步有效动作，而不是只显示空白页面。
 - 所有状态颜色都要配合文字标签，不能只靠颜色表达。
+
+## v0.7.12 视觉规范清理验证
+
+- 确认 `globals.css` 中已移除所有未使用样式类（timeline-list、filter-button、decision-badge、legacy-tag、signal-grid、stage-*、matrix-header、matrix-action-panel/detail、sr-only、dimension-caption 等）。
+- 全站按钮（primary-link、secondary-link、secondary-button、backlink、inline-action）均有 hover、focus-visible、disabled 状态。
+- 语义色（success/warning/danger/info）统一使用 CSS 自定义属性，无硬编码色值。
+- 空态（.empty-state）和占位态（.empty）样式统一，各页面空态表现一致。
+- 桌面 (1440px)、平板 (1180px/980px)、移动端 (720px) 无重叠、不可读按钮或不可控横向滚动。
+- `npm test` 与 `tsc --noEmit` 通过。

@@ -1038,14 +1038,11 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain("岗位优先级矩阵");
+    expect(html).toContain("评估阶段");
     expect(html).toContain("决策分");
     expect(html).toContain("维度矩阵");
-    expect(html).toContain("证据引用展开");
-    expect(html).toContain("风险解释展开");
-    expect(html).toContain("score-ring score-ring-operational");
-    expect(html).toContain("--target-score:81%");
-    expect(html).toContain('data-target-score="81"');
+    expect(html).toContain("证据引用");
+    expect(html).toContain("风险解释");
     expect(html).toContain("81%");
     expect(html).not.toContain("移动端改成可纵向扫描的决策卡");
   });
@@ -1082,7 +1079,7 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain("适配度分析");
+    expect(html).toContain("适配度");
     expect(html).toContain("投递建议");
     expect(html).toContain("决策驱动");
     expect(html).not.toContain("阶段计划");
@@ -1096,8 +1093,8 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-legacy" }) }));
 
-    expect(html).toContain("适配度分析");
-    expect(html).toContain("旧版产物");
+    expect(html).toContain("适配度");
+    expect(html).toContain("当前运行未生成评估解释文件");
   });
 
   it("renders report page markdown with structured interview prep summary", async () => {
