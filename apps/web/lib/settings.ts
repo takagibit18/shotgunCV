@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { getRunsDir } from "./runs";
 import type { RunConfig } from "./types";
 
 type SettingsCheckStatus = "pass" | "warning" | "fail";
@@ -173,10 +174,6 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
       { label: "shotguncv CLI", status: cliVisible() ? "pass" : "warning", detail: buildCliDetail() },
     ],
   };
-}
-
-function getRunsDir(): string {
-  return process.env.SHOTGUNCV_RUNS_DIR ?? path.resolve(process.cwd(), "..", "..", "runs");
 }
 
 async function readRunConfig(runsDir: string, runId: string): Promise<RunConfigReadResult> {
