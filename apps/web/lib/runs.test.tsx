@@ -1109,9 +1109,14 @@ describe("run viewer pages", () => {
     expect(html).toContain("推荐结论");
     expect(html).toContain("关键证据");
     expect(html).toContain("面试前突击内容");
+    expect(html).toContain("决策摘要");
+    expect(html).toContain("推荐 JD");
+    expect(html).toContain("引用 / 来源依据");
+    expect(html).toContain("原始 Markdown 报告");
+    expect(html).toContain("report-source-panel");
     expect(html).toContain("来源：");
     expect(html).toContain("报告目录");
-    expect(html).toContain("当前推荐岗位");
+    expect(html).toContain("推荐 JD");
     expect(html).toContain("离线评估指标");
     expect(html).not.toContain("主要风险");
   });
@@ -1195,6 +1200,11 @@ describe("run viewer pages", () => {
     const homeHtml = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("岗位评估队列");
+    expect(html).toContain("总评估");
+    expect(html).toContain("需复核 Gate");
+    expect(html).toContain("高风险岗位");
+    expect(html).toContain("历史产物");
+    expect(html).toContain("投递建议");
     expect(html).toContain("LLM Product Engineer");
     expect(html).toContain("真实匹配");
     expect(html).toContain("改写潜力");
@@ -1455,6 +1465,10 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("本地模型配置");
     expect(html).toContain("API key 与模型运行参数");
+    expect(html).toContain("环境健康");
+    expect(html).toContain(".env 边界");
+    expect(html).toContain("API key 状态");
+    expect(html).toContain("local-config-field-with-icon");
     expect(html).toContain("已配置 · ****7777");
     expect(html).toContain("api.openai.com");
     expect(html).toContain("gpt-5.4-mini");

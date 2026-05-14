@@ -10,7 +10,14 @@
       "Bash(Format-Table -AutoSize)",
       "Bash(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\" -Depth 1 -Directory)",
       "Bash(Select-Object Name)",
-      "Bash(Format-Table -HideTableHeaders)"
+      "Bash(Format-Table -HideTableHeaders)",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\\\\app\\\\runs\" -Recurse | ForEach-Object { $_.FullName.Replace\\(\"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\\\\\", \"\"\\) })",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\\\\app\\\\api\" -Recurse -File | ForEach-Object { $_.FullName.Replace\\(\"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\\\\\", \"\"\\) })",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\" -Directory | ForEach-Object { $_.Name }; Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\" -File | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\packages\\\\ts-shared\\\\src\" -Recurse -File | ForEach-Object { $_.FullName.Replace\\(\"e:\\\\PycharmProjects\\\\jobPilot\\\\packages\\\\ts-shared\\\\src\\\\\", \"\"\\) })",
+      "Bash(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\" -Depth 2)",
+      "Bash(Select-Object Name, FullName)",
+      "Bash(npm run *)"
     ]
   }
 }

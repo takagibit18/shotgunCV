@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 
 import { loadEvaluationResults } from "../../lib/evaluations";
-import { AppShell } from "../AppShell";
+import { AppShell, Icon, MetricCard } from "../AppShell";
 import { EvaluationQueue } from "./EvaluationQueue";
 
 export default async function EvaluationPage() {
@@ -17,40 +17,46 @@ export default async function EvaluationPage() {
   return (
     <AppShell active="evaluation" eyebrow="评估结果">
       <main className="app-shell operational-shell">
-        <Link href="/" className="backlink">
-          返回运行队列
-        </Link>
-
-        <section className="page-header">
+        <section className="page-header evaluation-page-header">
+          <div className="page-kicker-row">
+            <Link href="/" className="backlink icon-link">
+              <Icon name="chevron-left" />
+              返回运行队列
+            </Link>
+            <span className="breadcrumb-text">评估结果 / 队列</span>
+          </div>
           <div>
             <h1 className="page-title">评估结果列表</h1>
+            <p className="hero-copy">按 JD 聚合已固化的 scorecard、gate、证据和投递建议，优先处理风险与复核项。</p>
           </div>
         </section>
 
-        <section className="status-strip" aria-label="评估结果总览">
-          <article className="status-strip-item info">
-            <span>评估结果</span>
-            <strong>{total}</strong>
-          </article>
-          <article className={blockedOrReview > 0 ? "status-strip-item warning" : "status-strip-item success"}>
-            <span>需处理 gate</span>
-            <strong>{blockedOrReview}</strong>
-          </article>
-          <article className={highRisk > 0 ? "status-strip-item danger" : "status-strip-item success"}>
-            <span>高风险岗位</span>
-            <strong>{highRisk}</strong>
-          </article>
-          <article className="status-strip-item">
-            <span>历史产物</span>
-            <strong>{legacy}</strong>
-          </article>
+        <section className="metric-card-grid evaluation-metric-grid" aria-label="评估结果总览">
+          <MetricCard icon="stats" label="总评估" value={total} helper="已完成 evaluate 的 JD 行" tone="blue" />
+          <MetricCard
+            icon="alert-triangle"
+            label="需复核 Gate"
+            value={blockedOrReview}
+            helper="blocked / needs_review"
+            tone={blockedOrReview > 0 ? "orange" : "green"}
+          />
+          <MetricCard
+            icon="shield-alert"
+            label="高风险岗位"
+            value={highRisk}
+            helper="risk_score ≥ 70%"
+            tone={highRisk > 0 ? "red" : "green"}
+          />
+          <MetricCard icon="clock" label="历史产物" value={legacy} helper="缺少 v0.5.7 gate 字段" tone="purple" />
         </section>
 
         <div className="eval-summary-strip" aria-label="趋势与评估边界">
           <span className="eval-summary-item">
+            <Icon name="stats" />
             平均最终分 <strong>{averageScore}</strong>
           </span>
           <span className="eval-summary-item">
+            <Icon name="shield-alert" />
             平均风险分 <strong>{averageRisk}</strong>
           </span>
           <span className="eval-summary-hint">

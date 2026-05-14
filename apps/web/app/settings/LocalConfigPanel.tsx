@@ -2,6 +2,7 @@
 
 import React, { type FormEvent, useMemo, useState } from "react";
 
+import { Icon, type IconName } from "../AppShell";
 import type { LocalConfigState, LocalConfigValues } from "../../lib/local-config";
 
 type LocalConfigPanelProps = {
@@ -17,11 +18,12 @@ const MODEL_FIELDS: Array<{
   key: keyof Pick<LocalConfigValues, "openaiModel" | "generatorModel" | "judgeModel" | "visionModel">;
   label: string;
   placeholder: string;
+  icon: IconName;
 }> = [
-  { key: "openaiModel", label: "共享模型", placeholder: "留空时使用 CLI 默认模型" },
-  { key: "generatorModel", label: "Generator 模型", placeholder: "可留空继承共享模型" },
-  { key: "judgeModel", label: "Judge 模型", placeholder: "可留空继承共享模型" },
-  { key: "visionModel", label: "Vision 模型", placeholder: "图片兜底模型，可留空" },
+  { key: "openaiModel", label: "共享模型", placeholder: "留空时使用 CLI 默认模型", icon: "model" },
+  { key: "generatorModel", label: "Generator 模型", placeholder: "可留空继承共享模型", icon: "model" },
+  { key: "judgeModel", label: "Judge 模型", placeholder: "可留空继承共享模型", icon: "shield-check" },
+  { key: "visionModel", label: "Vision 模型", placeholder: "图片兜底模型，可留空", icon: "image-upload" },
 ];
 
 export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
@@ -93,24 +95,33 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
     <section className="section section-flush settings-local-config">
       <div className="section-heading queue-heading">
         <div>
-          <p className="eyebrow">本地模型配置</p>
+          <p className="eyebrow">本地模型配置 · .env 边界</p>
           <h2>API key 与模型运行参数</h2>
           <p className="section-copy">
             仅写入项目根目录 .env；Web 不保存到浏览器存储、不写入 run_config.json，也不发起远端模型检查。
           </p>
         </div>
-        <span className={config.apiKey.configured ? "status-chip success" : "status-chip warning"}>{apiKeyLabel}</span>
+        <span className={config.apiKey.configured ? "status-chip success icon-chip" : "status-chip warning icon-chip"}>
+          <Icon name={config.apiKey.configured ? "eye-off" : "key"} />
+          {apiKeyLabel}
+        </span>
       </div>
 
       <form className="local-config-form" onSubmit={handleSubmit}>
         <div className="local-config-status-grid" aria-label="本地配置状态">
-          <StatusCell label=".env 文件" value={config.envExists ? "已存在" : "未创建"} tone={config.envExists ? "success" : "warning"} />
-          <StatusCell label="可写状态" value={config.envWritable ? "可写" : "需检查"} tone={config.envWritable ? "success" : "warning"} />
-          <StatusCell label="base URL host" value={config.baseUrlHost} tone="info" />
+          <StatusCell icon="file" label=".env 文件" value={config.envExists ? "已存在" : "未创建"} tone={config.envExists ? "success" : "warning"} />
+          <StatusCell icon="edit" label="可写状态" value={config.envWritable ? "可写" : "需检查"} tone={config.envWritable ? "success" : "warning"} />
+          <StatusCell icon="link" label="base URL host" value={config.baseUrlHost} tone="info" />
+          <StatusCell
+            icon="key"
+            label="API key 状态"
+            value={apiKeyLabel}
+            tone={config.apiKey.configured ? "success" : "warning"}
+          />
         </div>
 
-        <label className="control-field">
-          API key
+        <label className="control-field local-config-field-with-icon">
+          <FieldLabel icon="key" text="API key" trailingIcon="eye-off" />
           <input
             type="password"
             value={values.openaiApiKey}
@@ -135,16 +146,16 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
         </label>
 
         <div className="local-config-grid">
-          <label className="control-field">
-            OPENAI_BASE_URL
+          <label className="control-field local-config-field-with-icon">
+            <FieldLabel icon="link" text="OPENAI_BASE_URL" />
             <input
               value={values.openaiBaseUrl}
               placeholder="留空使用 https://api.openai.com/v1"
               onChange={(event) => updateValue("openaiBaseUrl", event.target.value)}
             />
           </label>
-          <label className="control-field">
-            OPENAI_API_KEY_ENV
+          <label className="control-field local-config-field-with-icon">
+            <FieldLabel icon="key" text="OPENAI_API_KEY_ENV" />
             <input
               value={values.openaiApiKeyEnv}
               placeholder="留空使用 OPENAI_API_KEY"
@@ -155,8 +166,8 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
 
         <div className="local-config-grid">
           {MODEL_FIELDS.map((field) => (
-            <label key={field.key} className="control-field">
-              {field.label}
+            <label key={field.key} className="control-field local-config-field-with-icon">
+              <FieldLabel icon={field.icon} text={field.label} />
               <input
                 value={values[field.key]}
                 placeholder={field.placeholder}
@@ -169,10 +180,12 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
         {status.message ? <p className={`local-config-message ${status.kind}`}>{status.message}</p> : null}
 
         <div className="local-config-actions">
-          <button className="primary-link" type="submit" disabled={status.kind === "saving" || !config.envExists}>
+          <button className="primary-link icon-link" type="submit" disabled={status.kind === "saving" || !config.envExists}>
+            <Icon name="save" />
             保存本地配置
           </button>
-          <button className="secondary-button" type="button" onClick={handleRestore} disabled={status.kind === "saving" || !config.restoreAvailable}>
+          <button className="secondary-button icon-link" type="button" onClick={handleRestore} disabled={status.kind === "saving" || !config.restoreAvailable}>
+            <Icon name="reset" />
             恢复默认结构
           </button>
         </div>
@@ -181,10 +194,39 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
   );
 }
 
-function StatusCell({ label, value, tone }: { label: string; value: string; tone: "info" | "success" | "warning" }) {
+function FieldLabel({ icon, text, trailingIcon }: { icon: IconName; text: string; trailingIcon?: IconName }) {
+  return (
+    <span className="field-label-row">
+      <span>
+        <Icon name={icon} />
+        {text}
+      </span>
+      {trailingIcon ? (
+        <span className="field-label-trailing" title="完整密钥保持隐藏">
+          <Icon name={trailingIcon} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function StatusCell({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  tone: "info" | "success" | "warning";
+}) {
   return (
     <div className={`status-strip-item ${tone}`}>
-      <span>{label}</span>
+      <span>
+        <Icon name={icon} />
+        {label}
+      </span>
       <strong>{value}</strong>
     </div>
   );

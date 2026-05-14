@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { loadLocalConfig } from "../../lib/local-config";
 import { loadSettingsOverview, type SettingsCheck, type SettingsOverview } from "../../lib/settings";
-import { AppShell } from "../AppShell";
+import { AppShell, Icon, MetricCard } from "../AppShell";
 import { LocalConfigPanel } from "./LocalConfigPanel";
 
 export default async function SettingsPage() {
@@ -13,33 +13,43 @@ export default async function SettingsPage() {
   return (
     <AppShell active="settings" eyebrow="设置">
       <main className="app-shell operational-shell">
-        <Link href="/" className="backlink">
-          返回运行队列
-        </Link>
-
-        <section className="page-header">
+        <section className="page-header settings-page-header">
+          <div className="page-kicker-row">
+            <Link href="/" className="backlink icon-link">
+              <Icon name="chevron-left" />
+              返回运行队列
+            </Link>
+            <span className="breadcrumb-text">设置 / 本地环境</span>
+          </div>
           <div>
             <h1 className="page-title">本地设置与环境检查</h1>
+            <p className="hero-copy">环境健康、`.env` 边界和模型参数只反映本地状态；Web 不写入 pipeline artifacts。</p>
           </div>
         </section>
 
-        <section className="status-strip" aria-label="设置总览">
-          <article className={overview.runsDirReadable ? "status-strip-item success" : "status-strip-item danger"}>
-            <span>runs 目录</span>
-            <strong>{overview.runsDirReadable ? "可读" : "不可读"}</strong>
-          </article>
-          <article className="status-strip-item info">
-            <span>run 数量</span>
-            <strong>{overview.runCount}</strong>
-          </article>
-          <article className={overview.configIssueCount > 0 ? "status-strip-item warning" : "status-strip-item success"}>
-            <span>配置缺失或异常</span>
-            <strong>{overview.configIssueCount}</strong>
-          </article>
-          <article className={overview.artifactIssueCount > 0 ? "status-strip-item warning" : "status-strip-item success"}>
-            <span>artifact 解析异常</span>
-            <strong>{overview.artifactIssueCount}</strong>
-          </article>
+        <section className="metric-card-grid settings-metric-grid" aria-label="环境健康">
+          <MetricCard
+            icon="folder"
+            label="runs 目录"
+            value={overview.runsDirReadable ? "可读" : "不可读"}
+            helper={overview.displayRunsDir}
+            tone={overview.runsDirReadable ? "green" : "red"}
+          />
+          <MetricCard icon="play" label="run 数量" value={overview.runCount} helper="本地 runs 目录" tone="blue" />
+          <MetricCard
+            icon="alert-triangle"
+            label="配置缺失或异常"
+            value={overview.configIssueCount}
+            helper="缺失或无法解析的 run_config"
+            tone={overview.configIssueCount > 0 ? "orange" : "green"}
+          />
+          <MetricCard
+            icon="shield-alert"
+            label="artifact 解析异常"
+            value={overview.artifactIssueCount}
+            helper="已存在 JSON artifact"
+            tone={overview.artifactIssueCount > 0 ? "orange" : "green"}
+          />
         </section>
 
         <LocalConfigPanel initialConfig={localConfig} />
@@ -48,9 +58,9 @@ export default async function SettingsPage() {
           <section className="section settings-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">运行边界</p>
+                <p className="eyebrow">.env 边界</p>
                 <h2>本地路径</h2>
-                <p className="section-copy">Web 读取本地 run_dir artifacts，不重新实现 pipeline 业务逻辑。</p>
+                <p className="section-copy">Web 读取本地 run_dir artifacts；路径已脱敏，不展示完整本机目录。</p>
               </div>
             </div>
             <dl className="settings-list">
@@ -66,7 +76,7 @@ export default async function SettingsPage() {
               <div>
                 <p className="eyebrow">Provider</p>
                 <h2>最新配置快照</h2>
-                <p className="section-copy">来自最近修改且可解析的 run_config.json。</p>
+                <p className="section-copy">来自最近修改且可解析的 run_config.json，只展示 provider 与模型摘要。</p>
               </div>
             </div>
             {overview.latestConfig ? <LatestConfig overview={overview} /> : <EmptyConfig />}
@@ -76,9 +86,9 @@ export default async function SettingsPage() {
         <section className="section section-flush settings-check-section">
           <div className="section-heading queue-heading">
             <div>
-              <p className="eyebrow">环境检查</p>
-              <h2>本地依赖与 artifacts</h2>
-              <p className="section-copy">失败项不会导致页面崩溃，只给出可操作解释。</p>
+                <p className="eyebrow">环境健康</p>
+                <h2>本地依赖与 artifacts</h2>
+                <p className="section-copy">失败项保持可读并指向下一步检查，不阻断页面。</p>
             </div>
           </div>
           <div className="settings-check-list">
@@ -128,7 +138,6 @@ function LatestConfig({ overview }: { overview: SettingsOverview }) {
         <SummaryRow label="OCR provider" value={config.inputExtraction.ocrProvider} />
         <SummaryRow label="Vision provider" value={config.inputExtraction.visionProvider} />
         <SummaryRow label="Vision model" value={config.inputExtraction.visionModel || "未指定"} />
-        <SummaryRow label="OCR languages" value={config.inputExtraction.ocrLanguages || "未指定"} />
       </dl>
     </div>
   );
