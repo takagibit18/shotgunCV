@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { Icon, type IconName } from "../AppShell";
 import type { EvaluationResult } from "../../lib/evaluations";
 import {
   DEFAULT_EVALUATION_FILTERS,
@@ -46,11 +47,14 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
 
   return (
     <section className="section section-flush evaluation-section">
-      <h3 className="eval-filter-heading">筛选与排序</h3>
+      <h3 className="eval-filter-heading">
+        <Icon name="filter" />
+        筛选与排序
+      </h3>
 
       <div className="evaluation-controls" aria-label="评估结果筛选">
         <label className="control-field evaluation-search">
-          <span>搜索</span>
+          <FilterLabel icon="search" text="搜索" />
           <input
             value={filters.query}
             placeholder="搜索 JD、run、证据、风险、建议"
@@ -59,7 +63,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           />
         </label>
         <label className="control-field">
-          <span>Gate</span>
+          <FilterLabel icon="shield-check" text="Gate" />
           <select
             value={filters.gate}
             aria-label="Gate 筛选"
@@ -73,7 +77,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>风险</span>
+          <FilterLabel icon="shield-alert" text="风险" />
           <select
             value={filters.risk}
             aria-label="风险筛选"
@@ -87,7 +91,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>分数</span>
+          <FilterLabel icon="stats" text="分数" />
           <select
             value={filters.score}
             aria-label="分数筛选"
@@ -101,7 +105,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>Provider</span>
+          <FilterLabel icon="model" text="Provider" />
           <select
             value={filters.provider}
             aria-label="Provider 筛选"
@@ -116,7 +120,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>建议</span>
+          <FilterLabel icon="briefcase" text="投递建议" />
           <select
             value={filters.decision}
             aria-label="投递建议筛选"
@@ -131,7 +135,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>排序</span>
+          <FilterLabel icon="filter" text="排序" />
           <select
             value={sortKey}
             aria-label="评估结果排序"
@@ -144,7 +148,8 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
             <option value="title">岗位标题</option>
           </select>
         </label>
-        <button className="secondary-link evaluation-reset" type="button" onClick={() => setFilters(DEFAULT_EVALUATION_FILTERS)}>
+        <button className="secondary-link evaluation-reset icon-link" type="button" onClick={() => setFilters(DEFAULT_EVALUATION_FILTERS)}>
+          <Icon name="reset" />
           重置
         </button>
       </div>
@@ -188,6 +193,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
 
       {riskInPage ? (
         <div className="eval-risk-banner" role="alert">
+          <Icon name="shield-alert" />
           当前页面存在高风险或需复核的 gate 岗位，建议优先处理。
         </div>
       ) : null}
@@ -196,7 +202,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
         <div className="evaluation-table" role="table" aria-label="岗位评估队列">
           <div className="evaluation-table-head" role="row">
             <span role="columnheader">岗位/JD</span>
-            <span role="columnheader">Gate 与建议</span>
+            <span role="columnheader">Gate / 投递建议</span>
             <span role="columnheader">评分矩阵</span>
             <span role="columnheader">证据与风险</span>
             <span role="columnheader">操作</span>
@@ -213,8 +219,12 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
               </div>
               <div className="evaluation-status-cell" role="cell">
                 <span className={buildGateClassName(item.gateStatus)}>{formatGateStatus(item.gateStatus)}</span>
+                <span className="decision-pill">
+                  <Icon name="briefcase" />
+                  投递建议：{formatDecision(item.applyDecision)}
+                </span>
                 {item.artifactMode === "legacy" ? <span className="pill">legacy</span> : null}
-                {item.gateReasons.length > 0 ? <p className="risk-line">{item.gateReasons.join(" / ")}</p> : null}
+                {item.gateReasons.length > 0 ? <p className="risk-line">{summarizeList(item.gateReasons)}</p> : null}
               </div>
               <div className="evaluation-score-cell" role="cell">
                 <ScoreMetric label="最终分" value={item.finalScore} />
@@ -229,10 +239,12 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
                 </p>
               </div>
               <div className="row-actions" role="cell">
-                <Link href={item.detailHref} className="secondary-link">
+                <Link href={item.detailHref} className="secondary-link icon-link">
+                  <Icon name="eye" />
                   详情
                 </Link>
-                <Link href={item.reportHref} className="secondary-link">
+                <Link href={item.reportHref} className="secondary-link icon-link">
+                  <Icon name="document" />
                   报告
                 </Link>
               </div>
@@ -263,14 +275,27 @@ function PaginationSummary({
         第 {currentPage} / {pageCount} 页 · 每页 {PAGE_SIZE} 条 · 共 {totalCount} 条
       </span>
       <div className="row-actions">
-        <button className="secondary-button" type="button" disabled={currentPage <= 1} onClick={onPrevious}>
+        <button className="secondary-button icon-link" type="button" disabled={currentPage <= 1} onClick={onPrevious}>
+          <Icon name="chevron-left" />
           上一页
         </button>
-        <button className="secondary-button" type="button" disabled={currentPage >= pageCount} onClick={onNext}>
+        <button className="secondary-button icon-link" type="button" disabled={currentPage >= pageCount} onClick={onNext}>
           下一页
+          <Icon name="chevron-right" />
         </button>
       </div>
     </div>
+  );
+}
+
+function FilterLabel({ icon, text }: { icon: IconName; text: string }) {
+  return (
+    <span className="field-label-row">
+      <span>
+        <Icon name={icon} />
+        {text}
+      </span>
+    </span>
   );
 }
 
@@ -286,6 +311,14 @@ function ScoreMetric({ label, value, tone }: { label: string; value: number | nu
 
 function firstText(primary: string[], fallback: string[], emptyText: string): string {
   return primary[0] ?? fallback[0] ?? emptyText;
+}
+
+function summarizeList(values: string[]): string {
+  const [first, ...rest] = values;
+  if (!first) {
+    return "";
+  }
+  return rest.length > 0 ? `${first}（另 ${rest.length} 条）` : first;
 }
 
 function formatDateTime(value: string): string {
@@ -304,6 +337,17 @@ function formatGateStatus(status: string): string {
     legacy: "历史产物",
   };
   return labels[status] ?? status;
+}
+
+function formatDecision(value: string): string {
+  const labels: Record<string, string> = {
+    apply: "建议投递",
+    manual_review: "人工复核",
+    hold: "暂缓",
+    skip: "跳过",
+    review: "复核",
+  };
+  return labels[value] ?? value;
 }
 
 function buildGateClassName(status: string): string {

@@ -357,3 +357,19 @@ v0.6.0 已经完成 Web 体验的主要重构：统一 `AppShell`、冷白 SaaS 
 - 全页面语义色不依赖颜色单独传达状态，关键状态同时有文字标签。
 - 桌面、平板、移动端无重叠、不可读按钮或不可控横向滚动。
 - `npm test` 与 `tsc --noEmit` 通过；完成一轮手动截图 QA 记录。
+
+### v0.7.13 冷白 SaaS 工作台核心页面收敛
+
+目标：继续 Web-only 小版本优化，把报告页、设置页和评估结果列表收敛到冷白、本地单用户、证据优先的运营工作台视觉语言，不改变 Python pipeline artifact 合约。
+
+关键变化：
+- `runs/[runId]/report/page.tsx` 改为决策优先：面包屑和返回入口、三张导航/来源摘要卡、三列投递决策摘要；原始 Markdown 只作为可追溯来源内容保留。
+- `settings/page.tsx` 与 `settings/LocalConfigPanel.tsx` 使用四张环境健康指标卡、`.env` 边界说明、带语义图标的本地模型配置输入和保存/恢复操作；继续只展示 masked API key。
+- `evaluations/page.tsx` 与 `evaluations/EvaluationQueue.tsx` 使用四张评估指标卡、紧凑平均分/风险 strip、图标化筛选栏和表格内 gate/投递建议/分数/证据风险优先列。
+- `AppShell.tsx` 与 `globals.css` 补充共享语义图标和 metric card 视觉语言：蓝色统计、绿色目录/安全、橙色配置警告、红色高风险、紫色历史/来源。
+
+验收标准：
+- 报告、设置、评估结果三个页面首屏分别突出推荐/证据/改进重点、环境健康/本地配置状态、评估数量/风险/gate/筛选表格。
+- 页面不展示完整 API key、完整敏感本地路径、CV/JD 原文，也不重新解释评分、Gate 或投递建议。
+- 桌面、平板、移动端无不可控横向滚动、无错误 overlay、无明显文本重叠。
+- `npm test`、`npx tsc --noEmit` 与浏览器截图 QA 通过。
