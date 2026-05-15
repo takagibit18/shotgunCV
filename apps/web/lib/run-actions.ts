@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getRunsDir } from "./runs";
@@ -7,7 +7,15 @@ import type { RunConfig, RunStatusFile, UploadManifest, UploadedInputFile } from
 
 
 type RunAction = "run" | "retry_full" | "resume_failed";
-type SpawnRunner = (command: string, args: string[], options: { cwd: string }) => { on: (event: string, callback: (error: Error) => void) => void };
+type SpawnedRunProcess = {
+  on: (event: "error", callback: (error: Error) => void) => unknown;
+  stdout?: { on: (event: "data", callback: (chunk: unknown) => void) => unknown } | null;
+  stderr?: { on: (event: "data", callback: (chunk: unknown) => void) => unknown } | null;
+  unref?: () => void;
+} & {
+  on: (event: "exit", callback: (code: number | null, signal: NodeJS.Signals | null) => void) => unknown;
+};
+type SpawnRunner = (command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => SpawnedRunProcess;
 
 type DraftPatchInput = {
   candidateId?: string;
@@ -56,6 +64,12 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     throw new RunActionError("not_failed", "Only failed runs can resume from the failed stage.");
   }
 
+  const args = await buildCliArgs(runDir, action);
+  const command = process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv";
+  if (spawnRunner === defaultSpawnRunner && !(await commandAvailable(command))) {
+    throw new RunActionError("cli_not_found", "CLI 命令未找到，请确认 shotguncv 已安装并在 PATH 中。", 503);
+  }
+
   const startedAt = nowIso();
   await writeRunStatus(runDir, {
     status: "queued",
@@ -67,10 +81,10 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     last_action: action,
   });
 
-  const args = await buildCliArgs(runDir, action);
+  const currentStage = action === "resume_failed" ? firstIncompleteStage(await listStageDirs(runDir)) : "ingest";
   await writeRunStatus(runDir, {
     status: "running",
-    current_stage: action === "resume_failed" ? firstIncompleteStage(await listStageDirs(runDir)) : "ingest",
+    current_stage: currentStage,
     started_at: startedAt,
     finished_at: null,
     error_stage: null,
@@ -78,18 +92,21 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     last_action: action,
   });
 
-  const child = spawnRunner(process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv", args, { cwd: path.resolve(getRunsDir(), "..") });
+  const child = spawnRunner(command, args, { cwd: path.resolve(getRunsDir(), ".."), env: process.env });
+  const output = createOutputBuffer();
+  child.stdout?.on("data", (chunk) => output.push(chunk));
+  child.stderr?.on("data", (chunk) => output.push(chunk));
   child.on("error", async (error) => {
-    await writeRunStatus(runDir, {
-      status: "failed",
-      current_stage: null,
-      started_at: startedAt,
-      finished_at: nowIso(),
-      error_stage: null,
-      error_summary: error.message,
-      last_action: action,
-    });
+    await markRunFailed(runDir, startedAt, currentStage, action, `CLI 启动失败：${error.message}${formatCapturedOutput(output.text())}`);
   });
+  child.on("exit", async (code, signal) => {
+    if (code === 0) {
+      return;
+    }
+    const reason = signal ? `CLI 运行失败，信号 ${signal}` : `CLI 运行失败，退出码 ${code ?? "未知"}`;
+    await markRunFailed(runDir, startedAt, currentStage, action, `${reason}${formatCapturedOutput(output.text())}`);
+  });
+  child.unref?.();
 
   return { runId, status: "queued", action };
 }
@@ -181,8 +198,69 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
 }
 
 
-function defaultSpawnRunner(command: string, args: string[], options: { cwd: string }) {
-  return spawn(command, args, { cwd: options.cwd, detached: true, stdio: "ignore" });
+function defaultSpawnRunner(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) {
+  return spawn(command, args, {
+    cwd: options.cwd,
+    detached: true,
+    env: options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+}
+
+
+async function commandAvailable(command: string): Promise<boolean> {
+  if (command.includes("/") || command.includes("\\") || path.isAbsolute(command)) {
+    try {
+      await access(command);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const resolver = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(resolver, [command], { env: process.env, encoding: "utf-8", windowsHide: true });
+  return result.status === 0;
+}
+
+
+function createOutputBuffer() {
+  const chunks: string[] = [];
+  return {
+    push(chunk: unknown) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk));
+      while (chunks.join("").length > 4000) {
+        chunks.shift();
+      }
+    },
+    text() {
+      return chunks.join("").trim().slice(-4000);
+    },
+  };
+}
+
+
+function formatCapturedOutput(output: string): string {
+  return output ? `。输出：${output}` : "";
+}
+
+
+async function markRunFailed(
+  runDir: string,
+  startedAt: string,
+  currentStage: RunStatusFile["current_stage"],
+  action: RunAction,
+  errorSummary: string,
+) {
+  await writeRunStatus(runDir, {
+    status: "failed",
+    current_stage: currentStage,
+    started_at: startedAt,
+    finished_at: nowIso(),
+    error_stage: currentStage,
+    error_summary: errorSummary,
+    last_action: action,
+  });
 }
 
 

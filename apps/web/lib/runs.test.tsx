@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -740,6 +741,64 @@ describe("run viewer data loading", () => {
     expect(calls[0].args).toContain("--candidate-id");
     expect(calls[0].args).toContain("cand-001");
     expect(status).toMatchObject({ status: "running", current_stage: "ingest", last_action: "run" });
+  });
+
+  it("rejects a web run action before status changes when the CLI command is unavailable", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    process.env.SHOTGUNCV_CLI_COMMAND = "definitely-missing-shotguncv-command";
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    await expect(startRunAction(draft.runId, "run")).rejects.toMatchObject({
+      code: "cli_not_found",
+      message: "CLI 命令未找到，请确认 shotguncv 已安装并在 PATH 中。",
+    });
+
+    const status = JSON.parse(await readFile(path.join(runsDir, draft.runId, "run_status.json"), "utf-8"));
+    expect(status).toMatchObject({ status: "draft", current_stage: null, error_summary: null });
+  });
+
+  it("marks a web run action failed when the CLI exits with a non-zero code", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    process.env.SHOTGUNCV_CLI_COMMAND = process.execPath;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      unref: () => void;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.unref = () => undefined;
+
+    const result = await startRunAction(draft.runId, "run", () => child);
+    child.stderr.emit("data", Buffer.from("missing python package"));
+    child.emit("exit", 1, null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const status = JSON.parse(await readFile(path.join(runsDir, draft.runId, "run_status.json"), "utf-8"));
+    expect(result).toMatchObject({ runId: draft.runId, status: "queued", action: "run" });
+    expect(status).toMatchObject({
+      status: "failed",
+      current_stage: "ingest",
+      error_stage: "ingest",
+      last_action: "run",
+    });
+    expect(status.error_summary).toContain("CLI 运行失败，退出码 1");
+    expect(status.error_summary).toContain("missing python package");
   });
 
   it("rejects duplicate draft run ids", async () => {
