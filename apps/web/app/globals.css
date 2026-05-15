@@ -187,12 +187,9 @@ p {
 }
 
 .sidebar-brand,
-.topbar-actions,
 .row-actions,
 .pill-row,
-.statline,
 .commandbar-actions,
-.metric-title,
 .activity-item,
 .freshness-pill,
 .sidebar-user,
@@ -427,7 +424,6 @@ p {
 }
 
 .workspace-main,
-.workspace-rail,
 .insight-rail {
   display: grid;
   gap: var(--space-lg);
@@ -487,7 +483,6 @@ p {
 }
 
 .detail-grid,
-.grid,
 .gate-grid,
 .report-summary-grid,
 .metric-card-grid {
@@ -2343,27 +2338,6 @@ label.primary-link {
   color: var(--charcoal);
 }
 
-@property --animated-score {
-  syntax: "<percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-
-@keyframes score-ring-fill {
-  from {
-    --animated-score: 0%;
-  }
-  to {
-    --animated-score: var(--target-score);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .score-ring-operational {
-    --animated-score: var(--target-score);
-    animation: none;
-  }
-}
 
 @media (max-width: 1180px) {
   .app-frame {
