@@ -36,7 +36,7 @@ export default async function HomePage() {
                 <p className="eyebrow">趋势概览</p>
                 <h2>批次容量与健康度</h2>
               </div>
-              <TrendMetric label="Run 数" value={totalRuns} />
+              <TrendMetric label="运行数" value={totalRuns} />
               <TrendMetric label="完成率" value={`${completionRate}%`} />
               <TrendMetric label="警告/失败" value={warningRuns} tone={warningRuns > 0 ? "warning" : "success"} />
             </section>
@@ -66,7 +66,7 @@ export default async function HomePage() {
                     </div>
                   ))
                 ) : (
-                  <p className="muted">暂无 run 活动。</p>
+                  <p className="muted">暂无运行活动。</p>
                 )}
               </div>
             </section>
@@ -75,7 +75,7 @@ export default async function HomePage() {
               <section className="rail-card purple">
                 <div className="section-heading">
                   <div>
-                    <h3>AI 洞察</h3>
+                    <h3>智能洞察</h3>
                   </div>
                 </div>
                 <div className="recommendation-list">
@@ -155,21 +155,21 @@ function buildPrimaryInsight(runs: RunSummary[]): {
 
   if (failedRuns.length > 0) {
     return {
-      title: `${failedRuns.length} 个 run 运行失败`,
+      title: `${failedRuns.length} 个运行批次失败`,
       reason: "查看详情排查错误摘要，修复后重新运行。",
       tone: "recommendation-item priority",
     };
   }
   if (warningRuns.length > warningRuns.filter((r) => r.draftStatus === "failed").length) {
     return {
-      title: `${warningRuns.length} 个 run 有质量警告`,
+      title: `${warningRuns.length} 个运行批次有质量警告`,
       reason: "优先复查警告项，确认是否需要调整输入或模型配置。",
       tone: "recommendation-item watch",
     };
   }
   if (runningRuns.length > 0) {
     return {
-      title: `${runningRuns.length} 个 run 正在执行`,
+      title: `${runningRuns.length} 个运行批次正在执行`,
       reason: "关注阶段进度，完成后进入评估与报告。",
       tone: "recommendation-item safe",
     };
@@ -177,7 +177,7 @@ function buildPrimaryInsight(runs: RunSummary[]): {
   if (runs.length === 0) {
     return {
       title: "尚无运行数据",
-      reason: "创建草稿 run 开始评估。",
+      reason: "创建投递草稿开始评估。",
       tone: "recommendation-item safe",
     };
   }

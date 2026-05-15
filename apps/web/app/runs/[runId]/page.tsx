@@ -97,14 +97,14 @@ export default async function RunPage({ params }: PageProps) {
       </section>
 
       <section className="section">
-        <SectionHeading eyebrow="Run status" title="运行状态" action={displayStatus} />
+        <SectionHeading eyebrow="运行状态" title="运行状态" action={displayStatus} />
         <div className="detail-grid">
           <article className="detail-card">
             <h3>{"阶段状态"}</h3>
             <div className="pill-row">
               {detail.stageStatuses.map((item) => (
                 <span key={item.stage} className={`pill stage-${item.status}`}>
-                  {(STAGE_LABELS[item.stage] ?? item.stage) + " · " + item.status}
+                  {(STAGE_LABELS[item.stage] ?? item.stage) + " · " + formatStageStatus(item.status)}
                 </span>
               ))}
             </div>
@@ -121,7 +121,7 @@ export default async function RunPage({ params }: PageProps) {
             </p>
             {detail.runStatus?.error_summary ? (
               <p className="risk-line">
-                {(detail.runStatus.error_stage ?? "unknown") + ": " + detail.runStatus.error_summary}
+                {(detail.runStatus.error_stage ? STAGE_LABELS[detail.runStatus.error_stage] : "未知阶段") + "：" + detail.runStatus.error_summary}
               </p>
             ) : null}
             {detail.runStatus?.quality_summary ? (
@@ -136,19 +136,19 @@ export default async function RunPage({ params }: PageProps) {
 
       <section className="section">
         <SectionHeading
-          eyebrow="Observability"
+          eyebrow="运行观测"
           title="运行观测"
-          action={`${detail.observability.fallbackCount} fallback`}
+          action={`${detail.observability.fallbackCount} 次兜底`}
         />
         <div className="detail-grid">
           <article className="detail-card">
-            <h3>{"模型与 token"}</h3>
+            <h3>{"模型与用量"}</h3>
             <p>
-              {"总 token："}
+              {"总用量："}
               <span className="mono">{detail.observability.totalTokens ?? "n/a"}</span>
             </p>
             <p>
-              {"Prompt / completion："}
+              {"输入 / 输出："}
               <span className="mono">
                 {(detail.observability.promptTokens ?? "n/a") + " / " + (detail.observability.completionTokens ?? "n/a")}
               </span>
@@ -174,7 +174,7 @@ export default async function RunPage({ params }: PageProps) {
               <span className="mono">{detail.observability.toolCallCount}</span>
             </p>
             <p>
-              {"Fallback："}
+                {"兜底："}
               <span className="mono">{detail.observability.fallbackCount}</span>
             </p>
             {detail.observability.qualityWarnings.length > 0 ? (
@@ -192,7 +192,7 @@ export default async function RunPage({ params }: PageProps) {
 
       {detail.draft ? (
         <section className="section">
-          <SectionHeading eyebrow="Draft run" title="上传草稿" action={displayStatus} />
+        <SectionHeading eyebrow="上传草稿" title="上传草稿" action={displayStatus} />
           <div className="detail-grid">
             <article className="detail-card">
               <h3>{"输入文件"}</h3>
@@ -211,8 +211,8 @@ export default async function RunPage({ params }: PageProps) {
               </ul>
             </article>
             <article className="detail-card">
-              <h3>{"下一步 CLI"}</h3>
-              <p>{"Web 可以创建和管理本地草稿。确认输入后可在页面运行，或在本地执行："}</p>
+            <h3>{"下一步操作"}</h3>
+            <p>{"网页可以创建和管理本地草稿。确认输入后可在页面启动本地流程；高级排查时也可以在本机执行："}</p>
               <pre className="command-block">{detail.draft.nextCommand}</pre>
             </article>
           </div>
@@ -220,7 +220,7 @@ export default async function RunPage({ params }: PageProps) {
       ) : null}
 
       <section className="section">
-        <SectionHeading eyebrow="Input sources" title="输入来源" />
+        <SectionHeading eyebrow="输入来源" title="输入来源" />
         {detail.inputSources.length > 0 ? (
           <div className="input-source-table" role="table" aria-label="输入来源清单">
             <div className="input-source-row header" role="row">
@@ -283,7 +283,7 @@ export default async function RunPage({ params }: PageProps) {
       </section>
 
       <section className="section">
-        <SectionHeading eyebrow="Preflight gate" title="硬门槛审查" />
+        <SectionHeading eyebrow="投递前门槛" title="硬门槛审查" />
         {detail.preflightGates.length > 0 ? (
           <div className="gate-grid">
             {detail.preflightGates.map((gate) => {
@@ -311,7 +311,7 @@ export default async function RunPage({ params }: PageProps) {
             })}
           </div>
         ) : (
-          <div className="empty">{"当前 run 暂无 v0.5.7 硬门槛产物，继续按历史评分产物兼容展示。"}</div>
+          <div className="empty">{"当前运行暂无新版硬门槛产物，继续按历史评分产物兼容展示。"}</div>
         )}
       </section>
 
@@ -427,6 +427,17 @@ function buildNextAction(status: string): string {
     return "等待阶段更新";
   }
   return "检查输入来源";
+}
+
+
+function formatStageStatus(status: string): string {
+  const labels: Record<string, string> = {
+    complete: "已完成",
+    running: "运行中",
+    failed: "失败",
+    pending: "等待中",
+  };
+  return labels[status] ?? status;
 }
 
 function summarizeGates(total: number, blockedOrReview: number): string {

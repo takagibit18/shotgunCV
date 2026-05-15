@@ -36,7 +36,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (error instanceof RunActionError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
-    return NextResponse.json({ error: "Failed to update draft.", code: "draft_update_failed" }, { status: 500 });
+    return NextResponse.json({ error: "更新草稿失败。", code: "draft_update_failed" }, { status: 500 });
   }
 }
 

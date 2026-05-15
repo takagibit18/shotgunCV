@@ -33,7 +33,7 @@ export default async function ReportPage({ params }: PageProps) {
           <div>
             <p className="eyebrow">运行报告 · 投递复盘</p>
             <h1 className="page-title">{resolvedParams.runId}</h1>
-            <p className="hero-copy">先读投递结论、证据和面试/改进重点；原始 Markdown 保留为可追溯来源。</p>
+            <p className="hero-copy">先读投递结论、证据和面试/改进重点；原始报告保留为可追溯来源。</p>
           </div>
         </section>
 
@@ -41,15 +41,15 @@ export default async function ReportPage({ params }: PageProps) {
           <MetricCard
             icon="document"
             label="报告目录"
-            value="决策摘要 / 原始 Markdown"
+            value="决策摘要 / 原始报告"
             helper="结构化结论优先，原文用于追溯"
             tone="blue"
           />
           <MetricCard
             icon="briefcase"
-            label="推荐 JD"
+            label="推荐岗位"
             value={reportSummary.topTitle}
-            helper="来自 scorecard 与 strategy 快照"
+            helper="来自评分与投递策略快照"
             tone="green"
           />
           <MetricCard
@@ -66,7 +66,7 @@ export default async function ReportPage({ params }: PageProps) {
           <div>
             <p className="eyebrow">结构化摘要</p>
             <h2>投递决策摘要</h2>
-            <p className="section-copy">Web 只整理已生成 artifact 的展示顺序，不重新解释评分、Gate 或投递建议。</p>
+            <p className="section-copy">网页只整理已生成产物的展示顺序，不重新解释评分、门槛或投递建议。</p>
           </div>
         </div>
         <div className="report-summary-grid">
@@ -81,9 +81,9 @@ export default async function ReportPage({ params }: PageProps) {
             <summary>
               <span>
                 <Icon name="file" />
-                原始 Markdown 报告
+                原始报告
               </span>
-              <small>traceable source content</small>
+              <small>可追溯来源内容</small>
             </summary>
             {report ? (
               <div className="markdown">
@@ -129,7 +129,7 @@ function SummaryCard({ icon, title, items }: { icon: Parameters<typeof Icon>[0][
         )}
         {hiddenCount > 0 ? (
           <li className="report-more-item">
-            <span>另有 {hiddenCount} 条来源内容保留在原始 Markdown 与 artifact 中。</span>
+          <span>另有 {hiddenCount} 条来源内容保留在原始报告与本地产物中。</span>
           </li>
         ) : null}
       </ul>
@@ -160,34 +160,34 @@ function buildReportSummary(detail: DetailForReport) {
   return {
     topTitle: topVariant?.title ?? topStrategy?.jd_id ?? "暂无推荐岗位",
     sourceBasis: uniqueItems([
-      topVariant ? { text: "scorecard", source: "scorecard" } : null,
-      topStrategy ? { text: "strategy", source: "strategy" } : null,
-      topExplanation ? { text: "evidence", source: "ranking_explanations" } : null,
-      topGapMap ? { text: "gap_map", source: "gap_map" } : null,
+      topVariant ? { text: "评分快照", source: "评分产物" } : null,
+      topStrategy ? { text: "投递策略", source: "策略产物" } : null,
+      topExplanation ? { text: "证据解释", source: "证据产物" } : null,
+      topGapMap ? { text: "差距分析", source: "差距产物" } : null,
     ])
       .map((item) => item.text)
       .join(" / ") || "暂无来源",
     recommendations: uniqueItems([
       topVariant
-        ? { text: `优先投递 ${topVariant.title}，综合得分 ${Math.round(topVariant.overallScore * 100)}%。`, source: "scorecard" }
+        ? { text: `优先投递 ${topVariant.title}，综合得分 ${Math.round(topVariant.overallScore * 100)}%。`, source: "评分产物" }
         : null,
-      topStrategy ? { text: `投递决策：${topStrategy.apply_decision}。${topStrategy.reason_summary}`, source: "strategy" } : null,
+      topStrategy ? { text: `投递决策：${topStrategy.apply_decision}。${topStrategy.reason_summary}`, source: "策略产物" } : null,
     ]),
     evidence: uniqueItems([
-      ...(topExplanation?.evidence_refs.map((text) => ({ text, source: "ranking_explanations.evidence_refs" })) ?? []),
-      ...(topExplanation?.positive_signals.map((text) => ({ text, source: "ranking_explanations.positive_signals" })) ?? []),
-      ...(topStrategy?.decision_drivers.map((text) => ({ text, source: "strategy.decision_drivers" })) ?? []),
-      ...(topVariant?.topReasons.map((text) => ({ text, source: "eval_summary.top_reasons" })) ?? []),
+      ...(topExplanation?.evidence_refs.map((text) => ({ text, source: "证据引用" })) ?? []),
+      ...(topExplanation?.positive_signals.map((text) => ({ text, source: "正向信号" })) ?? []),
+      ...(topStrategy?.decision_drivers.map((text) => ({ text, source: "决策依据" })) ?? []),
+      ...(topVariant?.topReasons.map((text) => ({ text, source: "评估摘要" })) ?? []),
     ]),
     interviewPrep: uniqueItems([
-      ...(topStrategy?.catch_up_notes.map((text) => ({ text, source: "strategy.catch_up_notes" })) ?? []),
-      ...(topStrategy?.interview_prep_points.map((text) => ({ text, source: "strategy.interview_prep_points" })) ?? []),
-      ...(topStrategy?.recommended_actions.map((text) => ({ text, source: "strategy.recommended_actions" })) ?? []),
+      ...(topStrategy?.catch_up_notes.map((text) => ({ text, source: "补强建议" })) ?? []),
+      ...(topStrategy?.interview_prep_points.map((text) => ({ text, source: "面试准备" })) ?? []),
+      ...(topStrategy?.recommended_actions.map((text) => ({ text, source: "推荐动作" })) ?? []),
       ...(topGapMap?.items.flatMap((item) => [
-        ...item.catch_up_concepts.map((text) => ({ text, source: "gap_map.catch_up_concepts" })),
-        ...item.weak_points.map((text) => ({ text, source: "gap_map.weak_points" })),
+        ...item.catch_up_concepts.map((text) => ({ text, source: "补强概念" })),
+        ...item.weak_points.map((text) => ({ text, source: "薄弱点" })),
       ]) ?? []),
-      ...(topExplanation?.risk_flags.map((text) => ({ text, source: "ranking_explanations.risk_flags" })) ?? []),
+      ...(topExplanation?.risk_flags.map((text) => ({ text, source: "风险标记" })) ?? []),
     ]),
   };
 }

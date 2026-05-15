@@ -80,7 +80,7 @@ export function ScoreMatrixRow({
         <div className="matrix-action-strip">
           <div className="action-strip-col">
             <h5>适配度</h5>
-            <p>{explanation?.dimension_reasons.overall?.slice(0, 120) ?? "当前运行未生成评估解释文件，评分矩阵使用 scorecards 降级展示。"}</p>
+            <p>{explanation?.dimension_reasons.overall?.slice(0, 120) ?? "当前运行未生成评估解释文件，评分矩阵使用评分快照降级展示。"}</p>
           </div>
           <div className="action-strip-col">
             <h5>风险提示</h5>

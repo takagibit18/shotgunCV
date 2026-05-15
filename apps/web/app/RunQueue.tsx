@@ -101,8 +101,8 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       <div className="section-heading queue-heading">
         <div>
           <p className="eyebrow">运行队列</p>
-          <h2>本地 run 工作队列</h2>
-          <p className="section-copy">按状态、阶段和 provider 快速定位需要处理的批次。</p>
+          <h2>本地运行工作队列</h2>
+          <p className="section-copy">按状态、阶段和模型快速定位需要处理的批次。</p>
         </div>
       </div>
 
@@ -111,8 +111,8 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           <span>搜索</span>
           <input
             value={filters.query}
-            placeholder="搜索 run、标签、provider"
-            aria-label="搜索 run、标签、provider"
+            placeholder="搜索运行批次、标签、模型"
+            aria-label="搜索运行批次、标签、模型"
             onChange={(event) => setFilters((current) => ({ ...current, query: event.currentTarget.value }))}
           />
         </label>
@@ -147,13 +147,13 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>Provider 筛选</span>
+          <span>模型筛选</span>
           <select
             value={filters.provider}
-            aria-label="Provider 筛选"
+            aria-label="模型筛选"
             onChange={(event) => setFilters((current) => ({ ...current, provider: event.currentTarget.value }))}
           >
-            <option value="all">全部 provider</option>
+            <option value="all">全部模型</option>
             {providerOptions.map((provider) => (
               <option key={provider} value={provider}>
                 {provider}
@@ -181,23 +181,23 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
 
       {runs.length === 0 ? (
         <div className="empty-state">
-          <h3>暂无 run</h3>
-          <p>先创建一个草稿 run，或把已有 run 目录放入当前 runs 根目录。</p>
+          <h3>暂无运行批次</h3>
+          <p>先创建一个投递草稿，或把已有运行目录放入当前本地数据目录。</p>
           <Link href="/upload" className="primary-link">
-            创建草稿 run
+            创建投递草稿
           </Link>
         </div>
       ) : onlyDrafts ? (
         <div className="notice-strip warning">
           <strong>当前只有草稿。</strong>
-          <span>确认输入后进入详情页运行 pipeline，或在本地执行草稿中的命令。</span>
+          <span>确认输入后进入详情页启动本地流程，或在高级模式下使用草稿命令。</span>
         </div>
       ) : null}
 
       {runs.length > 0 && visibleRuns.length === 0 ? (
         <div className="empty-state">
           <h3>没有匹配筛选结果</h3>
-          <p>清空搜索词或放宽状态、阶段、provider 条件。</p>
+          <p>清空搜索词或放宽状态、阶段、模型条件。</p>
         </div>
       ) : null}
 
@@ -214,10 +214,10 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       {visibleRuns.length > 0 ? (
         <div className="run-table" role="table" aria-label="运行队列">
           <div className="run-table-head" role="row">
-            <span role="columnheader">Run</span>
+            <span role="columnheader">运行批次</span>
             <span role="columnheader">状态</span>
             <span role="columnheader">阶段进度</span>
-            <span role="columnheader">Provider</span>
+            <span role="columnheader">模型提供商</span>
             <span role="columnheader">风险与动作</span>
             <span role="columnheader">操作</span>
           </div>

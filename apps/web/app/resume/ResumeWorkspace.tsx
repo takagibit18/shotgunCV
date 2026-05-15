@@ -73,10 +73,10 @@ export function ResumeWorkspace({ rows }: { rows: ResumeWorkspaceRow[] }) {
   if (rows.length === 0) {
     return (
       <section className="empty-state">
-        <h3>暂无简历优化 run</h3>
-        <p>先创建草稿 run，完成 pipeline 后这里会展示版本摘要、证据约束和投递前检查。</p>
+      <h3>暂无简历优化运行</h3>
+      <p>先创建投递草稿，完成本地流程后这里会展示版本摘要、证据约束和投递前检查。</p>
         <Link href="/upload" className="primary-link">
-          创建草稿 run
+          创建投递草稿
         </Link>
       </section>
     );
@@ -89,8 +89,8 @@ export function ResumeWorkspace({ rows }: { rows: ResumeWorkspaceRow[] }) {
           <span>搜索</span>
           <input
             value={filters.query}
-            placeholder="搜索版本名、run、摘要"
-            aria-label="搜索版本名、run、摘要"
+            placeholder="搜索版本名、运行批次、摘要"
+            aria-label="搜索版本名、运行批次、摘要"
             onChange={(e) => setFilters((c) => ({ ...c, query: e.currentTarget.value }))}
           />
         </label>
@@ -118,7 +118,7 @@ export function ResumeWorkspace({ rows }: { rows: ResumeWorkspaceRow[] }) {
           >
             <option value="all">全部来源</option>
             <option value="v0.5.7">v0.5.7</option>
-            <option value="legacy">legacy</option>
+            <option value="legacy">历史产物</option>
           </select>
         </label>
         <label className="control-field">
@@ -160,7 +160,7 @@ export function ResumeWorkspace({ rows }: { rows: ResumeWorkspaceRow[] }) {
           </button>
         </div>
       ) : (
-        <section className="resume-workspace" aria-label="简历优化 run 列表">
+        <section className="resume-workspace" aria-label="简历优化运行列表">
           {filtered.map((row) => (
             <ResumeWorkspaceCard key={row.runId} row={row} />
           ))}
@@ -182,7 +182,7 @@ function ResumeWorkspaceCard({ row }: { row: ResumeWorkspaceRow }) {
           <div className="resume-card-eyebrow">
             <span className={buildStatusChip(row.status)}>{formatStatus(row.status)}</span>
             {row.artifactMode === "legacy" ? (
-              <span className="pill legacy-tag">legacy</span>
+                <span className="pill legacy-tag">历史产物</span>
             ) : null}
           </div>
           <h2>{row.label}</h2>
@@ -205,7 +205,7 @@ function ResumeWorkspaceCard({ row }: { row: ResumeWorkspaceRow }) {
       </div>
 
       {isEmpty ? (
-        <p className="muted">当前 artifact 未提供该类条目。</p>
+        <p className="muted">当前本地产物未提供该类条目。</p>
       ) : (
         <div className="resume-card-grid">
           <div className="resume-info-block">
@@ -228,7 +228,7 @@ function ResumeWorkspaceCard({ row }: { row: ResumeWorkspaceRow }) {
                 </div>
               </>
             ) : (
-              <p className="muted">当前 artifact 未提供该类条目。</p>
+              <p className="muted">当前本地产物未提供该类条目。</p>
             )}
           </div>
 
@@ -253,7 +253,7 @@ function ResumeWorkspaceCard({ row }: { row: ResumeWorkspaceRow }) {
                 />
               </>
             ) : (
-              <p className="muted">当前 artifact 未提供该类条目。</p>
+              <p className="muted">当前本地产物未提供该类条目。</p>
             )}
           </div>
 
@@ -273,7 +273,7 @@ function ResumeWorkspaceCard({ row }: { row: ResumeWorkspaceRow }) {
                 ))}
               </div>
             ) : (
-              <p className="muted">当前 artifact 未提供该类条目。</p>
+              <p className="muted">当前本地产物未提供该类条目。</p>
             )}
           </div>
 
@@ -284,7 +284,7 @@ function ResumeWorkspaceCard({ row }: { row: ResumeWorkspaceRow }) {
             </div>
             <dl className="settings-list compact">
               <div>
-                <dt>Gate</dt>
+                    <dt>门槛</dt>
                 <dd>{formatGateStatus(row.preflightStatus)}</dd>
               </div>
               <div>
@@ -334,7 +334,7 @@ function BoundarySection({ title, items }: { title: string; items: string[] }) {
           ))}
         </ul>
       ) : (
-        <p className="muted">当前 artifact 未提供该类条目。</p>
+        <p className="muted">当前本地产物未提供该类条目。</p>
       )}
     </div>
   );

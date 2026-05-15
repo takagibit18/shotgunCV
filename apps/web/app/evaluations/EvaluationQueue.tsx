@@ -57,19 +57,19 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           <FilterLabel icon="search" text="搜索" />
           <input
             value={filters.query}
-            placeholder="搜索 JD、run、证据、风险、建议"
-            aria-label="搜索 JD、run、证据、风险、建议"
+            placeholder="搜索岗位、运行批次、证据、风险、建议"
+            aria-label="搜索岗位、运行批次、证据、风险、建议"
             onChange={(event) => setFilters((current) => ({ ...current, query: event.currentTarget.value }))}
           />
         </label>
         <label className="control-field">
-          <FilterLabel icon="shield-check" text="Gate" />
+          <FilterLabel icon="shield-check" text="门槛" />
           <select
             value={filters.gate}
-            aria-label="Gate 筛选"
+            aria-label="门槛筛选"
             onChange={(event) => setFilters((current) => ({ ...current, gate: event.currentTarget.value }))}
           >
-            <option value="all">全部 gate</option>
+            <option value="all">全部门槛</option>
             <option value="pass">通过</option>
             <option value="needs_review">需复核</option>
             <option value="blocked">阻断</option>
@@ -105,13 +105,13 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           </select>
         </label>
         <label className="control-field">
-          <FilterLabel icon="model" text="Provider" />
+          <FilterLabel icon="model" text="模型" />
           <select
             value={filters.provider}
-            aria-label="Provider 筛选"
+            aria-label="模型筛选"
             onChange={(event) => setFilters((current) => ({ ...current, provider: event.currentTarget.value }))}
           >
-            <option value="all">全部 provider</option>
+            <option value="all">全部模型</option>
             {providerOptions.map((provider) => (
               <option key={provider} value={provider}>
                 {provider}
@@ -157,7 +157,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
       {results.length === 0 ? (
         <div className="empty-state">
           <h3>暂无评估结果</h3>
-          <p>等待 run 完成 evaluate 阶段后，这里会按 JD 聚合评分、gate、风险和投递建议。</p>
+          <p>等待运行批次完成评估阶段后，这里会按岗位聚合评分、门槛、风险和投递建议。</p>
           <Link href="/" className="primary-link">
             返回运行队列
           </Link>
@@ -168,10 +168,10 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
         <div className="empty-state">
           <h3>没有匹配的评估结果</h3>
           <p>
-            当前筛选：{filters.gate !== "all" ? `Gate=${filters.gate} ` : ""}
+          当前筛选：{filters.gate !== "all" ? `门槛=${formatGateStatus(filters.gate)} ` : ""}
             {filters.risk !== "all" ? `风险=${filters.risk} ` : ""}
             {filters.score !== "all" ? `分数=${filters.score} ` : ""}
-            {filters.provider !== "all" ? `Provider=${filters.provider} ` : ""}
+          {filters.provider !== "all" ? `模型=${filters.provider} ` : ""}
             {filters.decision !== "all" ? `建议=${filters.decision} ` : ""}
             {filters.query ? `搜索="${filters.query}" ` : ""}
           </p>
@@ -194,15 +194,15 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
       {riskInPage ? (
         <div className="eval-risk-banner" role="alert">
           <Icon name="shield-alert" />
-          当前页面存在高风险或需复核的 gate 岗位，建议优先处理。
+          当前页面存在高风险或需复核的岗位，建议优先处理。
         </div>
       ) : null}
 
       {visibleResults.length > 0 ? (
         <div className="evaluation-table" role="table" aria-label="岗位评估队列">
           <div className="evaluation-table-head" role="row">
-            <span role="columnheader">岗位/JD</span>
-            <span role="columnheader">Gate / 投递建议</span>
+            <span role="columnheader">岗位</span>
+            <span role="columnheader">门槛 / 投递建议</span>
             <span role="columnheader">评分矩阵</span>
             <span role="columnheader">证据与风险</span>
             <span role="columnheader">操作</span>
@@ -223,7 +223,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
                   <Icon name="briefcase" />
                   投递建议：{formatDecision(item.applyDecision)}
                 </span>
-                {item.artifactMode === "legacy" ? <span className="pill">legacy</span> : null}
+                {item.artifactMode === "legacy" ? <span className="pill">历史产物</span> : null}
                 {item.gateReasons.length > 0 ? <p className="risk-line">{summarizeList(item.gateReasons)}</p> : null}
               </div>
               <div className="evaluation-score-cell" role="cell">

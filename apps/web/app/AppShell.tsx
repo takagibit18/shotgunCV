@@ -66,13 +66,13 @@ export function AppShell({ active, children, eyebrow = "", freshnessText = "本�
   return (
     <div className="app-frame">
       <aside className="app-sidebar" aria-label="主导航">
-        <Link href="/" className="sidebar-brand" aria-label="AI Resume Ops 工作台">
+        <Link href="/" className="sidebar-brand" aria-label="智能简历工作台">
           <span className="brand-mark">
             <Icon name="ai" />
           </span>
           <span>
-            <strong>AI Resume Ops</strong>
-            <small>工作台</small>
+            <strong>智能简历工作台</strong>
+            <small></small>
           </span>
         </Link>
 
@@ -102,16 +102,16 @@ export function AppShell({ active, children, eyebrow = "", freshnessText = "本�
         <div className="sidebar-insight">
           <Icon name="sparkle" />
           <span>
-            <strong>AI 洞察</strong>
+            <strong>智能洞察</strong>
             <small>基于历史数据的智能建议</small>
           </span>
         </div>
 
         <div className="sidebar-user">
-          <span className="avatar-mark">N</span>
+          <span className="avatar-mark">本</span>
           <span>
-            <strong>Nemo Zhang</strong>
-            <small>产品负责人</small>
+            <strong>本地用户</strong>
+            <small>单用户工作台</small>
           </span>
         </div>
       </aside>

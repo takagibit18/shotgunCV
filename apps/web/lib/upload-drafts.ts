@@ -59,10 +59,10 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
   const jdFileDisplayNames = normalizeJdFileDisplayNames(input.jdFiles, input.jdFileDisplayNames ?? []);
   const jdTextEntries = normalizeJdTextEntries(input.jdTexts ?? [], input.jdTextDisplayNames ?? []);
   if (input.cvFiles.length === 0) {
-    throw new DraftCreationError("missing_cv", "At least one CV file is required.");
+    throw new DraftCreationError("missing_cv", "请至少上传一个简历文件。");
   }
   if (input.jdFiles.length === 0 && jdTextEntries.length === 0) {
-    throw new DraftCreationError("missing_jd", "At least one JD file is required.");
+    throw new DraftCreationError("missing_jd", "请至少提供一个岗位文件或岗位文本。");
   }
   [...input.cvFiles, ...input.jdFiles].forEach((file) => {
     validateUploadFile(file);
@@ -125,7 +125,7 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
     if (error instanceof DraftCreationError) {
       throw error;
     }
-    throw new DraftCreationError("write_failed", error instanceof Error ? error.message : "Failed to create draft run.");
+    throw new DraftCreationError("write_failed", error instanceof Error ? error.message : "创建投递草稿失败。");
   }
 }
 
@@ -150,7 +150,7 @@ function buildCandidateId(now: Date): string {
 async function reserveRunDirectory(runDir: string): Promise<void> {
   try {
     await stat(runDir);
-    throw new DraftCreationError("run_exists", "Run already exists.");
+    throw new DraftCreationError("run_exists", "该运行批次已存在。");
   } catch (error) {
     if (error instanceof DraftCreationError) {
       throw error;
@@ -228,14 +228,14 @@ async function writePastedJdTexts(
 
 function validateUploadFile(file: DraftFile): void {
   if (file.size === 0) {
-    throw new DraftCreationError("empty_file", `File ${file.name} is empty.`);
+    throw new DraftCreationError("empty_file", `文件 ${file.name} 为空。`);
   }
   if (file.size > MAX_FILE_BYTES) {
-    throw new DraftCreationError("file_too_large", `File ${file.name} exceeds the 10MB limit.`);
+    throw new DraftCreationError("file_too_large", `文件 ${file.name} 超过 10MB 限制。`);
   }
   const extension = path.extname(file.name).toLowerCase();
   if (!SUPPORTED_EXTENSIONS.has(extension)) {
-    throw new DraftCreationError("unsupported_file_type", `Unsupported file type: ${extension || "none"}.`);
+    throw new DraftCreationError("unsupported_file_type", `不支持的文件类型：${extension || "无扩展名"}。`);
   }
 }
 
@@ -244,7 +244,7 @@ function normalizeJdFileDisplayNames(files: DraftFile[], displayNames: string[])
   return files.map((file, index) => {
     const displayName = displayNames[index]?.trim() ?? "";
     if (!displayName) {
-      throw new DraftCreationError("missing_jd_display_name", `Display name is required for JD file ${file.name}.`);
+      throw new DraftCreationError("missing_jd_display_name", `请为岗位文件 ${file.name} 填写显示名称。`);
     }
     return displayName;
   });
@@ -260,7 +260,7 @@ function normalizeJdTextEntries(texts: string[], displayNames: string[]): { text
     }
     const displayName = displayNames[index]?.trim() ?? "";
     if (!displayName) {
-      throw new DraftCreationError("missing_jd_display_name", `Display name is required for pasted JD ${index + 1}.`);
+      throw new DraftCreationError("missing_jd_display_name", `请为第 ${index + 1} 段岗位文本填写显示名称。`);
     }
     entries.push({ text: normalizedText, displayName });
   });
@@ -271,7 +271,7 @@ function normalizeJdTextEntries(texts: string[], displayNames: string[]): { text
 function validatePastedJdText(entry: { text: string }, index: number): void {
   const size = Buffer.byteLength(entry.text, "utf-8");
   if (size > MAX_FILE_BYTES) {
-    throw new DraftCreationError("file_too_large", `Pasted JD ${index} exceeds the 10MB limit.`);
+    throw new DraftCreationError("file_too_large", `第 ${index} 段岗位文本超过 10MB 限制。`);
   }
 }
 
@@ -279,11 +279,11 @@ function validatePastedJdText(entry: { text: string }, index: number): void {
 function sanitizeFileName(name: string): string {
   const normalized = name.replaceAll("\\", "/");
   if (normalized.includes("/") || normalized.includes("..")) {
-    throw new DraftCreationError("unsafe_filename", "Uploaded filenames must not contain paths.");
+    throw new DraftCreationError("unsafe_filename", "上传文件名不能包含路径。");
   }
   const safeName = normalized.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!safeName) {
-    throw new DraftCreationError("unsafe_filename", "Uploaded filename is invalid.");
+    throw new DraftCreationError("unsafe_filename", "上传文件名无效。");
   }
   return safeName;
 }
@@ -306,7 +306,7 @@ function reserveUniqueFileName(name: string, usedNames: Set<string>): string {
 function assertInside(parent: string, child: string): void {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new DraftCreationError("unsafe_filename", "Resolved path escapes the configured runs directory.");
+    throw new DraftCreationError("unsafe_filename", "解析后的路径超出运行目录。");
   }
 }
 

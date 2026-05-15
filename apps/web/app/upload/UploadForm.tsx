@@ -154,14 +154,14 @@ export function UploadForm() {
     <div className="upload-workspace">
       <ol className="stepper" aria-label="草稿创建步骤">
         <li>1 候选人材料</li>
-        <li>2 JD 输入</li>
+        <li>2 岗位输入</li>
         <li>3 草稿确认</li>
       </ol>
       <form className="upload-form" onSubmit={handleSubmit}>
         <section className="upload-panel">
           <div className="upload-panel-heading">
             <div>
-              <p className="eyebrow">{"CV"}</p>
+              <p className="eyebrow">{"简历材料"}</p>
               <h3>{"候选人材料"}</h3>
             </div>
           </div>
@@ -190,15 +190,15 @@ export function UploadForm() {
               }}
             />
             <div>
-              <strong>{"将 CV 文件拖拽到此区域"}</strong>
+              <strong>{"将简历文件拖拽到此区域"}</strong>
               <p>{"拖拽到此处，或点击按钮选择文件；支持 PDF、Markdown、文本和图片文件。"}</p>
             </div>
             <label className="primary-link" htmlFor="cvFiles">
-              {"选择本地 CV 文件（可多选）"}
+              {"选择本地简历文件（可多选）"}
             </label>
           </div>
           {cvFiles.length > 0 ? (
-            <ul className="upload-file-list" aria-label="已选择 CV 文件">
+            <ul className="upload-file-list" aria-label="已选择简历文件">
               {cvFiles.map((entry, index) => (
                 <li key={entry.id}>
                   <div>
@@ -211,17 +211,17 @@ export function UploadForm() {
               ))}
             </ul>
           ) : (
-            <p className="upload-empty-hint">{"尚未选择 CV 或补充材料"}</p>
+            <p className="upload-empty-hint">{"尚未选择简历或补充材料"}</p>
           )}
         </section>
 
         <section className="upload-panel">
           <div className="upload-panel-heading">
             <div>
-              <p className="eyebrow">{"JD"}</p>
+              <p className="eyebrow">{"岗位描述"}</p>
               <h3>{"岗位信息"}</h3>
             </div>
-            <div className="upload-segment" aria-label="JD 输入方式">
+            <div className="upload-segment" aria-label="岗位输入方式">
               <button type="button" className={jdMode === "files" ? "active" : ""} onClick={() => setJdMode("files")}>
                 {"本地文件"}
               </button>
@@ -256,12 +256,12 @@ export function UploadForm() {
                 }}
               />
               <div>
-                <strong>{"将 JD 文件拖拽到此区域"}</strong>
+                <strong>{"将岗位文件拖拽到此区域"}</strong>
                 <p>{"拖拽到此处，或点击按钮选择文件；支持截图图片、PDF、Markdown 和文本文件。"}</p>
-                <p>{"每个 JD 都需要填写非空的公司/岗位显示名。"}</p>
+                <p>{"每个岗位都需要填写非空的公司/岗位显示名。"}</p>
               </div>
               <label className="primary-link" htmlFor="jdFiles">
-                {"选择本地 JD 文件（可多选）"}
+                {"选择本地岗位文件（可多选）"}
               </label>
             </div>
           ) : (
@@ -269,11 +269,11 @@ export function UploadForm() {
               {jdTexts.map((entry, index) => (
                 <div className="jd-text-entry" key={entry.id}>
                   <label className="field-label">
-                    <span>{`JD 文本 ${index + 1}`}</span>
+                    <span>{`岗位文本 ${index + 1}`}</span>
                     <input
                       name="jdTextDisplayNames"
                       value={entry.displayName}
-                      placeholder="公司/岗位显示名，例如 OpenAI - Product Manager"
+                      placeholder="公司/岗位显示名，例如：某公司 - 产品经理"
                       onChange={(event) => updateJdTextDisplayName(entry.id, event.currentTarget.value)}
                     />
                     <textarea
@@ -290,13 +290,13 @@ export function UploadForm() {
                 </div>
               ))}
               <button type="button" className="primary-link" onClick={addJdTextEntry}>
-                {"添加 JD 文本"}
+                {"添加岗位文本"}
               </button>
             </div>
           )}
 
           {jdFiles.length > 0 ? (
-            <ul className="upload-file-list" aria-label="已选择 JD 文件">
+            <ul className="upload-file-list" aria-label="已选择岗位文件">
               {jdFiles.map((entry, index) => (
                 <li key={entry.id}>
                   <div className="upload-file-item">
@@ -304,7 +304,7 @@ export function UploadForm() {
                     <input
                       name="jdFileDisplayNames"
                       value={entry.displayName}
-                      placeholder="公司/岗位显示名，例如 OpenAI - Product Manager"
+                      placeholder="公司/岗位显示名，例如：某公司 - 产品经理"
                       onChange={(event) => updateJdFileDisplayName(entry.id, event.currentTarget.value)}
                     />
                   </div>
@@ -315,7 +315,7 @@ export function UploadForm() {
               ))}
             </ul>
           ) : (
-            <p className="upload-empty-hint">{"尚未选择 JD 文件"}</p>
+            <p className="upload-empty-hint">{"尚未选择岗位文件"}</p>
           )}
         </section>
 
@@ -328,24 +328,24 @@ export function UploadForm() {
           </div>
           <div className="confirmation-summary" aria-label="草稿确认字段">
             <div className="confirmation-row">
-              <span className="confirmation-label">{"CV 文件"}</span>
+              <span className="confirmation-label">{"简历文件"}</span>
               <span className="confirmation-value">
                 <strong>{cvFiles.length > 0 ? `${cvFiles.length} 个` : "待选择"}</strong>
                 <span className="confirmation-hint">{" · 必须至少 1 个"}</span>
               </span>
             </div>
             <div className="confirmation-row">
-              <span className="confirmation-label">{"JD 输入"}</span>
+              <span className="confirmation-label">{"岗位输入"}</span>
               <span className="confirmation-value">
                 <strong>{jdMode === "files" ? `${jdFiles.length} 个文件` : `${jdTexts.filter((entry) => entry.value.trim()).length} 条文本`}</strong>
-                <span className="confirmation-hint">{" · 每个 JD 需要显示名"}</span>
+                <span className="confirmation-hint">{" · 每个岗位需要显示名"}</span>
               </span>
             </div>
           </div>
         </section>
 
         <button className="primary-link" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "正在创建草稿" : "创建草稿 run"}
+          {isSubmitting ? "正在创建草稿" : "创建投递草稿"}
         </button>
       </form>
 

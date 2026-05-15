@@ -84,7 +84,7 @@ describe("run viewer data loading", () => {
     expect(detail.analyzerProvider).toBe("unknown");
     expect(detail.completedStages).toEqual(["report"]);
     expect(html).toContain("artifact-only");
-    expect(html).toContain("Run status");
+    expect(html).toContain("运行状态");
   });
 
   it("renders legacy partial run with downstream artifacts but no config or analyze output", async () => {
@@ -144,7 +144,7 @@ describe("run viewer data loading", () => {
 
     expect(html).toContain("legacy-partial");
     expect(html).toContain("Legacy role");
-    expect(html).toContain("Run status");
+    expect(html).toContain("运行状态");
   });
 
   it("renders run detail when one optional artifact contains malformed json", async () => {
@@ -819,10 +819,10 @@ describe("run viewer data loading", () => {
   });
 
   it("exposes stable draft creation errors", async () => {
-    const error = new DraftCreationError("missing_jd", "At least one JD file is required.");
+    const error = new DraftCreationError("missing_jd", "请至少提供一个岗位文件或岗位文本。");
 
     expect(error.code).toBe("missing_jd");
-    expect(error.message).toBe("At least one JD file is required.");
+    expect(error.message).toBe("请至少提供一个岗位文件或岗位文本。");
   });
 });
 
@@ -839,7 +839,7 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await HomePage());
 
-    expect(html).toContain("AI Resume Ops 工作台");
+    expect(html).toContain("智能简历工作台");
     expect(html).toContain("demo");
     expect(html).toContain("导入");
   });
@@ -851,7 +851,7 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await HomePage());
 
-    expect(html).toContain("AI Resume Ops 工作台");
+    expect(html).toContain("智能简历工作台");
     expect(html).toContain("仪表盘");
     expect(html).toContain("简历优化");
     expect(html).toContain("运行队列");
@@ -862,11 +862,11 @@ describe("run viewer pages", () => {
     expect(html).not.toContain("模板库");
     expect(html).not.toContain("sidebar-nav-item disabled");
     expect(html).toContain("近期活动");
-    expect(html).toContain("AI 洞察");
-    expect(html).toContain("搜索 run、标签、provider");
+    expect(html).toContain("智能洞察");
+    expect(html).toContain("搜索运行批次、标签、模型");
     expect(html).toContain("状态筛选");
     expect(html).toContain("阶段筛选");
-    expect(html).toContain("Provider 筛选");
+    expect(html).toContain("模型筛选");
     expect(html).toContain("排序");
     expect(html).toContain("operational-shell");
     expect(html).not.toContain("editorial-hero");
@@ -882,7 +882,7 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("/upload");
-    expect(html).toContain("创建草稿 run");
+    expect(html).toContain("创建投递草稿");
   });
 
   it("renders run pagination and trend summary for dense queues", async () => {
@@ -915,7 +915,7 @@ describe("run viewer pages", () => {
     const reportHtml = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
     const combinedHtml = [homeHtml, uploadHtml, runHtml, reportHtml].join("\n");
 
-    expect(combinedHtml).toContain("AI Resume Ops 工作台");
+    expect(combinedHtml).toContain("智能简历工作台");
     expect(combinedHtml).toContain("运行队列");
     expect(combinedHtml).toContain("返回运行列表");
     expect(combinedHtml).toContain("三步创建草稿");
@@ -1042,7 +1042,7 @@ describe("run viewer pages", () => {
     expect(html).not.toContain("仅创建草稿");
     expect(html).toContain("三步创建草稿");
     expect(html).toContain("1 候选人材料");
-    expect(html).toContain("2 JD 输入");
+    expect(html).toContain("2 岗位输入");
     expect(html).toContain("3 草稿确认");
     expect(html).not.toContain("candidateId");
     expect(html).not.toContain("name=\"label\"");
@@ -1051,10 +1051,10 @@ describe("run viewer pages", () => {
     expect(html).toContain("本地文件");
     expect(html).toContain("粘贴文本");
     expect(html).toContain("公司/岗位显示名");
-    expect(html).toContain("选择本地 CV 文件（可多选）");
-    expect(html).toContain("将 CV 文件拖拽到此区域");
-    expect(html).toContain("选择本地 JD 文件（可多选）");
-    expect(html).toContain("input_files/");
+    expect(html).toContain("选择本地简历文件（可多选）");
+    expect(html).toContain("将简历文件拖拽到此区域");
+    expect(html).toContain("选择本地岗位文件（可多选）");
+    expect(html).toContain("数据存储位置");
   });
 
   it("renders run detail page with incomplete-stage messaging", async () => {
@@ -1113,7 +1113,7 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-v057" }) }));
 
-    expect(html).toContain("Preflight gate");
+    expect(html).toContain("投递前门槛");
     expect(html).toContain("硬门槛审查");
     expect(html).toContain("真实匹配");
     expect(html).toContain("改写潜力");
@@ -1169,13 +1169,13 @@ describe("run viewer pages", () => {
     expect(html).toContain("关键证据");
     expect(html).toContain("面试前突击内容");
     expect(html).toContain("决策摘要");
-    expect(html).toContain("推荐 JD");
+    expect(html).toContain("推荐岗位");
     expect(html).toContain("引用 / 来源依据");
-    expect(html).toContain("原始 Markdown 报告");
+    expect(html).toContain("原始报告");
     expect(html).toContain("report-source-panel");
     expect(html).toContain("来源：");
     expect(html).toContain("报告目录");
-    expect(html).toContain("推荐 JD");
+    expect(html).toContain("推荐岗位");
     expect(html).toContain("离线评估指标");
     expect(html).not.toContain("主要风险");
   });
@@ -1260,7 +1260,7 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("岗位评估队列");
     expect(html).toContain("总评估");
-    expect(html).toContain("需复核 Gate");
+    expect(html).toContain("需复核门槛");
     expect(html).toContain("高风险岗位");
     expect(html).toContain("历史产物");
     expect(html).toContain("投递建议");
@@ -1284,7 +1284,7 @@ describe("run viewer pages", () => {
 
     expect(results).toEqual([]);
     expect(html).toContain("暂无评估结果");
-    expect(html).toContain("等待 run 完成 evaluate 阶段");
+    expect(html).toContain("等待运行批次完成评估阶段");
   });
 
   it("renders evaluation pagination and score trend summary for dense JD queues", async () => {
@@ -1327,12 +1327,12 @@ describe("run viewer pages", () => {
       safeRewriteItems: ["Keep education and employer facts unchanged."],
       simulatedSupplementItems: ["待核实模拟补强：风控项目复盘"],
       forbiddenGapItems: ["Do not fabricate certificates."],
-      sourceLabel: "来源：variant",
+      sourceLabel: "来源：简历版本",
     });
     expect(workspace.rows[0].constraints[0]).toMatchObject({
       category: "可安全改写",
       requirementText: "本科及以上学历，计算机相关专业",
-      sourceLabel: "来源：requirement matrix / preflight gate",
+      sourceLabel: "来源：证据矩阵 / 投递前门槛",
     });
     expect(workspace.rows[1]).toMatchObject({
       runId: "resume-legacy",
@@ -1349,15 +1349,15 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await ResumePage());
 
     expect(html).toContain("简历优化");
-    expect(html).toContain("创建草稿 run");
+    expect(html).toContain("创建投递草稿");
     expect(html).toContain('href="/upload"');
     expect(html).toContain("岗位定制版本（jd-001）");
     expect(html).toContain("可安全改写");
     expect(html).toContain("待核实模拟补强");
     expect(html).toContain("禁止编造缺口");
-    expect(html).toContain("来源：variant");
-    expect(html).toContain("来源：requirement matrix / preflight gate");
-    expect(html).toContain("来源：strategy / status");
+    expect(html).toContain("来源：简历版本");
+    expect(html).toContain("来源：证据矩阵 / 投递前门槛");
+    expect(html).toContain("来源：投递策略 / 运行状态");
     expect(html).not.toContain("resume text");
     expect(html).not.toContain("jd text");
   });
@@ -1422,14 +1422,14 @@ describe("run viewer pages", () => {
       configSnapshotCount: 0,
       configIssueCount: 0,
     });
-    expect(emptyHtml).toContain("暂无 run");
+    expect(emptyHtml).toContain("暂无运行批次");
 
     process.env.SHOTGUNCV_RUNS_DIR = path.join(emptyRunsDir, "missing-runs-root");
     const missingOverview = await loadSettingsOverview();
     const missingHtml = renderToStaticMarkup(await SettingsPage());
 
     expect(missingOverview.runsDirReadable).toBe(false);
-    expect(missingHtml).toContain("runs 目录不可读");
+    expect(missingHtml).toContain("运行目录不可读");
   });
 
   it("surfaces missing config, malformed json artifacts, and unknown providers in settings", async () => {
@@ -1453,7 +1453,7 @@ describe("run viewer pages", () => {
     expect(overview.configIssueCount).toBeGreaterThanOrEqual(1);
     expect(overview.artifactIssueCount).toBeGreaterThanOrEqual(1);
     expect(html).toContain("配置缺失或异常");
-    expect(html).toContain("artifact 解析异常");
+    expect(html).toContain("产物解析异常");
     expect(html).toContain("unknown-provider");
     expect(html).toContain("unknown");
     expect(html).not.toContain("jd text");
@@ -1523,10 +1523,10 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await SettingsPage());
 
     expect(html).toContain("本地模型配置");
-    expect(html).toContain("API key 与模型运行参数");
+    expect(html).toContain("密钥与模型运行参数");
     expect(html).toContain("环境健康");
     expect(html).toContain(".env 边界");
-    expect(html).toContain("API key 状态");
+    expect(html).toContain("密钥状态");
     expect(html).toContain("local-config-field-with-icon");
     expect(html).toContain("已配置 · ****7777");
     expect(html).toContain("api.openai.com");
