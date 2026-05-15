@@ -359,20 +359,28 @@ export function UploadForm() {
 
       {result ? (
         <div className="upload-result" role="status">
-          <h3>{result.runId}</h3>
+          <h3>草稿已创建</h3>
+          <p>草稿已创建，点击下方按钮进入详情页运行。</p>
           <div className="row-actions">
             <a className="primary-link" href={`/runs/${result.runId}`}>
-              {"打开草稿详情"}
+              {"进入详情页"}
             </a>
             <a className="secondary-link" href="/">
               {"返回运行队列"}
             </a>
           </div>
           <p>
-            {"草稿 manifest："}
+            {"运行批次："}
+            <span className="mono">{result.runId}</span>
+          </p>
+          <p>
+            {"上传清单："}
             <span className="mono">{result.uploadManifestPath}</span>
           </p>
-          <pre className="command-block">{result.nextCommand}</pre>
+          <details className="advanced-command">
+            <summary>高级 / CLI 命令</summary>
+            <pre className="command-block">{result.nextCommand}</pre>
+          </details>
         </div>
       ) : null}
 

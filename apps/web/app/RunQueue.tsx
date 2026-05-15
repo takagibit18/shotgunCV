@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { STAGE_LABELS, STATUS_LABELS } from "../lib/labels";
 import type { RunSummary } from "../lib/runs";
 import { Icon } from "./AppShell";
 
@@ -14,24 +15,6 @@ type RunListFilterState = {
 };
 
 type RunSortKey = "recent" | "progress" | "status" | "label";
-
-const STAGE_LABELS: Record<string, string> = {
-  ingest: "导入",
-  analyze: "分析",
-  generate: "生成",
-  evaluate: "评估",
-  plan: "计划",
-  report: "报告",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  queued: "排队中",
-  running: "运行中",
-  done: "已完成",
-  failed: "失败",
-  "ingest-ready": "导入就绪",
-};
 
 const PAGE_SIZE = 10;
 

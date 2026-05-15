@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 
 import { AppShell } from "../../AppShell";
+import { STAGE_LABELS, STATUS_LABELS } from "../../../lib/labels";
 import { loadRunDetail } from "../../../lib/runs";
 import { RunActionPanel } from "./RunActionPanel";
 import { ScoreMatrixRow } from "./ScoreMatrixRow";
@@ -10,25 +11,6 @@ import { ScoreMatrixRow } from "./ScoreMatrixRow";
 type PageProps = {
   params: Promise<{ runId: string }>;
 };
-
-const STAGE_LABELS: Record<string, string> = {
-  ingest: "导入",
-  analyze: "分析",
-  generate: "生成",
-  evaluate: "评估",
-  plan: "计划",
-  report: "报告",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  queued: "排队中",
-  running: "运行中",
-  done: "已完成",
-  failed: "失败",
-  "ingest-ready": "导入就绪",
-};
-
 
 export default async function RunPage({ params }: PageProps) {
   const resolvedParams = await params;
@@ -213,7 +195,10 @@ export default async function RunPage({ params }: PageProps) {
             <article className="detail-card">
             <h3>{"下一步操作"}</h3>
             <p>{"网页可以创建和管理本地草稿。确认输入后可在页面启动本地流程；高级排查时也可以在本机执行："}</p>
-              <pre className="command-block">{detail.draft.nextCommand}</pre>
+              <details className="advanced-command">
+                <summary>高级 / CLI 命令</summary>
+                <pre className="command-block">{detail.draft.nextCommand}</pre>
+              </details>
             </article>
           </div>
         </section>

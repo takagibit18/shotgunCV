@@ -1,24 +1,11 @@
+import { FILTER_STATUS_LABELS, STATUS_LABELS } from "../../lib/labels";
+
 export function formatStatus(status: string): string {
-  const labels: Record<string, string> = {
-    draft: "草稿",
-    queued: "排队中",
-    running: "运行中",
-    done: "已完成",
-    failed: "失败",
-    "ingest-ready": "导入就绪",
-  };
-  return labels[status] ?? status;
+  return STATUS_LABELS[status] ?? status;
 }
 
 export function formatFilterStatus(status: string): string {
-  const labels: Record<string, string> = {
-    draft: "草稿",
-    queued: "排队中",
-    running: "运行中",
-    done: "已完成",
-    failed: "失败",
-  };
-  return labels[status] ?? status;
+  return FILTER_STATUS_LABELS[status] ?? status;
 }
 
 export function formatGateStatus(status: string): string {

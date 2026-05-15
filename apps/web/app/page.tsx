@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 
+import { STATUS_LABELS } from "../lib/labels";
 import { listRuns, type RunSummary } from "../lib/runs";
 import { AppShell, Icon } from "./AppShell";
 import { RunQueue } from "./RunQueue";
@@ -120,15 +121,6 @@ function TrendMetric({ label, value, tone }: { label: string; value: number | st
     </div>
   );
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  queued: "排队中",
-  running: "运行中",
-  done: "已完成",
-  failed: "失败",
-  "ingest-ready": "导入就绪",
-};
 
 function MetricTile({
   value,

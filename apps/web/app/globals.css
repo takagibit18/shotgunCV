@@ -457,6 +457,18 @@ p {
   text-align: left;
 }
 
+.advanced-command {
+  display: grid;
+  gap: 10px;
+}
+
+.advanced-command summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .detail-header {
   grid-template-columns: minmax(0, 1fr) minmax(250px, 340px);
 }
