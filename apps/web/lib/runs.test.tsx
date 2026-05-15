@@ -842,6 +842,8 @@ describe("run viewer pages", () => {
     expect(html).toContain("智能简历工作台");
     expect(html).toContain("demo");
     expect(html).toContain("导入");
+    expect(html).toContain("开始新投递");
+    expect(html).toContain('href="/upload"');
   });
 
   it("renders the v0.6 operational run workspace language and controls", async () => {
@@ -882,6 +884,8 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("/upload");
+    expect(html).toContain("开始新投递");
+    expect(html).toContain("开始您的第一次投递");
     expect(html).toContain("创建投递草稿");
   });
 

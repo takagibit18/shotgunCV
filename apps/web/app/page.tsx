@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 
 import { listRuns, type RunSummary } from "../lib/runs";
 import { AppShell, Icon } from "./AppShell";
@@ -16,10 +17,14 @@ export default async function HomePage() {
   return (
     <AppShell active="dashboard" eyebrow="仪表盘">
       <main className="app-shell operational-shell">
-        <section className="page-header">
+        <section className="page-header with-actions dashboard-header">
           <div>
             <h1>运行队列</h1>
           </div>
+          <Link href="/upload" className="primary-link dashboard-primary-cta icon-link">
+            <Icon name="play" />
+            开始新投递
+          </Link>
         </section>
 
         <div className="workspace-grid">
@@ -79,13 +84,23 @@ export default async function HomePage() {
                   </div>
                 </div>
                 <div className="recommendation-list">
-                  <div className={buildPrimaryInsight(runs)!.tone}>
-                    <Icon name="sparkle" />
-                    <div>
-                      <strong>{buildPrimaryInsight(runs)!.title}</strong>
-                      <p>{buildPrimaryInsight(runs)!.reason}</p>
+                  {runs.length === 0 ? (
+                    <Link href="/upload" className="recommendation-item safe dashboard-first-run-card">
+                      <Icon name="play" />
+                      <div>
+                        <strong>开始您的第一次投递</strong>
+                        <p>上传简历和岗位信息，创建投递草稿后即可在详情页启动本地流程。</p>
+                      </div>
+                    </Link>
+                  ) : (
+                    <div className={buildPrimaryInsight(runs)!.tone}>
+                      <Icon name="sparkle" />
+                      <div>
+                        <strong>{buildPrimaryInsight(runs)!.title}</strong>
+                        <p>{buildPrimaryInsight(runs)!.reason}</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </section>
             ) : null}
