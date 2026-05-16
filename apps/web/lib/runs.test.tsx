@@ -1184,6 +1184,55 @@ describe("run viewer pages", () => {
     expect(html).not.toContain("主要风险");
   });
 
+  it("renders legacy report and score rows when optional summary arrays are missing", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "legacy-summary-arrays");
+    const runDir = path.join(runsDir, "legacy-summary-arrays");
+    await writeJson(path.join(runDir, "evaluate", "ranking_explanations.json"), [
+      {
+        jd_id: "jd-001",
+        variant_id: "variant-jd-jd-001",
+        ranking_version: "legacy",
+        dimension_reasons: { overall: "旧版解释只提供总述。" },
+        decision_summary: "旧版摘要",
+      },
+    ]);
+    await writeJson(path.join(runDir, "evaluate", "gap_maps.json"), [
+      {
+        jd_id: "jd-001",
+        candidate_id: "cand-001",
+        items: [
+          {
+            area: "Legacy gap",
+            current_state: "partial",
+            target_state: "ready",
+            priority: "medium",
+          },
+        ],
+      },
+    ]);
+    await writeJson(path.join(runDir, "plan", "application_strategies.json"), [
+      {
+        jd_id: "jd-001",
+        recommended_variant_id: "variant-jd-jd-001",
+        priority_rank: 1,
+        apply_decision: "apply",
+        needs_jd_specific_variant: true,
+        decision_confidence: 0.5,
+        resume_revision_tasks: [],
+      },
+    ]);
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const runHtml = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "legacy-summary-arrays" }) }));
+    const reportHtml = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "legacy-summary-arrays" }) }));
+
+    expect(runHtml).toContain("投递建议");
+    expect(reportHtml).toContain("投递决策摘要");
+    expect(reportHtml).toContain("投递决策：apply");
+    expect(`${runHtml}\n${reportHtml}`).not.toContain("undefined");
+  });
+
   it("aggregates v0.5.7 evaluation results as JD-level review rows", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });

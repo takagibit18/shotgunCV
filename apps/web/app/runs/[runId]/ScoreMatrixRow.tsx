@@ -45,12 +45,19 @@ export function ScoreMatrixRow({
     { key: "evidence", label: "证据覆盖", value: scorecard?.evidence_score },
   ];
   const riskScore = toPercent(scorecard?.risk_score ?? scorecard?.gap_risk_score ?? 0);
-  const signals = explanation?.positive_signals.length ? explanation.positive_signals : topReasons;
-  const risks = explanation?.risk_flags ?? [];
-  const evidenceRefs = explanation?.evidence_refs ?? [];
+  const positiveSignals = toStringArray(explanation?.positive_signals);
+  const signals = positiveSignals.length ? positiveSignals : topReasons;
+  const risks = toStringArray(explanation?.risk_flags);
+  const evidenceRefs = toStringArray(explanation?.evidence_refs);
   const evidenceCount = evidenceRefs.length;
   const primaryRisk = risks[0] ?? null;
-  const suggestedAction = strategy?.recommended_actions?.[0] ?? null;
+  const decisionDrivers = toStringArray(strategy?.decision_drivers);
+  const recommendedActions = toStringArray(strategy?.recommended_actions);
+  const suggestedAction = recommendedActions[0] ?? null;
+  const overallReason =
+    explanation?.dimension_reasons && typeof explanation.dimension_reasons.overall === "string"
+      ? explanation.dimension_reasons.overall
+      : "";
 
   return (
     <article className="matrix-row" id={`evaluation-${jdId}`}>
@@ -80,7 +87,7 @@ export function ScoreMatrixRow({
         <div className="matrix-action-strip">
           <div className="action-strip-col">
             <h5>适配度</h5>
-            <p>{explanation?.dimension_reasons.overall?.slice(0, 120) ?? "当前运行未生成评估解释文件，评分矩阵使用评分快照降级展示。"}</p>
+            <p>{overallReason.slice(0, 120) || "当前运行未生成评估解释文件，评分矩阵使用评分快照降级展示。"}</p>
           </div>
           <div className="action-strip-col">
             <h5>风险提示</h5>
@@ -133,15 +140,15 @@ export function ScoreMatrixRow({
               ))}
             </ul>
           </div>
-          {strategy?.decision_drivers?.length ? (
+          {decisionDrivers.length ? (
             <div className="matrix-action-strip">
               <div className="action-strip-col">
                 <h5>决策驱动</h5>
-                <p>{strategy.decision_drivers.slice(0, 3).join(" / ")}</p>
+                <p>{decisionDrivers.slice(0, 3).join(" / ")}</p>
               </div>
               <div className="action-strip-col">
                 <h5>建议动作</h5>
-                <p>{(strategy.recommended_actions ?? []).slice(0, 3).join(" / ") || "--"}</p>
+                <p>{recommendedActions.slice(0, 3).join(" / ") || "--"}</p>
               </div>
             </div>
           ) : null}
@@ -149,6 +156,11 @@ export function ScoreMatrixRow({
       </div>
     </article>
   );
+}
+
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }
 
 

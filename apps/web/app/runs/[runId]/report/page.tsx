@@ -156,6 +156,8 @@ function buildReportSummary(detail: DetailForReport) {
   const topGapMap = topVariant
     ? detail.evaluate.gapMaps.find((gapMap) => gapMap.jd_id === topVariant.jdId)
     : detail.evaluate.gapMaps[0];
+  const gapItems = Array.isArray(topGapMap?.items) ? topGapMap.items : [];
+  const strategyReason = topStrategy?.reason_summary ? `。${topStrategy.reason_summary}` : "";
 
   return {
     topTitle: topVariant?.title ?? topStrategy?.jd_id ?? "暂无推荐岗位",
@@ -171,25 +173,34 @@ function buildReportSummary(detail: DetailForReport) {
       topVariant
         ? { text: `优先投递 ${topVariant.title}，综合得分 ${Math.round(topVariant.overallScore * 100)}%。`, source: "评分产物" }
         : null,
-      topStrategy ? { text: `投递决策：${topStrategy.apply_decision}。${topStrategy.reason_summary}`, source: "策略产物" } : null,
+      topStrategy ? { text: `投递决策：${topStrategy.apply_decision}${strategyReason}`, source: "策略产物" } : null,
     ]),
     evidence: uniqueItems([
-      ...(topExplanation?.evidence_refs.map((text) => ({ text, source: "证据引用" })) ?? []),
-      ...(topExplanation?.positive_signals.map((text) => ({ text, source: "正向信号" })) ?? []),
-      ...(topStrategy?.decision_drivers.map((text) => ({ text, source: "决策依据" })) ?? []),
-      ...(topVariant?.topReasons.map((text) => ({ text, source: "评估摘要" })) ?? []),
+      ...toSummaryItems(topExplanation?.evidence_refs, "证据引用"),
+      ...toSummaryItems(topExplanation?.positive_signals, "正向信号"),
+      ...toSummaryItems(topStrategy?.decision_drivers, "决策依据"),
+      ...toSummaryItems(topVariant?.topReasons, "评估摘要"),
     ]),
     interviewPrep: uniqueItems([
-      ...(topStrategy?.catch_up_notes.map((text) => ({ text, source: "补强建议" })) ?? []),
-      ...(topStrategy?.interview_prep_points.map((text) => ({ text, source: "面试准备" })) ?? []),
-      ...(topStrategy?.recommended_actions.map((text) => ({ text, source: "推荐动作" })) ?? []),
-      ...(topGapMap?.items.flatMap((item) => [
-        ...item.catch_up_concepts.map((text) => ({ text, source: "补强概念" })),
-        ...item.weak_points.map((text) => ({ text, source: "薄弱点" })),
-      ]) ?? []),
-      ...(topExplanation?.risk_flags.map((text) => ({ text, source: "风险标记" })) ?? []),
+      ...toSummaryItems(topStrategy?.catch_up_notes, "补强建议"),
+      ...toSummaryItems(topStrategy?.interview_prep_points, "面试准备"),
+      ...toSummaryItems(topStrategy?.recommended_actions, "推荐动作"),
+      ...gapItems.flatMap((item) => [
+        ...toSummaryItems(item.catch_up_concepts, "补强概念"),
+        ...toSummaryItems(item.weak_points, "薄弱点"),
+      ]),
+      ...toSummaryItems(topExplanation?.risk_flags, "风险标记"),
     ]),
   };
+}
+
+
+function toSummaryItems(value: unknown, source: string): SummaryItem[] {
+  return Array.isArray(value)
+    ? value
+        .filter((text): text is string => typeof text === "string" && text.trim().length > 0)
+        .map((text) => ({ text, source }))
+    : [];
 }
 
 
