@@ -17,7 +17,8 @@
       "PowerShell(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\packages\\\\ts-shared\\\\src\" -Recurse -File | ForEach-Object { $_.FullName.Replace\\(\"e:\\\\PycharmProjects\\\\jobPilot\\\\packages\\\\ts-shared\\\\src\\\\\", \"\"\\) })",
       "Bash(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\" -Depth 2)",
       "Bash(Select-Object Name, FullName)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git -C \"e:/PycharmProjects/jobPilot\" log --oneline --all -- \"apps/web/**\")"
     ]
   }
 }

@@ -73,7 +73,7 @@ export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
         safeRewriteItems: variant.safe_rewrites ?? [],
         simulatedSupplementItems: variant.simulated_supplements ?? [],
         forbiddenGapItems: variant.forbidden_gaps ?? [],
-        sourceLabel: "来源：variant",
+        sourceLabel: "来源：简历版本",
       }));
       const constraints = buildConstraints(detail.requirementMatrix, detail.preflightGates);
       const preflightStatus = summarizePreflightStatus(detail.preflightGates);
@@ -106,7 +106,7 @@ export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
         uploadHref: "/upload",
         variants,
         constraints,
-        sourceLabel: "来源：strategy / status",
+        sourceLabel: "来源：投递策略 / 运行状态",
       };
     }),
   );
@@ -147,7 +147,7 @@ function buildConstraints(
       evidenceRefs: item.evidence_refs,
       gateStatus: gate?.status ?? "legacy",
       gateReasons: gate?.reasons ?? [],
-      sourceLabel: "来源：requirement matrix / preflight gate",
+      sourceLabel: "来源：证据矩阵 / 投递前门槛",
     };
   });
 }
@@ -181,13 +181,13 @@ function summarizePreflightStatus(gates: PreflightGate[]): string {
 
 function buildNextAction(status: string, completedStageCount: number, preflightStatus: string): string {
   if (status === "draft") {
-    return "进入详情页运行 pipeline";
+    return "进入详情页运行本地流程";
   }
   if (status === "failed") {
     return "处理失败后重试或续跑";
   }
   if (status === "running" || status === "queued") {
-    return "等待 pipeline 完成";
+    return "等待本地流程完成";
   }
   if (preflightStatus === "blocked" || preflightStatus === "needs_review") {
     return "先补证据再投递";

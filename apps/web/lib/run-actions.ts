@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getRunsDir } from "./runs";
@@ -7,7 +7,15 @@ import type { RunConfig, RunStatusFile, UploadManifest, UploadedInputFile } from
 
 
 type RunAction = "run" | "retry_full" | "resume_failed";
-type SpawnRunner = (command: string, args: string[], options: { cwd: string }) => { on: (event: string, callback: (error: Error) => void) => void };
+type SpawnedRunProcess = {
+  on: (event: "error", callback: (error: Error) => void) => unknown;
+  stdout?: { on: (event: "data", callback: (chunk: unknown) => void) => unknown } | null;
+  stderr?: { on: (event: "data", callback: (chunk: unknown) => void) => unknown } | null;
+  unref?: () => void;
+} & {
+  on: (event: "exit", callback: (code: number | null, signal: NodeJS.Signals | null) => void) => unknown;
+};
+type SpawnRunner = (command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => SpawnedRunProcess;
 
 type DraftPatchInput = {
   candidateId?: string;
@@ -50,10 +58,16 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
   const runDir = resolveRunDir(runId);
   const current = await readRunStatus(runDir);
   if (current?.status === "running" || current?.status === "queued") {
-    throw new RunActionError("run_busy", "Run is already queued or running.", 409);
+    throw new RunActionError("run_busy", "该运行批次已在排队或运行中。", 409);
   }
   if (action === "resume_failed" && current?.status !== "failed") {
-    throw new RunActionError("not_failed", "Only failed runs can resume from the failed stage.");
+    throw new RunActionError("not_failed", "只有失败的运行批次可以从失败阶段继续。");
+  }
+
+  const args = await buildCliArgs(runDir, action);
+  const command = process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv";
+  if (spawnRunner === defaultSpawnRunner && !(await commandAvailable(command))) {
+    throw new RunActionError("cli_not_found", "CLI 命令未找到，请确认 shotguncv 已安装并在 PATH 中。", 503);
   }
 
   const startedAt = nowIso();
@@ -67,10 +81,10 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     last_action: action,
   });
 
-  const args = await buildCliArgs(runDir, action);
+  const currentStage = action === "resume_failed" ? firstIncompleteStage(await listStageDirs(runDir)) : "ingest";
   await writeRunStatus(runDir, {
     status: "running",
-    current_stage: action === "resume_failed" ? firstIncompleteStage(await listStageDirs(runDir)) : "ingest",
+    current_stage: currentStage,
     started_at: startedAt,
     finished_at: null,
     error_stage: null,
@@ -78,18 +92,21 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     last_action: action,
   });
 
-  const child = spawnRunner(process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv", args, { cwd: path.resolve(getRunsDir(), "..") });
+  const child = spawnRunner(command, args, { cwd: path.resolve(getRunsDir(), ".."), env: process.env });
+  const output = createOutputBuffer();
+  child.stdout?.on("data", (chunk) => output.push(chunk));
+  child.stderr?.on("data", (chunk) => output.push(chunk));
   child.on("error", async (error) => {
-    await writeRunStatus(runDir, {
-      status: "failed",
-      current_stage: null,
-      started_at: startedAt,
-      finished_at: nowIso(),
-      error_stage: null,
-      error_summary: error.message,
-      last_action: action,
-    });
+    await markRunFailed(runDir, startedAt, currentStage, action, `CLI 启动失败：${error.message}${formatCapturedOutput(output.text())}`);
   });
+  child.on("exit", async (code, signal) => {
+    if (code === 0) {
+      return;
+    }
+    const reason = signal ? `CLI 运行失败，信号 ${signal}` : `CLI 运行失败，退出码 ${code ?? "未知"}`;
+    await markRunFailed(runDir, startedAt, currentStage, action, `${reason}${formatCapturedOutput(output.text())}`);
+  });
+  child.unref?.();
 
   return { runId, status: "queued", action };
 }
@@ -100,10 +117,10 @@ export async function deleteRun(runId: string) {
   const current = await readRunStatus(runDir);
   const inferred = current?.status ?? (await inferStatus(runDir));
   if (inferred === "running" || inferred === "queued") {
-    throw new RunActionError("run_busy", "Running runs cannot be deleted.", 409);
+    throw new RunActionError("run_busy", "正在运行的批次不能删除。", 409);
   }
   if (inferred !== "draft" && inferred !== "failed") {
-    throw new RunActionError("delete_not_allowed", "Only draft or failed runs can be deleted.", 409);
+    throw new RunActionError("delete_not_allowed", "只能删除草稿或失败的运行批次。", 409);
   }
   await rm(runDir, { recursive: true, force: true });
   return { runId, deleted: true };
@@ -115,7 +132,7 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
   const current = await readRunStatus(runDir);
   const inferred = current?.status ?? (await inferStatus(runDir));
   if (inferred !== "draft") {
-    throw new RunActionError("not_draft", "Only draft runs can be edited.", 409);
+    throw new RunActionError("not_draft", "只能编辑草稿状态的运行批次。", 409);
   }
 
   const manifestPath = path.join(runDir, "ingest", "upload_manifest.json");
@@ -181,8 +198,69 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
 }
 
 
-function defaultSpawnRunner(command: string, args: string[], options: { cwd: string }) {
-  return spawn(command, args, { cwd: options.cwd, detached: true, stdio: "ignore" });
+function defaultSpawnRunner(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) {
+  return spawn(command, args, {
+    cwd: options.cwd,
+    detached: true,
+    env: options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+}
+
+
+async function commandAvailable(command: string): Promise<boolean> {
+  if (command.includes("/") || command.includes("\\") || path.isAbsolute(command)) {
+    try {
+      await access(command);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const resolver = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(resolver, [command], { env: process.env, encoding: "utf-8", windowsHide: true });
+  return result.status === 0;
+}
+
+
+function createOutputBuffer() {
+  const chunks: string[] = [];
+  return {
+    push(chunk: unknown) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk));
+      while (chunks.join("").length > 4000) {
+        chunks.shift();
+      }
+    },
+    text() {
+      return chunks.join("").trim().slice(-4000);
+    },
+  };
+}
+
+
+function formatCapturedOutput(output: string): string {
+  return output ? `。输出：${output}` : "";
+}
+
+
+async function markRunFailed(
+  runDir: string,
+  startedAt: string,
+  currentStage: RunStatusFile["current_stage"],
+  action: RunAction,
+  errorSummary: string,
+) {
+  await writeRunStatus(runDir, {
+    status: "failed",
+    current_stage: currentStage,
+    started_at: startedAt,
+    finished_at: nowIso(),
+    error_stage: currentStage,
+    error_summary: errorSummary,
+    last_action: action,
+  });
 }
 
 
@@ -192,7 +270,7 @@ async function buildCliArgs(runDir: string, action: RunAction): Promise<string[]
     return ["run", "--run-dir", runDir, "--resume"];
   }
   if (manifest === null) {
-    throw new RunActionError("missing_upload_manifest", "Run action requires an upload manifest.");
+    throw new RunActionError("missing_upload_manifest", "启动运行需要先完成草稿上传清单。");
   }
   const args = [
     "run",
@@ -305,13 +383,13 @@ function normalizeJdTextEntries(texts: string[], displayNames: string[]) {
 
 function validateFile(file: File): void {
   if (file.size === 0) {
-    throw new RunActionError("empty_file", `File ${file.name} is empty.`);
+    throw new RunActionError("empty_file", `文件 ${file.name} 为空。`);
   }
   if (file.size > MAX_FILE_BYTES) {
-    throw new RunActionError("file_too_large", `File ${file.name} exceeds the 10MB limit.`);
+    throw new RunActionError("file_too_large", `文件 ${file.name} 超过 10MB 限制。`);
   }
   if (!SUPPORTED_EXTENSIONS.has(path.extname(file.name).toLowerCase())) {
-    throw new RunActionError("unsupported_file_type", `Unsupported file type: ${path.extname(file.name) || "none"}.`);
+    throw new RunActionError("unsupported_file_type", `不支持的文件类型：${path.extname(file.name) || "无扩展名"}。`);
   }
 }
 
@@ -349,7 +427,7 @@ function firstIncompleteStage(existingStages: string[]): RunStatusFile["current_
 
 function resolveRunDir(runId: string): string {
   if (!/^[a-zA-Z0-9._-]+$/.test(runId)) {
-    throw new RunActionError("invalid_run_id", "Run id contains unsafe characters.");
+    throw new RunActionError("invalid_run_id", "运行批次编号包含不安全字符。");
   }
   const runsDir = getRunsDir();
   const runDir = path.join(runsDir, runId);
@@ -385,11 +463,11 @@ async function exists(filePath: string): Promise<boolean> {
 function sanitizeFileName(name: string): string {
   const normalized = name.replaceAll("\\", "/");
   if (normalized.includes("/") || normalized.includes("..")) {
-    throw new RunActionError("unsafe_filename", "Uploaded filenames must not contain paths.");
+    throw new RunActionError("unsafe_filename", "上传文件名不能包含路径。");
   }
   const safeName = normalized.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!safeName) {
-    throw new RunActionError("unsafe_filename", "Uploaded filename is invalid.");
+    throw new RunActionError("unsafe_filename", "上传文件名无效。");
   }
   return safeName;
 }
@@ -423,7 +501,7 @@ function buildNextCommand(runId: string, candidateId: string): string {
 function assertInside(parent: string, child: string): void {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new RunActionError("unsafe_path", "Resolved path escapes the configured runs directory.");
+    throw new RunActionError("unsafe_path", "解析后的路径超出运行目录。");
   }
 }
 

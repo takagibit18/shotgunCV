@@ -1,5 +1,7 @@
 import React from "react";
+import Link from "next/link";
 
+import { STATUS_LABELS } from "../lib/labels";
 import { listRuns, type RunSummary } from "../lib/runs";
 import { AppShell, Icon } from "./AppShell";
 import { RunQueue } from "./RunQueue";
@@ -16,10 +18,14 @@ export default async function HomePage() {
   return (
     <AppShell active="dashboard" eyebrow="仪表盘">
       <main className="app-shell operational-shell">
-        <section className="page-header">
+        <section className="page-header with-actions dashboard-header">
           <div>
             <h1>运行队列</h1>
           </div>
+          <Link href="/upload" className="primary-link dashboard-primary-cta icon-link">
+            <Icon name="play" />
+            开始新投递
+          </Link>
         </section>
 
         <div className="workspace-grid">
@@ -36,7 +42,7 @@ export default async function HomePage() {
                 <p className="eyebrow">趋势概览</p>
                 <h2>批次容量与健康度</h2>
               </div>
-              <TrendMetric label="Run 数" value={totalRuns} />
+              <TrendMetric label="运行数" value={totalRuns} />
               <TrendMetric label="完成率" value={`${completionRate}%`} />
               <TrendMetric label="警告/失败" value={warningRuns} tone={warningRuns > 0 ? "warning" : "success"} />
             </section>
@@ -66,7 +72,7 @@ export default async function HomePage() {
                     </div>
                   ))
                 ) : (
-                  <p className="muted">暂无 run 活动。</p>
+                  <p className="muted">暂无运行活动。</p>
                 )}
               </div>
             </section>
@@ -75,17 +81,27 @@ export default async function HomePage() {
               <section className="rail-card purple">
                 <div className="section-heading">
                   <div>
-                    <h3>AI 洞察</h3>
+                    <h3>智能洞察</h3>
                   </div>
                 </div>
                 <div className="recommendation-list">
-                  <div className={buildPrimaryInsight(runs)!.tone}>
-                    <Icon name="sparkle" />
-                    <div>
-                      <strong>{buildPrimaryInsight(runs)!.title}</strong>
-                      <p>{buildPrimaryInsight(runs)!.reason}</p>
+                  {runs.length === 0 ? (
+                    <Link href="/upload" className="recommendation-item safe dashboard-first-run-card">
+                      <Icon name="play" />
+                      <div>
+                        <strong>开始您的第一次投递</strong>
+                        <p>上传简历和岗位信息，创建投递草稿后即可在详情页启动本地流程。</p>
+                      </div>
+                    </Link>
+                  ) : (
+                    <div className={buildPrimaryInsight(runs)!.tone}>
+                      <Icon name="sparkle" />
+                      <div>
+                        <strong>{buildPrimaryInsight(runs)!.title}</strong>
+                        <p>{buildPrimaryInsight(runs)!.reason}</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </section>
             ) : null}
@@ -105,15 +121,6 @@ function TrendMetric({ label, value, tone }: { label: string; value: number | st
     </div>
   );
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  queued: "排队中",
-  running: "运行中",
-  done: "已完成",
-  failed: "失败",
-  "ingest-ready": "导入就绪",
-};
 
 function MetricTile({
   value,
@@ -155,21 +162,21 @@ function buildPrimaryInsight(runs: RunSummary[]): {
 
   if (failedRuns.length > 0) {
     return {
-      title: `${failedRuns.length} 个 run 运行失败`,
+      title: `${failedRuns.length} 个运行批次失败`,
       reason: "查看详情排查错误摘要，修复后重新运行。",
       tone: "recommendation-item priority",
     };
   }
   if (warningRuns.length > warningRuns.filter((r) => r.draftStatus === "failed").length) {
     return {
-      title: `${warningRuns.length} 个 run 有质量警告`,
+      title: `${warningRuns.length} 个运行批次有质量警告`,
       reason: "优先复查警告项，确认是否需要调整输入或模型配置。",
       tone: "recommendation-item watch",
     };
   }
   if (runningRuns.length > 0) {
     return {
-      title: `${runningRuns.length} 个 run 正在执行`,
+      title: `${runningRuns.length} 个运行批次正在执行`,
       reason: "关注阶段进度，完成后进入评估与报告。",
       tone: "recommendation-item safe",
     };
@@ -177,7 +184,7 @@ function buildPrimaryInsight(runs: RunSummary[]): {
   if (runs.length === 0) {
     return {
       title: "尚无运行数据",
-      reason: "创建草稿 run 开始评估。",
+      reason: "创建投递草稿开始评估。",
       tone: "recommendation-item safe",
     };
   }
