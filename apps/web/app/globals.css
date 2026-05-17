@@ -187,12 +187,9 @@ p {
 }
 
 .sidebar-brand,
-.topbar-actions,
 .row-actions,
 .pill-row,
-.statline,
 .commandbar-actions,
-.metric-title,
 .activity-item,
 .freshness-pill,
 .sidebar-user,
@@ -427,7 +424,6 @@ p {
 }
 
 .workspace-main,
-.workspace-rail,
 .insight-rail {
   display: grid;
   gap: var(--space-lg);
@@ -447,6 +443,30 @@ p {
 .page-header.with-actions {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
+}
+
+.dashboard-primary-cta {
+  min-height: 48px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
+}
+
+.dashboard-first-run-card {
+  text-align: left;
+}
+
+.advanced-command {
+  display: grid;
+  gap: 10px;
+}
+
+.advanced-command summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .detail-header {
@@ -487,7 +507,6 @@ p {
 }
 
 .detail-grid,
-.grid,
 .gate-grid,
 .report-summary-grid,
 .metric-card-grid {
@@ -2343,27 +2362,6 @@ label.primary-link {
   color: var(--charcoal);
 }
 
-@property --animated-score {
-  syntax: "<percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-
-@keyframes score-ring-fill {
-  from {
-    --animated-score: 0%;
-  }
-  to {
-    --animated-score: var(--target-score);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .score-ring-operational {
-    --animated-score: var(--target-score);
-    animation: none;
-  }
-}
 
 @media (max-width: 1180px) {
   .app-frame {
@@ -2502,6 +2500,16 @@ label.primary-link {
   .matrix-titleline,
   .upload-panel-heading {
     display: grid;
+  }
+
+  .page-header.with-actions {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .dashboard-primary-cta {
+    width: 100%;
+    justify-content: center;
   }
 
   .pill,

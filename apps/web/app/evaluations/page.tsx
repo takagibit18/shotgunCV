@@ -27,17 +27,17 @@ export default async function EvaluationPage() {
           </div>
           <div>
             <h1 className="page-title">评估结果列表</h1>
-            <p className="hero-copy">按 JD 聚合已固化的 scorecard、gate、证据和投递建议，优先处理风险与复核项。</p>
+            <p className="hero-copy">按岗位聚合已固化的评分、门槛、证据和投递建议，优先处理风险与复核项。</p>
           </div>
         </section>
 
         <section className="metric-card-grid evaluation-metric-grid" aria-label="评估结果总览">
-          <MetricCard icon="stats" label="总评估" value={total} helper="已完成 evaluate 的 JD 行" tone="blue" />
+          <MetricCard icon="stats" label="总评估" value={total} helper="已完成评估的岗位行" tone="blue" />
           <MetricCard
             icon="alert-triangle"
-            label="需复核 Gate"
+            label="需复核门槛"
             value={blockedOrReview}
-            helper="blocked / needs_review"
+            helper="阻断或需人工复核"
             tone={blockedOrReview > 0 ? "orange" : "green"}
           />
           <MetricCard
@@ -47,7 +47,7 @@ export default async function EvaluationPage() {
             helper="risk_score ≥ 70%"
             tone={highRisk > 0 ? "red" : "green"}
           />
-          <MetricCard icon="clock" label="历史产物" value={legacy} helper="缺少 v0.5.7 gate 字段" tone="purple" />
+          <MetricCard icon="clock" label="历史产物" value={legacy} helper="缺少新版门槛字段" tone="purple" />
         </section>
 
         <div className="eval-summary-strip" aria-label="趋势与评估边界">
@@ -60,7 +60,7 @@ export default async function EvaluationPage() {
             平均风险分 <strong>{averageRisk}</strong>
           </span>
           <span className="eval-summary-hint">
-            评估基于已固化 scorecard 快照，不包含实时策略变更。
+            评估基于已固化评分快照，不包含实时策略变更。
           </span>
         </div>
 

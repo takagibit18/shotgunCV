@@ -16,6 +16,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
     if (error instanceof RunActionError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
-    return NextResponse.json({ error: "Failed to delete run.", code: "delete_failed" }, { status: 500 });
+    return NextResponse.json({ error: "删除运行批次失败。", code: "delete_failed" }, { status: 500 });
   }
 }

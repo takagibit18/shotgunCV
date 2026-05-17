@@ -27,6 +27,6 @@ export async function POST(request: Request) {
     if (error instanceof DraftCreationError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
     }
-    return NextResponse.json({ error: "Failed to create draft run.", code: "write_failed" }, { status: 500 });
+    return NextResponse.json({ error: "创建投递草稿失败。", code: "write_failed" }, { status: 500 });
   }
 }

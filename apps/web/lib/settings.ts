@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { getRunsDir } from "./runs";
 import type { RunConfig } from "./types";
 
 type SettingsCheckStatus = "pass" | "warning" | "fail";
@@ -92,8 +93,8 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
       unknownProviderRunIds: [],
       latestConfig: null,
       checks: [
-        { label: "runs 目录", status: "fail", detail: "runs 目录不可读，请检查 SHOTGUNCV_RUNS_DIR 或默认 runs 路径。" },
-        { label: "run 清单", status: "warning", detail: "无法读取 run 清单。" },
+        { label: "运行目录", status: "fail", detail: "运行目录不可读，请检查 SHOTGUNCV_RUNS_DIR 或默认运行路径。" },
+        { label: "运行清单", status: "warning", detail: "无法读取运行清单。" },
         { label: "配置快照", status: "warning", detail: "无法检查 run_config.json。" },
         { label: "shotguncv CLI", status: cliVisible() ? "pass" : "warning", detail: buildCliDetail() },
       ],
@@ -140,11 +141,11 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
     unknownProviderRunIds,
     latestConfig,
     checks: [
-      { label: "runs 目录", status: "pass", detail: `当前读取 ${displayRunsDir}` },
+      { label: "运行目录", status: "pass", detail: `当前读取 ${displayRunsDir}` },
       {
-        label: "run 清单",
+        label: "运行清单",
         status: runEntries.length > 0 ? "pass" : "warning",
-        detail: runEntries.length > 0 ? `发现 ${runEntries.length} 个本地 run。` : "暂无 run，可先从上传页创建草稿。",
+        detail: runEntries.length > 0 ? `发现 ${runEntries.length} 个本地运行批次。` : "暂无运行批次，可先从上传页创建投递草稿。",
       },
       {
         label: "配置快照",
@@ -152,31 +153,27 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
         detail:
           configIssueCount === 0
             ? `可解析 ${parseableConfigs.length} 个 run_config.json。`
-            : `${configIssueCount} 个 run 缺少或无法解析 run_config.json：${formatRunList(configIssueRunIds)}。`,
+            : `${configIssueCount} 个运行批次缺少或无法解析 run_config.json：${formatRunList(configIssueRunIds)}。`,
       },
       {
-        label: "关键 artifacts",
+        label: "关键产物",
         status: artifactIssueCount === 0 ? "pass" : "warning",
         detail:
           artifactIssueCount === 0
-            ? "已存在的关键 JSON artifacts 均可解析。"
-            : `${artifactIssueCount} 个已存在 JSON artifact 无法解析：${formatRunList(artifactIssueRunIds)}。`,
+            ? "已存在的关键 JSON 产物均可解析。"
+            : `${artifactIssueCount} 个已存在 JSON 产物无法解析：${formatRunList(artifactIssueRunIds)}。`,
       },
       {
-        label: "provider 配置",
+        label: "模型提供商配置",
         status: unknownProviderCount === 0 ? "pass" : "warning",
         detail:
           unknownProviderCount === 0
-            ? "可解析配置未发现 unknown provider。"
-            : `${unknownProviderCount} 项 provider 为 unknown：${formatRunList(unknownProviderRunIds)}。`,
+            ? "可解析配置未发现未知模型提供商。"
+            : `${unknownProviderCount} 项模型提供商为 unknown：${formatRunList(unknownProviderRunIds)}。`,
       },
       { label: "shotguncv CLI", status: cliVisible() ? "pass" : "warning", detail: buildCliDetail() },
     ],
   };
-}
-
-function getRunsDir(): string {
-  return process.env.SHOTGUNCV_RUNS_DIR ?? path.resolve(process.cwd(), "..", "..", "runs");
 }
 
 async function readRunConfig(runsDir: string, runId: string): Promise<RunConfigReadResult> {
@@ -289,12 +286,12 @@ function maskPath(filePath: string): string {
 
 function baseUrlHost(value: string | null | undefined): string {
   if (!value) {
-    return "默认 OpenAI endpoint";
+    return "默认 OpenAI 服务地址";
   }
   try {
     return new URL(value).host;
   } catch {
-    return "自定义 endpoint";
+    return "自定义服务地址";
   }
 }
 
@@ -313,7 +310,7 @@ function cliVisible(): boolean {
 function buildCliDetail(): string {
   return cliVisible()
     ? "PATH 中可见 shotguncv 命令。"
-    : "PATH 中未发现 shotguncv 命令；Web 仍只展示本地 artifacts。";
+    : "PATH 中未发现 shotguncv 命令；网页仍只展示本地产物。";
 }
 
 export type { InputExtractionSummary, ProviderRoleSummary, SettingsCheck, SettingsOverview };

@@ -20,10 +20,10 @@ const MODEL_FIELDS: Array<{
   placeholder: string;
   icon: IconName;
 }> = [
-  { key: "openaiModel", label: "共享模型", placeholder: "留空时使用 CLI 默认模型", icon: "model" },
-  { key: "generatorModel", label: "Generator 模型", placeholder: "可留空继承共享模型", icon: "model" },
-  { key: "judgeModel", label: "Judge 模型", placeholder: "可留空继承共享模型", icon: "shield-check" },
-  { key: "visionModel", label: "Vision 模型", placeholder: "图片兜底模型，可留空", icon: "image-upload" },
+  { key: "openaiModel", label: "共享模型", placeholder: "留空时使用默认模型", icon: "model" },
+  { key: "generatorModel", label: "生成模型", placeholder: "可留空继承共享模型", icon: "model" },
+  { key: "judgeModel", label: "评审模型", placeholder: "可留空继承共享模型", icon: "shield-check" },
+  { key: "visionModel", label: "视觉兜底模型", placeholder: "图片兜底模型，可留空", icon: "image-upload" },
 ];
 
 export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
@@ -96,7 +96,7 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
       <div className="section-heading queue-heading">
         <div>
           <p className="eyebrow">本地模型配置 · .env 边界</p>
-          <h2>API key 与模型运行参数</h2>
+          <h2>密钥与模型运行参数</h2>
           <p className="section-copy">
             仅写入项目根目录 .env；Web 不保存到浏览器存储、不写入 run_config.json，也不发起远端模型检查。
           </p>
@@ -111,21 +111,21 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
         <div className="local-config-status-grid" aria-label="本地配置状态">
           <StatusCell icon="file" label=".env 文件" value={config.envExists ? "已存在" : "未创建"} tone={config.envExists ? "success" : "warning"} />
           <StatusCell icon="edit" label="可写状态" value={config.envWritable ? "可写" : "需检查"} tone={config.envWritable ? "success" : "warning"} />
-          <StatusCell icon="link" label="base URL host" value={config.baseUrlHost} tone="info" />
+          <StatusCell icon="link" label="服务地址主机" value={config.baseUrlHost} tone="info" />
           <StatusCell
             icon="key"
-            label="API key 状态"
+            label="密钥状态"
             value={apiKeyLabel}
             tone={config.apiKey.configured ? "success" : "warning"}
           />
         </div>
 
         <label className="control-field local-config-field-with-icon">
-          <FieldLabel icon="key" text="API key" trailingIcon="eye-off" />
+          <FieldLabel icon="key" text="模型服务密钥" trailingIcon="eye-off" />
           <input
             type="password"
             value={values.openaiApiKey}
-            placeholder={config.apiKey.configured ? "留空保持当前密钥" : "输入本地 API key"}
+            placeholder={config.apiKey.configured ? "留空保持当前密钥" : "输入本地模型服务密钥"}
             autoComplete="off"
             onChange={(event) => updateValue("openaiApiKey", event.target.value)}
             disabled={clearApiKey}
@@ -142,7 +142,7 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
               }
             }}
           />
-          清空当前 API key
+          清空当前密钥
         </label>
 
         <div className="local-config-grid">

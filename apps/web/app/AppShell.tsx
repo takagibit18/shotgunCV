@@ -10,14 +10,6 @@ type AppShellProps = {
   freshnessText?: string;
 };
 
-const ACTIVE_META: Record<NavKey, { title: string; context: string }> = {
-  dashboard: { title: "运行总览", context: "AI Resume Ops 工作台" },
-  resume: { title: "简历优化", context: "产物复核" },
-  queue: { title: "运行队列", context: "Pipeline 状态" },
-  evaluation: { title: "评估结果", context: "证据与风险" },
-  settings: { title: "本地设置", context: "环境与模型" },
-};
-
 const NAV_ITEMS: Array<{
   key: NavKey;
   label: string;
@@ -70,19 +62,17 @@ export type IconName =
   | "sparkle"
   | "stats";
 
-export function AppShell({ active, children, eyebrow, freshnessText = "本地数据" }: AppShellProps) {
-  const activeMeta = ACTIVE_META[active];
-
+export function AppShell({ active, children, eyebrow = "", freshnessText = "本地数据" }: AppShellProps) {
   return (
-    <div className="app-frame v08-frame">
-      <aside className="app-sidebar v08-sidebar" aria-label="主导航">
-        <Link href="/" className="sidebar-brand" aria-label="AI Resume Ops 工作台">
+    <div className="app-frame">
+      <aside className="app-sidebar" aria-label="主导航">
+        <Link href="/" className="sidebar-brand" aria-label="智能简历工作台">
           <span className="brand-mark">
             <Icon name="ai" />
           </span>
           <span>
-            <strong>ShotgunCV</strong>
-            <small>AI Resume Ops 工作台</small>
+            <strong>智能简历工作台</strong>
+            <small></small>
           </span>
         </Link>
 
@@ -98,7 +88,7 @@ export function AppShell({ active, children, eyebrow, freshnessText = "本地数
               </>
             );
             return item.href && !item.disabled ? (
-              <Link key={item.key} href={item.href} className={className} aria-current={item.key === active ? "page" : undefined}>
+              <Link key={item.key} href={item.href} className={className}>
                 {content}
               </Link>
             ) : (
@@ -109,29 +99,26 @@ export function AppShell({ active, children, eyebrow, freshnessText = "本地数
           })}
         </nav>
 
-        <div className="sidebar-insight v08-side-note">
+        <div className="sidebar-insight">
           <Icon name="sparkle" />
           <span>
-            <strong>本地证据优先</strong>
-            <small>分数、建议与风险都回到 run artifact 复核</small>
+            <strong>智能洞察</strong>
+            <small>基于历史数据的智能建议</small>
           </span>
         </div>
 
         <div className="sidebar-user">
-          <span className="avatar-mark">N</span>
+          <span className="avatar-mark">本</span>
           <span>
-            <strong>Nemo Zhang</strong>
-            <small>本地工作区</small>
+            <strong>本地用户</strong>
+            <small>单用户工作台</small>
           </span>
         </div>
       </aside>
 
       <div className="app-main-shell">
-        <header className="app-commandbar v08-commandbar">
-          <span className="commandbar-title">
-            <span className="commandbar-context">{eyebrow ?? activeMeta.context}</span>
-            <strong>{activeMeta.title}</strong>
-          </span>
+        <header className="app-commandbar">
+          <span className="commandbar-context">{eyebrow}</span>
           <div className="commandbar-actions" aria-label="工作台工具">
             <span className="freshness-pill">
               <Icon name="refresh" />

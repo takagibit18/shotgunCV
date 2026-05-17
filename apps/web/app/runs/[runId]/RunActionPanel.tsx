@@ -28,7 +28,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action }),
     });
-    await handleResponse(response, "运行动作已进入本地队列。");
+    await handleResponse(response, "已提交本地运行，请稍候。页面会自动刷新显示最新状态。", { delayedReload: true });
   }
 
   async function deleteCurrentRun() {
@@ -56,16 +56,16 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
     await handleResponse(response, "草稿已更新。");
   }
 
-  async function handleResponse(response: Response, success: string) {
+  async function handleResponse(response: Response, success: string, options: { delayedReload?: boolean } = {}) {
     setIsBusy(false);
     if (!response.ok) {
       const payload = (await response.json()) as { error?: string; code?: string };
-      setMessage(payload.error ?? payload.code ?? "请求失败。");
+      setMessage(payload.error ?? payload.code ?? "请求失败，请检查本地运行环境后重试。");
       return;
     }
     setMessage(success);
     if (typeof window !== "undefined") {
-      window.location.reload();
+      window.setTimeout(() => window.location.reload(), options.delayedReload ? 1800 : 0);
     }
   }
 
@@ -91,7 +91,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
         <form className="draft-edit-form" onSubmit={patchDraft}>
           <div className="detail-grid">
             <label className="field-label">
-              <span>{"Candidate ID"}</span>
+              <span>{"候选人标识"}</span>
               <input name="candidateId" defaultValue={draft.candidateId} />
             </label>
             <label className="field-label">
@@ -100,7 +100,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
             </label>
           </div>
           <label className="field-label">
-            <span>{"替换全部 CV 文件"}</span>
+            <span>{"替换全部简历文件"}</span>
             <input name="cvFiles" type="file" multiple accept=".txt,.md,.pdf,.png,.jpg,.jpeg" />
           </label>
           <div className="jd-text-stack">
@@ -108,23 +108,23 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
               .filter((file) => file.role === "jd")
               .map((file, index) => (
                 <label className="field-label" key={file.storedRelativePath}>
-                  <span>{`JD 显示名 ${index + 1}`}</span>
+                  <span>{`岗位显示名 ${index + 1}`}</span>
                   <input name="jdFileDisplayNames" defaultValue={file.displayName ?? ""} />
                 </label>
               ))}
           </div>
           <label className="field-label">
-            <span>{"追加 JD 文件"}</span>
+            <span>{"追加岗位文件"}</span>
             <input name="jdFiles" type="file" multiple accept=".txt,.md,.pdf,.png,.jpg,.jpeg" />
           </label>
           <label className="field-label">
-            <span>{"新 JD 显示名"}</span>
-            <input name="jdFileDisplayNames" placeholder="Company - Role" />
+            <span>{"新岗位显示名"}</span>
+            <input name="jdFileDisplayNames" placeholder="例如：公司名称 - 岗位名称" />
           </label>
           <label className="field-label">
-            <span>{"追加粘贴 JD"}</span>
-            <input name="jdTextDisplayNames" placeholder="Company - Role" />
-            <textarea name="jdTexts" rows={5} placeholder="粘贴 JD 文本" />
+            <span>{"追加粘贴岗位"}</span>
+            <input name="jdTextDisplayNames" placeholder="例如：公司名称 - 岗位名称" />
+            <textarea name="jdTexts" rows={5} placeholder="粘贴岗位描述文本" />
           </label>
           <button className="primary-link" type="submit" disabled={isBusy}>
             {"更新草稿"}
