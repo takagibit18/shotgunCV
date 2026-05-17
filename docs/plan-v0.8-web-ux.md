@@ -30,7 +30,7 @@ Decompose into these sub-versions, each committed separately:
 
 3. Trace the full flow:
    - User creates draft → `createRunDraft()` in `upload-drafts.ts` → writes files to `runs/<runId>/`
-   - User clicks "Run" → POST to `/api/runs/[runId]/actions` → `startRunAction()` → `spawn("shotguncv", [...])` 
+   - User clicks "Run" → POST to `/api/runs/[runId]/actions` → `startRunAction()` → `spawn("shotguncv", [...])`
    - The subprocess runs detached, stdio ignored — no feedback loop
 
 **Required fixes:**
@@ -119,7 +119,7 @@ Decompose into these sub-versions, each committed separately:
      </Link>
    </div>
    ```
-   
+
 2. The button should:
    - Use the existing `.primary-link` class with slightly larger padding/font to stand out
    - Include a `play` icon (already exists in AppShell Icon component)
