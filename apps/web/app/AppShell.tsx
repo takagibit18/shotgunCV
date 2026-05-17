@@ -10,6 +10,14 @@ type AppShellProps = {
   freshnessText?: string;
 };
 
+const ACTIVE_META: Record<NavKey, { title: string; context: string }> = {
+  dashboard: { title: "运行总览", context: "AI Resume Ops 工作台" },
+  resume: { title: "简历优化", context: "产物复核" },
+  queue: { title: "运行队列", context: "Pipeline 状态" },
+  evaluation: { title: "评估结果", context: "证据与风险" },
+  settings: { title: "本地设置", context: "环境与模型" },
+};
+
 const NAV_ITEMS: Array<{
   key: NavKey;
   label: string;
@@ -62,17 +70,19 @@ export type IconName =
   | "sparkle"
   | "stats";
 
-export function AppShell({ active, children, eyebrow = "", freshnessText = "本地数据" }: AppShellProps) {
+export function AppShell({ active, children, eyebrow, freshnessText = "本地数据" }: AppShellProps) {
+  const activeMeta = ACTIVE_META[active];
+
   return (
-    <div className="app-frame">
-      <aside className="app-sidebar" aria-label="主导航">
+    <div className="app-frame v08-frame">
+      <aside className="app-sidebar v08-sidebar" aria-label="主导航">
         <Link href="/" className="sidebar-brand" aria-label="AI Resume Ops 工作台">
           <span className="brand-mark">
             <Icon name="ai" />
           </span>
           <span>
-            <strong>AI Resume Ops</strong>
-            <small>工作台</small>
+            <strong>ShotgunCV</strong>
+            <small>AI Resume Ops 工作台</small>
           </span>
         </Link>
 
@@ -88,7 +98,7 @@ export function AppShell({ active, children, eyebrow = "", freshnessText = "本�
               </>
             );
             return item.href && !item.disabled ? (
-              <Link key={item.key} href={item.href} className={className}>
+              <Link key={item.key} href={item.href} className={className} aria-current={item.key === active ? "page" : undefined}>
                 {content}
               </Link>
             ) : (
@@ -99,11 +109,11 @@ export function AppShell({ active, children, eyebrow = "", freshnessText = "本�
           })}
         </nav>
 
-        <div className="sidebar-insight">
+        <div className="sidebar-insight v08-side-note">
           <Icon name="sparkle" />
           <span>
-            <strong>AI 洞察</strong>
-            <small>基于历史数据的智能建议</small>
+            <strong>本地证据优先</strong>
+            <small>分数、建议与风险都回到 run artifact 复核</small>
           </span>
         </div>
 
@@ -111,14 +121,17 @@ export function AppShell({ active, children, eyebrow = "", freshnessText = "本�
           <span className="avatar-mark">N</span>
           <span>
             <strong>Nemo Zhang</strong>
-            <small>产品负责人</small>
+            <small>本地工作区</small>
           </span>
         </div>
       </aside>
 
       <div className="app-main-shell">
-        <header className="app-commandbar">
-          <span className="commandbar-context">{eyebrow}</span>
+        <header className="app-commandbar v08-commandbar">
+          <span className="commandbar-title">
+            <span className="commandbar-context">{eyebrow ?? activeMeta.context}</span>
+            <strong>{activeMeta.title}</strong>
+          </span>
           <div className="commandbar-actions" aria-label="工作台工具">
             <span className="freshness-pill">
               <Icon name="refresh" />

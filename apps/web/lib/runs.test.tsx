@@ -793,6 +793,11 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("AI Resume Ops 工作台");
+    expect(html).toContain("从岗位输入到证据化简历策略，一屏掌控");
+    expect(html).toContain("creative-hero");
+    expect(html).toContain("product-preview-frame");
+    expect(html).toContain("opening-guide");
+    expect(html).toContain("先把工作流跑通，再进入证据复核");
     expect(html).toContain("仪表盘");
     expect(html).toContain("简历优化");
     expect(html).toContain("运行队列");
@@ -810,6 +815,8 @@ describe("run viewer pages", () => {
     expect(html).toContain("Provider 筛选");
     expect(html).toContain("排序");
     expect(html).toContain("operational-shell");
+    expect(html).not.toContain("模拟面试");
+    expect(html).not.toContain("JadeAI");
     expect(html).not.toContain("editorial-hero");
     expect(html).not.toContain("dark-product-surface");
     expect(html).not.toContain("coral-cta");
