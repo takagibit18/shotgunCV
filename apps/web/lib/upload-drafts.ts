@@ -1,4 +1,4 @@
-import { mkdir, open, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { UploadManifest, UploadedInputFile } from "./types";
@@ -10,8 +10,10 @@ type DraftFile = File;
 
 type CreateRunDraftInput = {
   candidateId?: string;
+  candidateDisplayName?: string;
   label?: string;
   cvFiles: DraftFile[];
+  existingCvFiles?: ExistingCvFileRef[];
   jdFiles: DraftFile[];
   jdFileDisplayNames?: string[];
   jdTexts?: string[];
@@ -34,8 +36,14 @@ type CvIssue = {
 };
 
 type WebUploadManifest = UploadManifest & {
+  candidateDisplayName?: string;
   cvIssues?: CvIssue[];
   needsManualText?: boolean;
+};
+
+type ExistingCvFileRef = {
+  sourceRunId: string;
+  storedRelativePath: string;
 };
 
 type DraftErrorCode =
@@ -69,9 +77,14 @@ export class DraftCreationError extends Error {
 export async function createRunDraft(input: CreateRunDraftInput): Promise<CreateRunDraftResult> {
   const now = input.now ?? new Date();
   const candidateId = input.candidateId?.trim() || buildCandidateId(now);
+  const candidateDisplayName = input.candidateDisplayName?.trim() ?? "";
+  const existingCvFiles = input.existingCvFiles ?? [];
   const jdFileDisplayNames = normalizeJdFileDisplayNames(input.jdFiles, input.jdFileDisplayNames ?? []);
   const jdTextEntries = normalizeJdTextEntries(input.jdTexts ?? [], input.jdTextDisplayNames ?? []);
-  if (input.cvFiles.length === 0) {
+  if (existingCvFiles.length > 0 && !input.candidateId?.trim()) {
+    throw new DraftCreationError("missing_candidate_id", "复用候选人简历时必须提供候选人 ID。");
+  }
+  if (input.cvFiles.length === 0 && existingCvFiles.length === 0) {
     throw new DraftCreationError("missing_cv", "请至少上传一个简历文件。");
   }
   if (input.jdFiles.length === 0 && jdTextEntries.length === 0) {
@@ -95,10 +108,12 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
   try {
     const uploadedAt = now.toISOString();
     const jdUsedNames = new Set<string>();
+    const cvUsedNames = new Set<string>();
     const cvIssues = await detectCvIssues(input.cvFiles);
     const needsManualText = cvIssues.length > 0;
     const files: UploadedInputFile[] = [
-      ...(await writeRoleFiles(runDir, "cv", input.cvFiles, uploadedAt)),
+      ...(await copyExistingCvFiles(runDir, candidateId, existingCvFiles, uploadedAt, cvUsedNames)),
+      ...(await writeRoleFiles(runDir, "cv", input.cvFiles, uploadedAt, cvUsedNames)),
       ...(await writeRoleFiles(runDir, "jd", input.jdFiles, uploadedAt, jdUsedNames, jdFileDisplayNames)),
       ...(await writePastedJdTexts(runDir, jdTextEntries, uploadedAt, jdUsedNames)),
     ];
@@ -106,6 +121,7 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
     const manifest: WebUploadManifest = {
       schemaVersion: "v0.5.1-upload-manifest",
       candidateId,
+      ...(candidateDisplayName ? { candidateDisplayName } : {}),
       label,
       createdAt: uploadedAt,
       files,
@@ -229,6 +245,58 @@ async function writeRoleFiles(
 }
 
 
+async function copyExistingCvFiles(
+  runDir: string,
+  candidateId: string,
+  refs: ExistingCvFileRef[],
+  uploadedAt: string,
+  usedNames: Set<string>,
+): Promise<UploadedInputFile[]> {
+  if (refs.length === 0) {
+    return [];
+  }
+
+  const runsDir = getRunsDir();
+  const outputDir = path.join(runDir, "input_files", "cv");
+  await mkdir(outputDir, { recursive: true });
+
+  const records: UploadedInputFile[] = [];
+  for (const ref of refs) {
+    const sourceRunId = sanitizeRunId(ref.sourceRunId);
+    const sourceRunDir = path.join(runsDir, sourceRunId);
+    assertInside(runsDir, sourceRunDir);
+    const sourceManifest = JSON.parse(
+      await readFile(path.join(sourceRunDir, UPLOAD_MANIFEST_PATH), "utf-8"),
+    ) as WebUploadManifest;
+    if (sourceManifest.candidateId !== candidateId) {
+      throw new DraftCreationError("missing_cv", "所选简历不属于当前候选人，请重新选择候选人。");
+    }
+    const sourceFile = sourceManifest.files.find(
+      (file) => file.role === "cv" && file.storedRelativePath === ref.storedRelativePath,
+    );
+    if (!sourceFile) {
+      throw new DraftCreationError("missing_cv", "所选候选人简历已不存在，请重新上传。");
+    }
+    const sourcePath = path.resolve(sourceRunDir, sourceFile.storedRelativePath);
+    assertInside(sourceRunDir, sourcePath);
+    const bytes = await readFile(sourcePath);
+    const safeName = reserveUniqueFileName(path.posix.basename(sourceFile.storedRelativePath), usedNames);
+    const outputPath = path.join(outputDir, safeName);
+    assertInside(outputDir, outputPath);
+    await writeFile(outputPath, bytes);
+    records.push({
+      role: "cv",
+      originalName: sourceFile.originalName,
+      storedRelativePath: path.posix.join("input_files", "cv", safeName),
+      sizeBytes: bytes.byteLength,
+      contentType: sourceFile.contentType || "application/octet-stream",
+      uploadedAt,
+    });
+  }
+  return records;
+}
+
+
 async function writePastedJdTexts(
   runDir: string,
   texts: { text: string; displayName: string }[],
@@ -322,6 +390,15 @@ function sanitizeFileName(name: string): string {
 }
 
 
+function sanitizeRunId(runId: string): string {
+  const trimmed = runId.trim();
+  if (!trimmed || trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("..")) {
+    throw new DraftCreationError("unsafe_filename", "候选人简历来源无效。");
+  }
+  return trimmed;
+}
+
+
 function reserveUniqueFileName(name: string, usedNames: Set<string>): string {
   const extension = path.extname(name);
   const base = name.slice(0, name.length - extension.length);
@@ -376,4 +453,4 @@ async function writeDefaultRunConfig(runDir: string, label: string): Promise<voi
 }
 
 
-export type { CreateRunDraftInput, CreateRunDraftResult, CvIssue };
+export type { CreateRunDraftInput, CreateRunDraftResult, CvIssue, ExistingCvFileRef };

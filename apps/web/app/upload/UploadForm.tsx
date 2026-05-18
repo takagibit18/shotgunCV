@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 import { CvTextSidecarPanel } from "../CvTextSidecarPanel";
+import { ACTIVE_CANDIDATE_KEY, CANDIDATE_EVENT } from "../CandidateSelector";
+import type { CandidateSummary } from "../../lib/candidates";
 import type { CvIssue } from "../../lib/upload-drafts";
 
 type DraftSuccess = {
@@ -31,12 +33,27 @@ type JdFileEntry = {
   displayName: string;
 };
 
+type StoredCandidate = {
+  candidateId: string;
+  displayName: string;
+};
+
+type UploadCandidate = CandidateSummary & {
+  isLocalOnly?: boolean;
+};
+
+type CandidateResponse = {
+  candidates: CandidateSummary[];
+};
+
 const ACCEPTED_INPUT_TYPES = ".txt,.md,.pdf,.png,.jpg,.jpeg";
 
 export function UploadForm() {
   const [result, setResult] = useState<DraftSuccess | null>(null);
   const [error, setError] = useState<DraftError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeCandidate, setActiveCandidate] = useState<UploadCandidate | null>(null);
+  const candidateOptionsRef = useRef<CandidateSummary[]>([]);
   const [cvFiles, setCvFiles] = useState<JdFileEntry[]>([]);
   const [nextCvFileId, setNextCvFileId] = useState(1);
   const [jdMode, setJdMode] = useState<"files" | "text">("files");
@@ -45,6 +62,42 @@ export function UploadForm() {
   const [jdTexts, setJdTexts] = useState<JdTextEntry[]>([{ id: 1, displayName: "", value: "" }]);
   const [nextTextId, setNextTextId] = useState(2);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const reusableCvFiles = activeCandidate?.cvFiles ?? [];
+  const totalCvCount = reusableCvFiles.length + cvFiles.length;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/candidates", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("候选人列表读取失败");
+        }
+        return (await response.json()) as CandidateResponse;
+      })
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        candidateOptionsRef.current = payload.candidates;
+        setActiveCandidate(resolveActiveCandidate(payload.candidates, readStoredCandidate()));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActiveCandidate(resolveActiveCandidate([], readStoredCandidate()));
+        }
+      });
+
+    function handleCandidateChange(event: Event) {
+      const detail = (event as CustomEvent<StoredCandidate>).detail;
+      setActiveCandidate(resolveActiveCandidate(candidateOptionsRef.current, detail));
+    }
+
+    window.addEventListener(CANDIDATE_EVENT, handleCandidateChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CANDIDATE_EVENT, handleCandidateChange);
+    };
+  }, []);
 
   function handleCvTextSaved(savedOriginalNames: string[]) {
     setResult((current) => {
@@ -66,6 +119,9 @@ export function UploadForm() {
     const form = event.currentTarget;
     const formData = new FormData(form);
     formData.delete("cvFiles");
+    formData.delete("candidateId");
+    formData.delete("candidateDisplayName");
+    formData.delete("existingCvRefs");
     formData.delete("jdFiles");
     formData.delete("jdFileDisplayNames");
     formData.delete("jdTexts");
@@ -73,6 +129,21 @@ export function UploadForm() {
     cvFiles.forEach((entry) => {
       formData.append("cvFiles", entry.file);
     });
+    if (activeCandidate) {
+      formData.append("candidateId", activeCandidate.candidateId);
+      formData.append("candidateDisplayName", activeCandidate.displayName);
+      if (activeCandidate.cvFiles.length > 0) {
+        formData.append(
+          "existingCvRefs",
+          JSON.stringify(
+            activeCandidate.cvFiles.map((file) => ({
+              sourceRunId: file.sourceRunId,
+              storedRelativePath: file.storedRelativePath,
+            })),
+          ),
+        );
+      }
+    }
     jdFiles.forEach((entry) => {
       formData.append("jdFiles", entry.file);
       formData.append("jdFileDisplayNames", entry.displayName);
@@ -181,6 +252,24 @@ export function UploadForm() {
               <h3>{"候选人材料"}</h3>
             </div>
           </div>
+          <div className="candidate-prefill-panel">
+            <span className="avatar-mark compact">{activeCandidate?.initials ?? "候"}</span>
+            <div>
+              <strong>{activeCandidate ? activeCandidate.displayName : "未选择候选人"}</strong>
+              <p>
+                {reusableCvFiles.length > 0
+                  ? `已预填 ${reusableCvFiles.length} 份历史简历，可继续上传补充材料。`
+                  : "当前候选人暂无可复用简历，请上传第一份简历。"}
+              </p>
+              {reusableCvFiles.length > 0 ? (
+                <ul>
+                  {reusableCvFiles.map((file) => (
+                    <li key={`${file.sourceRunId}:${file.storedRelativePath}`}>{file.originalName}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
           <div
             className="jd-dropzone"
             onDragOver={(event) => {
@@ -196,7 +285,7 @@ export function UploadForm() {
               name="cvFiles"
               type="file"
               multiple
-              required={cvFiles.length === 0}
+              required={totalCvCount === 0}
               accept={ACCEPTED_INPUT_TYPES}
               onChange={(event) => {
                 if (event.currentTarget.files) {
@@ -346,8 +435,10 @@ export function UploadForm() {
             <div className="confirmation-row">
               <span className="confirmation-label">{"简历文件"}</span>
               <span className="confirmation-value">
-                <strong>{cvFiles.length > 0 ? `${cvFiles.length} 个` : "待选择"}</strong>
-                <span className="confirmation-hint">{" · 必须至少 1 个"}</span>
+                <strong>{totalCvCount > 0 ? `${totalCvCount} 个` : "待选择"}</strong>
+                <span className="confirmation-hint">
+                  {reusableCvFiles.length > 0 ? ` · 含 ${reusableCvFiles.length} 份历史简历` : " · 必须至少 1 个"}
+                </span>
               </span>
             </div>
             <div className="confirmation-row">
@@ -420,6 +511,56 @@ const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp|bmp)$/i;
 
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/") || IMAGE_EXTENSIONS.test(file.name);
+}
+
+function readStoredCandidate(): StoredCandidate | null {
+  const value = localStorage.getItem(ACTIVE_CANDIDATE_KEY);
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<StoredCandidate>;
+    if (typeof parsed.candidateId === "string" && typeof parsed.displayName === "string") {
+      return { candidateId: parsed.candidateId, displayName: parsed.displayName };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function resolveActiveCandidate(candidates: CandidateSummary[], stored: StoredCandidate | null): UploadCandidate | null {
+  if (stored) {
+    const matched = candidates.find((candidate) => candidate.candidateId === stored.candidateId);
+    if (matched) {
+      return matched;
+    }
+    return {
+      candidateId: stored.candidateId,
+      displayName: stored.displayName,
+      initials: buildInitials(stored.displayName),
+      latestRunId: "",
+      latestLabel: "",
+      updatedAt: new Date().toISOString(),
+      runCount: 0,
+      cvFiles: [],
+      isLocalOnly: true,
+    };
+  }
+  return candidates[0] ?? null;
+}
+
+function buildInitials(displayName: string): string {
+  const trimmed = displayName.trim();
+  const asciiWords = trimmed.match(/[A-Za-z0-9]+/g);
+  if (asciiWords && asciiWords.length > 0) {
+    return asciiWords
+      .slice(0, 2)
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase();
+  }
+  return trimmed.slice(0, 2) || "候";
 }
 
 function FileThumbnail({ file, onClick }: { file: File; onClick: (url: string) => void }) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createRunDraft, DraftCreationError } from "../../../../lib/upload-drafts";
+import type { ExistingCvFileRef } from "../../../../lib/upload-drafts";
 
 
 export async function POST(request: Request) {
@@ -16,7 +17,10 @@ export async function POST(request: Request) {
       .getAll("jdTextDisplayNames")
       .filter((item): item is string => typeof item === "string");
     const result = await createRunDraft({
+      candidateId: stringValue(formData.get("candidateId")),
+      candidateDisplayName: stringValue(formData.get("candidateDisplayName")),
       cvFiles,
+      existingCvFiles: parseExistingCvRefs(formData.get("existingCvRefs")),
       jdFiles,
       jdFileDisplayNames,
       jdTexts,
@@ -28,5 +32,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
     }
     return NextResponse.json({ error: "创建投递草稿失败。", code: "write_failed" }, { status: 500 });
+  }
+}
+
+function stringValue(value: FormDataEntryValue | null): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseExistingCvRefs(value: FormDataEntryValue | null): ExistingCvFileRef[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((item) => {
+        if (
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { sourceRunId?: unknown }).sourceRunId === "string" &&
+          typeof (item as { storedRelativePath?: unknown }).storedRelativePath === "string"
+        ) {
+          return {
+            sourceRunId: (item as { sourceRunId: string }).sourceRunId,
+            storedRelativePath: (item as { storedRelativePath: string }).storedRelativePath,
+          };
+        }
+        return null;
+      })
+      .filter((item): item is ExistingCvFileRef => item !== null);
+  } catch {
+    return [];
   }
 }

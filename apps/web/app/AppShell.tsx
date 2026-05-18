@@ -1,6 +1,8 @@
 import React, { type ReactNode } from "react";
 import Link from "next/link";
 
+import { CandidateSelector } from "./CandidateSelector";
+
 type NavKey = "resume" | "queue" | "evaluation" | "settings";
 
 type AppShellProps = {
@@ -106,13 +108,7 @@ export function AppShell({ active, children, eyebrow = "", freshnessText = "本�
           </span>
         </div>
 
-        <div className="sidebar-user">
-          <span className="avatar-mark">本</span>
-          <span>
-            <strong>本地用户</strong>
-            <small>单用户工作台</small>
-          </span>
-        </div>
+        <CandidateSelector />
       </aside>
 
       <div className="app-main-shell">
