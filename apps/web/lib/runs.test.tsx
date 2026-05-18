@@ -84,8 +84,9 @@ describe("run viewer data loading", () => {
     expect(detail.runId).toBe("artifact-only");
     expect(detail.analyzerProvider).toBe("unknown");
     expect(detail.completedStages).toEqual(["report"]);
-    expect(html).toContain("artifact-only");
-    expect(html).toContain("运行状态");
+    expect(html).toContain("评估详情");
+    expect(html).toContain("评估结果尚未生成");
+    expect(html).not.toContain("运行状态");
   });
 
   it("renders legacy partial run with downstream artifacts but no config or analyze output", async () => {
@@ -143,9 +144,9 @@ describe("run viewer data loading", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId }) }));
 
-    expect(html).toContain("legacy-partial");
     expect(html).toContain("Legacy role");
-    expect(html).toContain("运行状态");
+    expect(html).toContain("匹配、证据与风险");
+    expect(html).not.toContain("运行状态");
   });
 
   it("renders run detail when one optional artifact contains malformed json", async () => {
@@ -162,8 +163,8 @@ describe("run viewer data loading", () => {
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "malformed-artifact" }) }));
 
     expect(detail.analyze.candidate).toBeNull();
-    expect(html).toContain("malformed-artifact");
-    expect(html).toContain("阶段状态");
+    expect(html).toContain("评估结果尚未生成");
+    expect(html).not.toContain("阶段状态");
   });
 
   it("loads completed run detail with score and strategy summaries", async () => {
@@ -630,10 +631,10 @@ describe("run viewer data loading", () => {
       resolvedModel: "gpt-5.4-mini",
     });
     expect(html).not.toContain("Run timeline");
-    expect(html).toContain("运行观测");
-    expect(html).toContain("gpt-5.4-mini");
-    expect(html).toContain("125");
-    expect(html).toContain("完成但有警告");
+    expect(html).not.toContain("运行观测");
+    expect(html).not.toContain("gpt-5.4-mini");
+    expect(html).not.toContain("125");
+    expect(html).toContain("完成，建议复核提醒项");
   });
 
   it("updates draft metadata, replaces CV files, and appends JD inputs", async () => {
@@ -758,7 +759,8 @@ describe("run viewer data loading", () => {
 
     await expect(startRunAction(draft.runId, "run")).rejects.toMatchObject({
       code: "cli_not_found",
-      message: "CLI 命令未找到，请确认 shotguncv 已安装并在 PATH 中。",
+      message:
+        "CLI 命令未找到（definitely-missing-shotguncv-command），请确认已安装并在 PATH 中，或取消 SHOTGUNCV_CLI_COMMAND 环境变量以使用自动发现。",
     });
 
     const status = JSON.parse(await readFile(path.join(runsDir, draft.runId, "run_status.json"), "utf-8"));
@@ -872,12 +874,12 @@ describe("run viewer pages", () => {
     expect(html).not.toContain("sidebar-nav-item disabled");
     expect(html).toContain("本地优先，边界清晰");
     expect(html).toContain("先把工作流跑通，再进入证据复核");
-    expect(html).not.toContain("搜索运行批次、标签、模型");
-    expect(runsHtml).toContain("搜索运行批次、标签、模型");
+    expect(html).not.toContain("搜索投递名称、状态、风险");
+    expect(runsHtml).toContain("搜索投递名称、状态、风险");
     expect(runsHtml).toContain("状态筛选");
     expect(runsHtml).toContain("阶段筛选");
-    expect(runsHtml).toContain("模型筛选");
     expect(runsHtml).toContain("排序");
+    expect(runsHtml).toContain("投递进度");
     expect(runsHtml).toContain("operational-shell");
     expect(html).not.toContain("editorial-hero");
     expect(html).not.toContain("dark-product-surface");
@@ -899,7 +901,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("landing-workflow-card");
     expect(html).toContain("aria-label=\"下一步\"");
     expect(html).toContain("aria-label=\"查看第 2 步\"");
-    expect(html).not.toContain("搜索运行批次、标签、模型");
+    expect(html).not.toContain("搜索投递名称、状态、风险");
     expect(html).not.toContain("状态筛选");
     expect(html).not.toContain("第 1 / 2 页");
     expect(html).not.toContain("每页 10 条");
@@ -927,14 +929,15 @@ describe("run viewer pages", () => {
     const dashboardHtml = renderToStaticMarkup(await HomePage());
     const html = renderToStaticMarkup(await RunsPage());
 
-    expect(dashboardHtml).toContain("趋势概览");
+    expect(dashboardHtml).toContain("Workflow Health");
     expect(dashboardHtml).toContain("完成率");
-    expect(dashboardHtml).toContain("警告/失败");
+    expect(dashboardHtml).toContain("打开运行队列");
+    expect(html).toContain("投递进度");
+    expect(html).toContain("全部投递");
+    expect(html).toContain("进行中");
     expect(html).toContain("第 1 / 2 页");
     expect(html).toContain("每页 10 条");
     expect(html).toContain("共 12 条");
-    expect(html).toContain("dense-run-12");
-    expect(html).not.toContain("dense-run-01");
   });
 
   it("renders v0.6 polished Chinese workspace copy without mojibake or temporary version labels", async () => {
@@ -951,15 +954,14 @@ describe("run viewer pages", () => {
 
     expect(combinedHtml).toContain("智能简历工作台");
     expect(combinedHtml).toContain("运行队列");
-    expect(combinedHtml).toContain("返回运行列表");
+    expect(combinedHtml).toContain("返回评估结果");
     expect(combinedHtml).toContain("三步创建草稿");
-    expect(combinedHtml).toContain("运行详情");
-    expect(combinedHtml).toContain("运行状态");
+    expect(combinedHtml).toContain("评估详情");
+    expect(combinedHtml).toContain("AI 评估复核");
     expect(combinedHtml).toContain("投递决策摘要");
-    expect(combinedHtml).toContain("硬门槛审查");
-    expect(combinedHtml).toContain("真实匹配");
-    expect(combinedHtml).toContain("改写潜力");
-    expect(combinedHtml).toContain("风险压力");
+    expect(combinedHtml).toContain("匹配度");
+    expect(combinedHtml).toContain("补强空间");
+    expect(combinedHtml).toContain("风险");
     expect(combinedHtml).toContain("operational-shell");
     expect(combinedHtml).not.toContain("editorial-hero");
     expect(combinedHtml).not.toContain("dark-product-surface");
@@ -969,7 +971,7 @@ describe("run viewer pages", () => {
     expect(combinedHtml).not.toMatch(/[杩鏂鐢绋鐘宀]/);
   });
 
-  it("renders draft run detail with the next CLI command", async () => {
+  it("renders draft run detail as a product action page without CLI paths", async () => {
     const runsDir = await createTempRunsDir();
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
     const draft = await createRunDraft({
@@ -983,16 +985,18 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: draft.runId }) }));
 
-    expect(html).toContain("上传草稿");
-    expect(html).toContain("shotguncv run");
-    expect(html).toContain("input_files/cv");
-    expect(html).toContain("输入来源");
-    expect(html).toContain("resume.md");
+    expect(html).toContain("开始评估");
+    expect(html).toContain("投递名称");
+    expect(html).toContain("JD 详情");
+    expect(html).toContain("查看 JD 详情");
     expect(html).toContain("Example - Draft Role");
     expect(html).toContain("草稿");
+    expect(html).not.toContain("shotguncv run");
+    expect(html).not.toContain("input_files/cv");
+    expect(html).not.toContain("输入来源");
   });
 
-  it("renders ingested input source metadata on the run detail page", async () => {
+  it("renders JD text preview on the run detail page without exposing source paths", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -1019,54 +1023,62 @@ describe("run viewer pages", () => {
         extractionStatus: "extracted",
       }),
     ]);
-    expect(html).toContain("输入来源");
-    expect(html).toContain("fixture");
-    expect(html).toContain("base_resume.md");
+    expect(detail.jdInputPreviews[0]).toMatchObject({
+      label: "Example AI - LLM Product Engineer",
+      kind: "text",
+      text: "jd text",
+    });
+    expect(html).toContain("JD 详情");
+    expect(html).toContain("查看 JD 详情");
+    expect(html).toContain("jd text");
     expect(html).toContain("Example AI - LLM Product Engineer");
-    expect(html).toContain("fixtures/candidates/base_resume.md");
-    expect(html).toContain("1.2 KB");
-    expect(html).toContain("extracted");
+    expect(html).not.toContain("输入来源");
+    expect(html).not.toContain("fixture");
+    expect(html).not.toContain("base_resume.md");
+    expect(html).not.toContain("fixtures/candidates/base_resume.md");
   });
 
-  it("renders unparseable input source metadata on the run detail page", async () => {
+  it("renders uploaded JD screenshots as enlargeable previews", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const runDir = path.join(runsDir, "demo-full");
+    await mkdir(path.join(runDir, "input_files", "jd"), { recursive: true });
+    await writeFile(path.join(runDir, "input_files", "jd", "jd-scan.png"), Buffer.from([137, 80, 78, 71]));
     const manifestPath = path.join(runsDir, "demo-full", "ingest", "manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
-    manifest.candidate_inputs.push({
-      role: "cv",
+    manifest.jd_inputs = [
+      {
+        role: "jd",
       source_origin: "upload",
       source_type: "file",
-      source_value: path.join(runsDir, "demo-full", "input_files", "cv", "scan.jpg"),
-      original_name: "Original Scan.jpg",
-      relative_path: "input_files/cv/scan.jpg",
+        display_name: "Example AI - Screenshot JD",
+        source_value: path.join(runDir, "input_files", "jd", "jd-scan.png"),
+        original_name: "jd-scan.png",
+        relative_path: "input_files/jd/jd-scan.png",
       size_bytes: 3456,
-      media_type: "image/jpeg",
+        media_type: "image/png",
       text: "",
       extraction_status: "unparseable",
       extraction_provider: "local_ocr",
-      extraction_error: "Tesseract is not installed.",
-    });
+        extraction_error: "",
+      },
+    ];
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
 
     const detail = await loadRunDetail("demo-full");
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(detail.inputSources).toContainEqual(
-      expect.objectContaining({
-        role: "cv",
-        sourceOrigin: "upload",
-        originalName: "Original Scan.jpg",
-        relativePath: "input_files/cv/scan.jpg",
-        sizeBytes: 3456,
-        extractionStatus: "unparseable",
-        extractionError: "Tesseract is not installed.",
-      }),
-    );
-    expect(html).toContain("Original Scan.jpg");
-    expect(html).toContain("unparseable");
-    expect(html).toContain("Tesseract is not installed.");
+    expect(detail.jdInputPreviews[0]).toMatchObject({
+      label: "Example AI - Screenshot JD",
+      kind: "image",
+      contentType: "image/png",
+    });
+    expect(detail.jdInputPreviews[0].imageDataUrl).toContain("data:image/png;base64,");
+    expect(html).toContain("Example AI - Screenshot JD");
+    expect(html).toContain("点击放大");
+    expect(html).toContain("data:image/png;base64,");
+    expect(html).not.toContain("input_files/jd/jd-scan.png");
   });
 
   it("renders the upload page as a three-step draft workflow", () => {
@@ -1091,36 +1103,38 @@ describe("run viewer pages", () => {
     expect(html).toContain("数据存储位置");
   });
 
-  it("renders run detail page with incomplete-stage messaging", async () => {
+  it("renders run detail page with product empty evaluation messaging", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo" }) }));
 
-    expect(html).toContain("生成阶段");
-    expect(html).toContain("阶段未完成");
+    expect(html).toContain("评估结果尚未生成");
+    expect(html).toContain("完成本地评估后");
+    expect(html).not.toContain("生成阶段");
+    expect(html).not.toContain("阶段未完成");
   });
 
-  it("renders chinese variant alias as title while keeping raw id in body", async () => {
+  it("hides raw variant identifiers from the evaluation detail page", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain("岗位定制版本（jd-001）");
-    expect(html).toContain("variant-jd-jd-001");
+    expect(html).toContain("岗位定制版本");
+    expect(html).not.toContain("variant-jd-jd-001");
   });
 
-  it("renders generate variants without the variant type pill", async () => {
+  it("does not render generated artifact cards on the evaluation detail page", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain('id="variant-variant-jd-jd-001"');
+    expect(html).not.toContain('id="variant-variant-jd-jd-001"');
     expect(html).not.toContain('<p class="pill">岗位定制版本</p>');
   });
 
@@ -1131,9 +1145,9 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain("评估阶段");
+    expect(html).toContain("评估结果");
     expect(html).toContain("决策分");
-    expect(html).toContain("维度矩阵");
+    expect(html).toContain("匹配维度");
     expect(html).toContain("证据引用");
     expect(html).toContain("风险解释");
     expect(html).toContain("81%");
@@ -1147,22 +1161,20 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-v057" }) }));
 
-    expect(html).toContain("投递前门槛");
-    expect(html).toContain("硬门槛审查");
-    expect(html).toContain("真实匹配");
-    expect(html).toContain("改写潜力");
-    expect(html).toContain("风险压力");
+    expect(html).toContain("匹配度");
+    expect(html).toContain("补强空间");
+    expect(html).toContain("风险");
   });
 
-  it("links matrix rows to the matching customized resume card", async () => {
+  it("does not link matrix rows to raw customized resume anchors", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain('href="#variant-variant-jd-jd-001"');
-    expect(html).toContain("打开对应定制简历");
+    expect(html).not.toContain('href="#variant-variant-jd-jd-001"');
+    expect(html).not.toContain("打开对应定制简历");
   });
 
   it("moves fit analysis and application advice into matrix row expanders", async () => {
@@ -1193,6 +1205,11 @@ describe("run viewer pages", () => {
   it("renders report page markdown with structured interview prep summary", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-full");
+    await writeFile(
+      path.join(runsDir, "demo-full", "report", "summary.md"),
+      "# ShotgunCV v0.3.0 LLM Eval Summary\n\n- gate: hard_gate_missing\n- review: needs_review\n- Top Evidence: 围绕 LLM 辅助工作流搭建过内部工具\n",
+      "utf-8",
+    );
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-full" }) }));
@@ -1204,13 +1221,17 @@ describe("run viewer pages", () => {
     expect(html).toContain("面试前突击内容");
     expect(html).toContain("决策摘要");
     expect(html).toContain("推荐岗位");
-    expect(html).toContain("引用 / 来源依据");
+    expect(html).toContain("依据完整度");
     expect(html).toContain("原始报告");
     expect(html).toContain("report-source-panel");
-    expect(html).toContain("来源：");
+    expect(html).not.toContain("来源：");
     expect(html).toContain("报告目录");
     expect(html).toContain("推荐岗位");
     expect(html).toContain("离线评估指标");
+    expect(html).toContain("硬性要求缺少证据");
+    expect(html).toContain("需要复核");
+    expect(html).not.toContain("hard_gate_missing");
+    expect(html).not.toContain("needs_review");
     expect(html).not.toContain("主要风险");
   });
 
@@ -1259,7 +1280,7 @@ describe("run viewer pages", () => {
 
     expect(runHtml).toContain("投递建议");
     expect(reportHtml).toContain("投递决策摘要");
-    expect(reportHtml).toContain("投递决策：apply");
+    expect(reportHtml).toContain("投递建议：建议投递");
     expect(`${runHtml}\n${reportHtml}`).not.toContain("undefined");
   });
 
@@ -1342,18 +1363,17 @@ describe("run viewer pages", () => {
     const homeHtml = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("岗位评估队列");
-    expect(html).toContain("总评估");
-    expect(html).toContain("需复核门槛");
+    expect(html).toContain("岗位结果");
+    expect(html).toContain("需复核");
     expect(html).toContain("高风险岗位");
-    expect(html).toContain("历史产物");
+    expect(html).toContain("历史结果");
     expect(html).toContain("投递建议");
     expect(html).toContain("LLM Product Engineer");
-    expect(html).toContain("真实匹配");
-    expect(html).toContain("改写潜力");
-    expect(html).toContain("风险分");
+    expect(html).toContain("匹配");
+    expect(html).toContain("补强");
+    expect(html).toContain("风险");
     expect(html).toContain('href="/runs/demo-v057#evaluation-jd-001"');
     expect(html).toContain('href="/runs/demo-v057/report"');
-    expect(homeHtml).toContain('href="/evaluations"');
     expect(homeHtml).toContain("评估结果");
   });
 
@@ -1367,7 +1387,7 @@ describe("run viewer pages", () => {
 
     expect(results).toEqual([]);
     expect(html).toContain("暂无评估结果");
-    expect(html).toContain("等待运行批次完成评估阶段");
+    expect(html).toContain("等待投递完成评估");
   });
 
   it("renders evaluation pagination and score trend summary for dense JD queues", async () => {
@@ -1381,7 +1401,7 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("平均最终分");
     expect(html).toContain("平均风险分");
-    expect(html).toContain("评估基于已固化");
+    expect(html).toContain("评估基于最近一次生成结果");
     expect(html).toContain("第 1 / 2 页");
     expect(html).toContain("每页 10 条");
     expect(html).toContain("共 12 条");

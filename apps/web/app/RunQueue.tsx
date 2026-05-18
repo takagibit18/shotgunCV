@@ -11,7 +11,6 @@ type RunListFilterState = {
   query: string;
   status: string;
   stage: string;
-  provider: string;
 };
 
 type RunSortKey = "recent" | "progress" | "status" | "label";
@@ -23,22 +22,9 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
     query: "",
     status: "all",
     stage: "all",
-    provider: "all",
   });
   const [sortKey, setSortKey] = useState<RunSortKey>("recent");
   const [page, setPage] = useState(1);
-
-  const providerOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          runs.flatMap((run) => [run.analyzerProvider, run.generatorProvider, run.judgeProvider, run.plannerProvider]),
-        ),
-      )
-        .filter((provider) => provider && provider !== "unknown")
-        .sort(),
-    [runs],
-  );
 
   const visibleRuns = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -48,8 +34,6 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           run.runId,
           run.label,
           run.draftStatus,
-          run.generatorProvider,
-          run.judgeProvider,
           run.runStatus?.error_summary ?? "",
           run.runStatus?.quality_summary ?? "",
         ]
@@ -58,9 +42,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
         const matchesQuery = !query || queryText.includes(query);
         const matchesStatus = filters.status === "all" || run.draftStatus === filters.status;
         const matchesStage = filters.stage === "all" || run.completedStages.some((stage) => stage === filters.stage);
-        const providers = [run.analyzerProvider, run.generatorProvider, run.judgeProvider, run.plannerProvider];
-        const matchesProvider = filters.provider === "all" || providers.includes(filters.provider);
-        return matchesQuery && matchesStatus && matchesStage && matchesProvider;
+        return matchesQuery && matchesStatus && matchesStage;
       })
       .sort((left, right) => compareRuns(left, right, sortKey));
   }, [filters, runs, sortKey]);
@@ -69,9 +51,12 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
   const paginatedRuns = visibleRuns.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const onlyDrafts = runs.length > 0 && runs.every((run) => run.draftStatus === "draft");
+  const activeCount = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued").length;
+  const attentionCount = runs.filter((run) => run.draftStatus === "failed" || run.runStatus?.error_summary).length;
+  const reportCount = runs.filter((run) => run.completedStages.includes("report")).length;
 
   function handleReset() {
-    setFilters({ query: "", status: "all", stage: "all", provider: "all" });
+    setFilters({ query: "", status: "all", stage: "all" });
     setSortKey("recent");
   }
 
@@ -84,9 +69,28 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       <div className="section-heading queue-heading">
         <div>
           <p className="eyebrow">运行队列</p>
-          <h2>本地运行工作队列</h2>
-          <p className="section-copy">按状态、阶段和模型快速定位需要处理的批次。</p>
+          <h2>投递进度</h2>
+          <p className="section-copy">看清每个投递的当前状态、进度和下一步处理动作。</p>
         </div>
+      </div>
+
+      <div className="eval-summary-strip queue-summary-strip" aria-label="运行队列总览">
+        <span className="eval-summary-item">
+          <Icon name="list" />
+          全部投递 <strong>{runs.length}</strong>
+        </span>
+        <span className="eval-summary-item">
+          <Icon name="play" />
+          进行中 <strong>{activeCount}</strong>
+        </span>
+        <span className="eval-summary-item">
+          <Icon name="alert-triangle" />
+          需要处理 <strong>{attentionCount}</strong>
+        </span>
+        <span className="eval-summary-item">
+          <Icon name="document" />
+          可查看报告 <strong>{reportCount}</strong>
+        </span>
       </div>
 
       <div className="queue-controls" aria-label="运行队列筛选">
@@ -94,8 +98,8 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           <span>搜索</span>
           <input
             value={filters.query}
-            placeholder="搜索运行批次、标签、模型"
-            aria-label="搜索运行批次、标签、模型"
+            placeholder="搜索投递名称、状态、风险"
+            aria-label="搜索投递名称、状态、风险"
             onChange={(event) => setFilters((current) => ({ ...current, query: event.currentTarget.value }))}
           />
         </label>
@@ -130,21 +134,6 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           </select>
         </label>
         <label className="control-field">
-          <span>模型筛选</span>
-          <select
-            value={filters.provider}
-            aria-label="模型筛选"
-            onChange={(event) => setFilters((current) => ({ ...current, provider: event.currentTarget.value }))}
-          >
-            <option value="all">全部模型</option>
-            {providerOptions.map((provider) => (
-              <option key={provider} value={provider}>
-                {provider}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="control-field">
           <span>排序</span>
           <select
             value={sortKey}
@@ -164,7 +153,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
 
       {runs.length === 0 ? (
         <div className="empty-state">
-          <h3>暂无运行批次</h3>
+          <h3>暂无投递</h3>
           <p>先创建一个投递草稿，或把已有运行目录放入当前本地数据目录。</p>
           <Link href="/upload" className="primary-link">
             创建投递草稿
@@ -197,30 +186,28 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       {visibleRuns.length > 0 ? (
         <div className="run-table" role="table" aria-label="运行队列">
           <div className="run-table-head" role="row">
-            <span role="columnheader">运行批次</span>
+            <span role="columnheader">投递</span>
             <span role="columnheader">状态</span>
-            <span role="columnheader">阶段进度</span>
-            <span role="columnheader">模型提供商</span>
-            <span role="columnheader">风险与动作</span>
+            <span role="columnheader">进度</span>
+            <span role="columnheader">需要关注</span>
             <span role="columnheader">操作</span>
           </div>
           {paginatedRuns.map((run) => (
             <article key={run.runId} className="run-row" role="row">
               <div className="run-primary" role="cell">
                 <Link href={`/runs/${run.runId}`} className="run-title-link">
-                  <strong title={run.label || ""}>{run.label || "未命名运行"}</strong>
+                  <strong title={run.label || ""}>{run.label || "未命名投递"}</strong>
                 </Link>
-                <span className="mono" title={run.runId}>{truncateText(run.runId, 28)}</span>
-                <span className="muted">{formatDateTime(run.lastModified)}</span>
+                <span className="muted">最近更新 {formatDateTime(run.lastModified)}</span>
               </div>
               <div className="run-status-cell" role="cell">
                 <span className={buildStatusClassName(run.draftStatus)}>{STATUS_LABELS[run.draftStatus] ?? run.draftStatus}</span>
-                {run.runStatus?.quality_summary ? <span className="status-chip warning">质量警告</span> : null}
-                {run.runStatus?.error_summary ? <span className="status-chip danger">失败摘要</span> : null}
+                {run.runStatus?.quality_summary ? <span className="status-chip warning">有提醒</span> : null}
+                {run.runStatus?.error_summary ? <span className="status-chip danger">失败</span> : null}
               </div>
               <div className="run-progress" role="cell">
                 <div className="progress-meta">
-                  <span>阶段完成</span>
+                  <span>已完成</span>
                   <strong>{run.completedStages.length}/6</strong>
                 </div>
                 <div className="stage-track" aria-label={`阶段完成 ${run.completedStages.length}/6`}>
@@ -244,38 +231,28 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
                   )}
                 </div>
               </div>
-              <div className="provider-stack" role="cell">
-                <span title={run.generatorProvider}>
-                  生成 <strong>{truncateText(run.generatorProvider, 16)}</strong>
-                </span>
-                <span title={run.judgeProvider}>
-                  评审 <strong>{truncateText(run.judgeProvider, 16)}</strong>
-                </span>
-              </div>
               <div className="run-action-cell" role="cell">
                 <p
                   className={run.runStatus?.error_summary ? "risk-line" : "muted"}
                   title={run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? ""}
                 >
-                  {truncateText(run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? "暂无阻断风险", 30)}
+                  {truncateText(run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? getNextStepText(run), 34)}
                 </p>
                 <span className={run.runStatus?.error_summary ? "status-chip danger" : "status-chip success"}>
-                  {run.runStatus?.error_summary ? "需处理" : "健康"}
+                  {run.runStatus?.error_summary ? "需处理" : "可继续"}
                 </span>
               </div>
               <div className="row-actions" role="cell">
-                <Link href={`/runs/${run.runId}`} className="secondary-link">
-                  详情
+                <Link href={`/runs/${run.runId}`} className="secondary-link icon-link">
+                  <Icon name="eye" />
+                  {getPrimaryActionText(run)}
                 </Link>
                 {run.completedStages.includes("report") ? (
-                  <Link href={`/runs/${run.runId}/report`} className="secondary-link">
+                  <Link href={`/runs/${run.runId}/report`} className="secondary-link icon-link">
+                    <Icon name="document" />
                     报告
                   </Link>
-                ) : (
-                  <span className="secondary-link" aria-disabled="true">
-                    报告
-                  </span>
-                )}
+                ) : null}
               </div>
             </article>
           ))}
@@ -313,6 +290,32 @@ function PaginationSummary({
       </div>
     </div>
   );
+}
+
+function getNextStepText(run: RunSummary): string {
+  if (run.draftStatus === "draft") {
+    return "确认输入后启动评估流程";
+  }
+  if (run.draftStatus === "failed") {
+    return "查看失败原因并重新处理";
+  }
+  if (run.draftStatus === "running" || run.draftStatus === "queued") {
+    return "流程正在推进，查看最新进度";
+  }
+  if (run.completedStages.includes("report")) {
+    return "报告已就绪，可进入结果复核";
+  }
+  return "继续查看当前进度";
+}
+
+function getPrimaryActionText(run: RunSummary): string {
+  if (run.draftStatus === "draft") {
+    return "启动";
+  }
+  if (run.draftStatus === "failed") {
+    return "处理";
+  }
+  return "查看";
 }
 
 function compareRuns(left: RunSummary, right: RunSummary, sortKey: RunSortKey): number {

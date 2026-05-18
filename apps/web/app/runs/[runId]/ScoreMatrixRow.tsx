@@ -6,7 +6,6 @@ export type ScoreMatrixRowProps = {
   jdId: string;
   title: string;
   variantDisplayName: string;
-  variantId: string;
   overallScore: number;
   gapCount: number;
   topReasons: string[];
@@ -27,7 +26,6 @@ export function ScoreMatrixRow({
   jdId,
   title,
   variantDisplayName,
-  variantId,
   overallScore,
   gapCount,
   topReasons,
@@ -37,10 +35,10 @@ export function ScoreMatrixRow({
 }: ScoreMatrixRowProps) {
   const score = toPercent(scorecard?.final_overall_score ?? scorecard?.overall_score ?? overallScore);
   const dimensions: DimensionItem[] = [
-    { key: "verified", label: "真实匹配", value: scorecard?.verified_fit_score, tone: "evidence" },
-    { key: "rewritePotential", label: "改写潜力", value: scorecard?.rewrite_potential_score, tone: "rewrite" },
-    { key: "risk", label: "风险压力", value: scorecard?.risk_score ?? scorecard?.gap_risk_score, tone: "risk" },
-    { key: "fit", label: "岗位匹配", value: scorecard?.fit_score },
+    { key: "verified", label: "匹配度", value: scorecard?.verified_fit_score, tone: "evidence" },
+    { key: "rewritePotential", label: "补强空间", value: scorecard?.rewrite_potential_score, tone: "rewrite" },
+    { key: "risk", label: "风险", value: scorecard?.risk_score ?? scorecard?.gap_risk_score, tone: "risk" },
+    { key: "fit", label: "岗位适配", value: scorecard?.fit_score },
     { key: "ats", label: "关键词", value: scorecard?.ats_score },
     { key: "evidence", label: "证据覆盖", value: scorecard?.evidence_score },
   ];
@@ -64,13 +62,11 @@ export function ScoreMatrixRow({
       <div className="matrix-main matrix-single-panel">
         <div className="matrix-titleline">
           <div>
-            <a className="matrix-title-link" href={`#${buildVariantAnchorId(variantId)}`} title="打开对应定制简历">
+            <div className="matrix-title-link">
               <h4>{title}</h4>
-            </a>
+            </div>
             <p className="muted">
-              {variantDisplayName}
-              {" · "}
-              <span className="mono">{variantId}</span>
+              {formatVariantDisplayName(variantDisplayName)}
             </p>
           </div>
           <div className="matrix-score-area">
@@ -102,7 +98,7 @@ export function ScoreMatrixRow({
           </div>
           <div className="action-strip-col">
             <h5>投递建议</h5>
-            <p>{strategy?.apply_decision ?? "暂无投递决策"}</p>
+            <p>{formatDecision(strategy?.apply_decision ?? "review")}</p>
           </div>
         </div>
 
@@ -136,7 +132,7 @@ export function ScoreMatrixRow({
             <h5>风险解释</h5>
             <ul>
               {(risks.length ? risks.slice(0, 3) : ["当前岗位未记录显著风险。"]).map((item, i) => (
-                <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
+                <li key={`${i}-${item.slice(0, 20)}`}>{formatUserText(item)}</li>
               ))}
             </ul>
           </div>
@@ -166,7 +162,7 @@ function toStringArray(value: unknown): string[] {
 
 function DimensionBars({ dimensions }: { dimensions: DimensionItem[] }) {
   return (
-    <div className="dimension-grid" aria-label="维度矩阵">
+    <div className="dimension-grid" aria-label="匹配维度">
       {dimensions.map((dimension) => {
         const percent = dimension.value === undefined ? 0 : toPercent(dimension.value);
         return (
@@ -191,11 +187,6 @@ function toPercent(value: number): number {
 }
 
 
-function buildVariantAnchorId(variantId: string): string {
-  return `variant-${variantId}`;
-}
-
-
 function buildGateClassName(status: string): string {
   if (status === "blocked") {
     return "status-chip danger";
@@ -213,10 +204,40 @@ function buildGateClassName(status: string): string {
 function formatGateStatus(status: string): string {
   const labels: Record<string, string> = {
     pass: "通过",
-    blocked: "阻断",
-    needs_review: "需复核",
+    blocked: "暂不建议投递",
+    needs_review: "需要复核",
   };
-  return labels[status] ?? status;
+  return labels[status] ?? formatUserText(status);
+}
+
+
+function formatDecision(value: string): string {
+  const labels: Record<string, string> = {
+    apply: "建议投递",
+    manual_review: "人工复核",
+    hold: "暂缓",
+    skip: "跳过",
+    review: "复核后决定",
+  };
+  return labels[value] ?? formatUserText(value);
+}
+
+
+function formatVariantDisplayName(value: string): string {
+  if (!value) {
+    return "推荐简历版本";
+  }
+  return value.replace(/（[^）]+）/g, "").replace(/\([^)]+\)/g, "") || "推荐简历版本";
+}
+
+
+function formatUserText(value: string): string {
+  const labels: Record<string, string> = {
+    hard_gate_missing: "硬性要求缺少证据",
+    needs_review: "需要复核",
+    manual_review: "人工复核",
+  };
+  return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
 }
 
 

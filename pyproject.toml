@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 authors = [{ name = "ShotgunCV Contributors" }]
 dependencies = ["pypdf>=5.0", "PyMuPDF>=1.24", "Pillow>=10.0", "pytesseract>=0.3.10"]
 
+[project.scripts]
+shotguncv = "shotguncv_cli.main:main"
+
 [tool.setuptools]
 package-dir = {"" = "."}
 

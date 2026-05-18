@@ -13,8 +13,8 @@ export default async function RunsPage() {
         <section className="page-header">
           <div>
             <p className="eyebrow">运行队列</p>
-            <h1 className="page-title">本地运行工作队列</h1>
-            <p className="hero-copy">集中处理所有 run 的搜索、筛选、排序、分页、详情跳转和报告入口。</p>
+            <h1 className="page-title">投递进度</h1>
+            <p className="hero-copy">把每个投递的状态、进度和下一步动作放在同一个工作台里。</p>
           </div>
         </section>
 

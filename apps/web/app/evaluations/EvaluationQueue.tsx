@@ -20,10 +20,6 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
   const [sortKey, setSortKey] = useState<EvaluationSortKey>("recent");
   const [page, setPage] = useState(1);
 
-  const providerOptions = useMemo(
-    () => Array.from(new Set(results.map((item) => item.provider).filter((provider) => provider !== "unknown"))).sort(),
-    [results],
-  );
   const decisionOptions = useMemo(
     () => Array.from(new Set(results.map((item) => item.applyDecision).filter(Boolean))).sort(),
     [results],
@@ -57,8 +53,8 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           <FilterLabel icon="search" text="搜索" />
           <input
             value={filters.query}
-            placeholder="搜索岗位、运行批次、证据、风险、建议"
-            aria-label="搜索岗位、运行批次、证据、风险、建议"
+            placeholder="搜索岗位、证据、风险、建议"
+            aria-label="搜索岗位、证据、风险、建议"
             onChange={(event) => setFilters((current) => ({ ...current, query: event.currentTarget.value }))}
           />
         </label>
@@ -73,7 +69,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
             <option value="pass">通过</option>
             <option value="needs_review">需复核</option>
             <option value="blocked">阻断</option>
-            <option value="legacy">历史产物</option>
+            <option value="legacy">历史结果</option>
           </select>
         </label>
         <label className="control-field">
@@ -102,21 +98,6 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
             <option value="medium">中分</option>
             <option value="low">低分</option>
             <option value="unknown">未知</option>
-          </select>
-        </label>
-        <label className="control-field">
-          <FilterLabel icon="model" text="模型" />
-          <select
-            value={filters.provider}
-            aria-label="模型筛选"
-            onChange={(event) => setFilters((current) => ({ ...current, provider: event.currentTarget.value }))}
-          >
-            <option value="all">全部模型</option>
-            {providerOptions.map((provider) => (
-              <option key={provider} value={provider}>
-                {provider}
-              </option>
-            ))}
           </select>
         </label>
         <label className="control-field">
@@ -157,7 +138,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
       {results.length === 0 ? (
         <div className="empty-state">
           <h3>暂无评估结果</h3>
-          <p>等待运行批次完成评估阶段后，这里会按岗位聚合评分、门槛、风险和投递建议。</p>
+          <p>等待投递完成评估后，这里会按岗位聚合匹配度、风险和投递建议。</p>
           <Link href="/runs" className="primary-link">
             返回运行队列
           </Link>
@@ -171,7 +152,6 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           当前筛选：{filters.gate !== "all" ? `门槛=${formatGateStatus(filters.gate)} ` : ""}
             {filters.risk !== "all" ? `风险=${filters.risk} ` : ""}
             {filters.score !== "all" ? `分数=${filters.score} ` : ""}
-          {filters.provider !== "all" ? `模型=${filters.provider} ` : ""}
             {filters.decision !== "all" ? `建议=${filters.decision} ` : ""}
             {filters.query ? `搜索="${filters.query}" ` : ""}
           </p>
@@ -202,8 +182,8 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
         <div className="evaluation-table" role="table" aria-label="岗位评估队列">
           <div className="evaluation-table-head" role="row">
             <span role="columnheader">岗位</span>
-            <span role="columnheader">门槛 / 投递建议</span>
-            <span role="columnheader">评分矩阵</span>
+            <span role="columnheader">投递判断</span>
+            <span role="columnheader">匹配与风险</span>
             <span role="columnheader">证据与风险</span>
             <span role="columnheader">操作</span>
           </div>
@@ -213,9 +193,8 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
                 <Link href={item.detailHref} className="run-title-link">
                   <strong>{item.title}</strong>
                 </Link>
-                <span className="mono">{item.jdId}</span>
-                <span className="muted">{item.runLabel}</span>
-                <span className="muted">{formatDateTime(item.lastModified)}</span>
+                <span className="muted">{formatDisplayName(item.runLabel)}</span>
+                <span className="muted">最近更新 {formatDateTime(item.lastModified)}</span>
               </div>
               <div className="evaluation-status-cell" role="cell">
                 <span className={buildGateClassName(item.gateStatus)}>{formatGateStatus(item.gateStatus)}</span>
@@ -223,14 +202,14 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
                   <Icon name="briefcase" />
                   投递建议：{formatDecision(item.applyDecision)}
                 </span>
-                {item.artifactMode === "legacy" ? <span className="pill">历史产物</span> : null}
+                {item.artifactMode === "legacy" ? <span className="pill">历史结果</span> : null}
                 {item.gateReasons.length > 0 ? <p className="risk-line">{summarizeList(item.gateReasons)}</p> : null}
               </div>
               <div className="evaluation-score-cell" role="cell">
-                <ScoreMetric label="最终分" value={item.finalScore} />
-                <ScoreMetric label="真实匹配" value={item.verifiedFitScore} />
-                <ScoreMetric label="改写潜力" value={item.rewritePotentialScore} />
-                <ScoreMetric label="风险分" value={item.riskScore} tone="risk" />
+                <ScoreMetric label="综合" value={item.finalScore} />
+                <ScoreMetric label="匹配" value={item.verifiedFitScore} />
+                <ScoreMetric label="补强" value={item.rewritePotentialScore} />
+                <ScoreMetric label="风险" value={item.riskScore} tone="risk" />
               </div>
               <div className="evaluation-evidence-cell" role="cell">
                 <p>{firstText(item.evidenceRefs, item.topReasons, "暂无证据引用")}</p>
@@ -241,7 +220,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
               <div className="row-actions" role="cell">
                 <Link href={item.detailHref} className="secondary-link icon-link">
                   <Icon name="eye" />
-                  详情
+                  查看
                 </Link>
                 <Link href={item.reportHref} className="secondary-link icon-link">
                   <Icon name="document" />
@@ -254,6 +233,13 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
       ) : null}
     </section>
   );
+}
+
+function formatDisplayName(value: string): string {
+  if (!value || /^[a-z0-9][a-z0-9._-]*$/i.test(value)) {
+    return "未命名投递";
+  }
+  return value;
 }
 
 function PaginationSummary({
@@ -334,7 +320,7 @@ function formatGateStatus(status: string): string {
     pass: "通过",
     blocked: "阻断",
     needs_review: "需复核",
-    legacy: "历史产物",
+    legacy: "历史结果",
   };
   return labels[status] ?? status;
 }

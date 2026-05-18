@@ -17,6 +17,11 @@ type SpawnedRunProcess = {
 };
 type SpawnRunner = (command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => SpawnedRunProcess;
 
+type CliResolution = {
+  command: string;
+  prefixArgs: string[];
+};
+
 type DraftPatchInput = {
   candidateId?: string;
   label?: string;
@@ -64,10 +69,17 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     throw new RunActionError("not_failed", "只有失败的运行批次可以从失败阶段继续。");
   }
 
-  const args = await buildCliArgs(runDir, action);
-  const command = process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv";
-  if (spawnRunner === defaultSpawnRunner && !(await commandAvailable(command))) {
-    throw new RunActionError("cli_not_found", "CLI 命令未找到，请确认 shotguncv 已安装并在 PATH 中。", 503);
+  const cliArgs = await buildCliArgs(runDir, action);
+  let command: string;
+  let finalArgs: string[];
+
+  if (spawnRunner === defaultSpawnRunner) {
+    const resolved = await resolveCli();
+    command = resolved.command;
+    finalArgs = [...resolved.prefixArgs, ...cliArgs];
+  } else {
+    command = process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv";
+    finalArgs = cliArgs;
   }
 
   const startedAt = nowIso();
@@ -92,7 +104,7 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     last_action: action,
   });
 
-  const child = spawnRunner(command, args, { cwd: path.resolve(getRunsDir(), ".."), env: process.env });
+  const child = spawnRunner(command, finalArgs, { cwd: path.resolve(getRunsDir(), ".."), env: process.env });
   const output = createOutputBuffer();
   child.stdout?.on("data", (chunk) => output.push(chunk));
   child.stderr?.on("data", (chunk) => output.push(chunk));
@@ -209,6 +221,35 @@ function defaultSpawnRunner(command: string, args: string[], options: { cwd: str
 }
 
 
+async function resolveCli(): Promise<CliResolution> {
+  const explicitCommand = process.env.SHOTGUNCV_CLI_COMMAND;
+  if (explicitCommand) {
+    if (await commandAvailable(explicitCommand)) {
+      return { command: explicitCommand, prefixArgs: [] };
+    }
+    throw new RunActionError(
+      "cli_not_found",
+      `CLI 命令未找到（${explicitCommand}），请确认已安装并在 PATH 中，或取消 SHOTGUNCV_CLI_COMMAND 环境变量以使用自动发现。`,
+      503,
+    );
+  }
+
+  if (await commandAvailable("shotguncv")) {
+    return { command: "shotguncv", prefixArgs: [] };
+  }
+
+  const python = await findPython();
+  if (python && (await pythonModuleAvailable(python, "shotguncv_cli.main"))) {
+    return { command: python, prefixArgs: ["-m", "shotguncv_cli.main"] };
+  }
+
+  throw new RunActionError(
+    "cli_not_found",
+    "未找到 shotguncv 命令。请执行 `pip install -e .` 安装 CLI，或设置 SHOTGUNCV_CLI_COMMAND 环境变量。",
+    503,
+  );
+}
+
 async function commandAvailable(command: string): Promise<boolean> {
   if (command.includes("/") || command.includes("\\") || path.isAbsolute(command)) {
     try {
@@ -221,6 +262,29 @@ async function commandAvailable(command: string): Promise<boolean> {
   const resolver = process.platform === "win32" ? "where.exe" : "which";
   const result = spawnSync(resolver, [command], { env: process.env, encoding: "utf-8", windowsHide: true });
   return result.status === 0;
+}
+
+async function findPython(): Promise<string | null> {
+  for (const candidate of ["python", "python3"]) {
+    if (await commandAvailable(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function pythonModuleAvailable(pythonCmd: string, moduleName: string): Promise<boolean> {
+  try {
+    const result = spawnSync(pythonCmd, ["-c", `import ${moduleName}`], {
+      env: process.env,
+      encoding: "utf-8",
+      windowsHide: true,
+      timeout: 10000,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 
