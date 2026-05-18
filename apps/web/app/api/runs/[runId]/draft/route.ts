@@ -21,11 +21,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     const jdTextDisplayNames = formData
       .getAll("jdTextDisplayNames")
       .filter((item): item is string => typeof item === "string");
+    const cvTexts = formData.getAll("cvText").filter((item): item is string => typeof item === "string");
+    const cvTextOriginalNames = formData
+      .getAll("cvTextOriginalName")
+      .filter((item): item is string => typeof item === "string");
     return NextResponse.json(
       await patchRunDraft(runId, {
         candidateId: stringValue(formData.get("candidateId")),
         label: stringValue(formData.get("label")),
         cvFiles,
+        cvText: cvTexts.length <= 1 ? cvTexts[0] : undefined,
+        cvTexts:
+          cvTexts.length > 1
+            ? cvTexts.map((text, index) => ({ text, originalName: cvTextOriginalNames[index] }))
+            : cvTexts.length === 1 && cvTextOriginalNames[0]
+              ? [{ text: cvTexts[0], originalName: cvTextOriginalNames[0] }]
+              : undefined,
         jdFiles,
         jdFileDisplayNames,
         jdTexts,

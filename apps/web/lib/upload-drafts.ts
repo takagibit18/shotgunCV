@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { UploadManifest, UploadedInputFile } from "./types";
 import { getRunsDir } from "./runs";
+import { extractPdfText } from "./pdf-text";
 
 
 type DraftFile = File;
@@ -23,6 +24,18 @@ type CreateRunDraftResult = {
   status: "draft";
   uploadManifestPath: string;
   nextCommand: string;
+  cvIssues?: CvIssue[];
+  needsManualText: boolean;
+};
+
+type CvIssue = {
+  originalName: string;
+  quality: "readable" | "scanned" | "empty";
+};
+
+type WebUploadManifest = UploadManifest & {
+  cvIssues?: CvIssue[];
+  needsManualText?: boolean;
 };
 
 type DraftErrorCode =
@@ -82,19 +95,22 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
   try {
     const uploadedAt = now.toISOString();
     const jdUsedNames = new Set<string>();
+    const cvIssues = await detectCvIssues(input.cvFiles);
+    const needsManualText = cvIssues.length > 0;
     const files: UploadedInputFile[] = [
       ...(await writeRoleFiles(runDir, "cv", input.cvFiles, uploadedAt)),
       ...(await writeRoleFiles(runDir, "jd", input.jdFiles, uploadedAt, jdUsedNames, jdFileDisplayNames)),
       ...(await writePastedJdTexts(runDir, jdTextEntries, uploadedAt, jdUsedNames)),
     ];
     const nextCommand = buildNextCommand(runId, candidateId);
-    const manifest: UploadManifest = {
+    const manifest: WebUploadManifest = {
       schemaVersion: "v0.5.1-upload-manifest",
       candidateId,
       label,
       createdAt: uploadedAt,
       files,
       nextCommand,
+      ...(needsManualText ? { cvIssues, needsManualText } : { needsManualText: false }),
     };
     await writeDefaultRunConfig(runDir, label);
     await writeFile(path.join(runDir, UPLOAD_MANIFEST_PATH), JSON.stringify(manifest, null, 2), "utf-8");
@@ -120,6 +136,8 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
       status: "draft",
       uploadManifestPath: UPLOAD_MANIFEST_PATH,
       nextCommand,
+      cvIssues: cvIssues.length > 0 ? cvIssues : undefined,
+      needsManualText,
     };
   } catch (error) {
     if (error instanceof DraftCreationError) {
@@ -127,6 +145,21 @@ export async function createRunDraft(input: CreateRunDraftInput): Promise<Create
     }
     throw new DraftCreationError("write_failed", error instanceof Error ? error.message : "创建投递草稿失败。");
   }
+}
+
+
+async function detectCvIssues(files: DraftFile[]): Promise<CvIssue[]> {
+  const issues: CvIssue[] = [];
+  for (const file of files) {
+    if (path.extname(file.name).toLowerCase() !== ".pdf") {
+      continue;
+    }
+    const result = await extractPdfText(Buffer.from(await file.arrayBuffer()));
+    if (result.quality === "scanned" || result.quality === "empty") {
+      issues.push({ originalName: file.name, quality: result.quality });
+    }
+  }
+  return issues;
 }
 
 
@@ -343,4 +376,4 @@ async function writeDefaultRunConfig(runDir: string, label: string): Promise<voi
 }
 
 
-export type { CreateRunDraftInput, CreateRunDraftResult };
+export type { CreateRunDraftInput, CreateRunDraftResult, CvIssue };

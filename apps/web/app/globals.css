@@ -856,6 +856,17 @@ p {
   margin: 0 20px 12px;
 }
 
+.queue-delete-message {
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-bg);
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .eval-filter-heading {
   padding: 16px 16px 0;
   margin: 0;
@@ -945,7 +956,8 @@ p {
 
 .evaluation-detail-metrics,
 .evaluation-focus-section,
-.evaluation-action-section {
+.evaluation-action-section,
+.run-state-panel {
   animation: ai-panel-in 420ms ease both;
 }
 
@@ -1004,12 +1016,7 @@ p {
   line-height: 1.55;
 }
 
-.jd-image-preview {
-  display: grid;
-  gap: 12px;
-}
-
-.jd-image-preview summary {
+.jd-image-preview-link {
   position: relative;
   display: grid;
   overflow: hidden;
@@ -1017,22 +1024,25 @@ p {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  cursor: zoom-in;
-  list-style: none;
+  color: inherit;
+  text-decoration: none;
 }
 
-.jd-image-preview summary::-webkit-details-marker,
 .jd-text-preview summary::-webkit-details-marker {
   display: none;
 }
 
-.jd-image-preview summary img {
+.jd-image-preview-link:hover {
+  border-color: var(--border-strong);
+}
+
+.jd-image-preview-link img {
   width: 100%;
   max-height: 260px;
   object-fit: cover;
 }
 
-.jd-image-preview summary span {
+.jd-image-preview-link span {
   position: absolute;
   right: 10px;
   bottom: 10px;
@@ -1044,16 +1054,84 @@ p {
   font-weight: 600;
 }
 
-.jd-image-expanded {
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--rounded-lg);
-  background: #0f172a;
+.run-state-panel {
+  border-color: rgba(203, 213, 225, 0.78);
 }
 
-.jd-image-expanded img {
-  width: 100%;
-  max-height: 72vh;
+.run-state-panel.running {
+  border-color: var(--info-bg);
+  background: var(--info-bg);
+}
+
+.run-state-panel.failed {
+  border-color: var(--danger-bg);
+  background: var(--danger-bg);
+}
+
+.run-state-panel.success {
+  border-color: var(--success-bg);
+  background: var(--success-bg);
+}
+
+.running-wave-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+}
+
+.running-wave-text span {
+  display: inline-block;
+  animation: running-wave 1.3s ease-in-out infinite;
+}
+
+@keyframes running-wave {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: translateY(0);
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.jd-image-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--canvas);
+}
+
+.jd-image-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding-bottom: 16px;
+}
+
+.jd-image-toolbar h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.jd-image-canvas {
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  min-height: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.jd-image-canvas img {
+  width: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 150px);
   object-fit: contain;
 }
 
@@ -1306,6 +1384,38 @@ p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.dependency-panel {
+  margin-top: 16px;
+}
+
+.dependency-grid {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+
+.dependency-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
+}
+
+.dependency-row strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.dependency-row p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .settings-local-config {
@@ -1613,7 +1723,7 @@ p {
 .run-table-head,
 .run-row {
   display: grid;
-  grid-template-columns: minmax(240px, 1.18fr) minmax(112px, 0.5fr) minmax(220px, 1.08fr) minmax(210px, 0.9fr) minmax(150px, 0.62fr);
+  grid-template-columns: minmax(220px, 1.1fr) minmax(112px, 0.5fr) minmax(220px, 1fr) minmax(190px, 0.85fr) minmax(230px, 0.9fr);
   gap: 14px;
   align-items: center;
   padding: 14px 20px;
@@ -1896,6 +2006,21 @@ label.primary-link {
   outline-offset: 2px;
 }
 
+.secondary-link:disabled,
+.backlink:disabled,
+.inline-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.row-delete-button {
+  color: var(--danger);
+}
+
+.row-delete-button svg {
+  color: currentColor;
+}
+
 /* backlink variant: no border, lighter weight */
 .backlink {
   border-color: transparent;
@@ -1949,6 +2074,58 @@ label.primary-link {
 .requirement-list {
   display: grid;
   gap: 10px;
+}
+
+.run-action-progress {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--info-bg);
+  border-radius: var(--radius);
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.run-action-progress.error {
+  border-color: var(--danger-bg);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.run-action-progress .progress-meta {
+  color: inherit;
+}
+
+.action-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.action-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  transition: width 240ms ease;
+}
+
+.action-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.action-progress-steps span {
+  min-width: 0;
+}
+
+.action-progress-steps span.active {
+  color: currentColor;
 }
 
 .draft-edit-form {
@@ -2464,6 +2641,36 @@ label.primary-link {
   border-color: var(--danger-bg);
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.cv-sidecar-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--warning-bg);
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.cv-sidecar-panel h3,
+.cv-sidecar-panel p {
+  margin: 0;
+}
+
+.cv-sidecar-panel p {
+  line-height: 1.6;
+}
+
+.cv-sidecar-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.cv-sidecar-panel textarea {
+  width: 100%;
+  resize: vertical;
+  color: var(--text);
 }
 
 .command-block {

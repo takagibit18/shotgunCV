@@ -1,9 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
+import { CvTextSidecarPanel } from "../../CvTextSidecarPanel";
+import type { DependencyReport } from "../../../lib/python-env";
 import type { RunDraftStatus, UploadManifest } from "../../../lib/types";
+import type { CvIssue } from "../../../lib/upload-drafts";
 
+type ActionPhase = "idle" | "submitting" | "accepted" | "refreshing" | "error";
 
 type Props = {
   runId: string;
@@ -11,33 +15,69 @@ type Props = {
   draft: UploadManifest | null;
 };
 
+type WebUploadManifest = UploadManifest & {
+  cvIssues?: CvIssue[];
+  needsManualText?: boolean;
+};
+
 
 export function RunActionPanel({ runId, draftStatus, draft }: Props) {
   const [message, setMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [actionPhase, setActionPhase] = useState<ActionPhase>("idle");
+  const [activeActionLabel, setActiveActionLabel] = useState("");
   const canEditDraft = draftStatus === "draft" && draft !== null;
   const canDelete = draftStatus === "draft" || draftStatus === "failed";
   const canRun = draftStatus === "draft";
   const canRetry = draftStatus === "failed";
+  const webDraft = draft as WebUploadManifest | null;
+  const cvIssues = webDraft?.cvIssues ?? [];
+  const [dependencyReport, setDependencyReport] = useState<DependencyReport | null>(null);
 
-  async function runAction(action: "run" | "retry_full" | "resume_failed") {
+  useEffect(() => {
+    if (draftStatus !== "draft") {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/settings/dependencies")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: DependencyReport | null) => {
+        if (!cancelled) {
+          setDependencyReport(payload);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [draftStatus]);
+
+  async function runAction(action: "run" | "retry_full" | "resume_failed", label: string) {
     setIsBusy(true);
-    setMessage("");
-    const response = await fetch(`/api/runs/${runId}/actions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    await handleResponse(response, "已提交本地运行，请稍候。页面会自动刷新显示最新状态。", { delayedReload: true });
+    setMessage(String());
+    setActionPhase("submitting");
+    setActiveActionLabel(label);
+    try {
+      const response = await fetch(`/api/runs/${runId}/actions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      await handleRunActionResponse(response);
+    } catch {
+      setIsBusy(false);
+      setActionPhase("error");
+      setMessage("提交失败，请检查本地运行环境后重试。");
+    }
   }
 
   async function deleteCurrentRun() {
     setIsBusy(true);
-    setMessage("");
+    setMessage(String());
     const response = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
     if (response.ok) {
       if (typeof window !== "undefined") {
-        window.location.href = "/";
+        window.location.href = "/runs";
       }
       return;
     }
@@ -47,13 +87,29 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
   async function patchDraft(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsBusy(true);
-    setMessage("");
+    setMessage(String());
     const formData = new FormData(event.currentTarget);
     const response = await fetch(`/api/runs/${runId}/draft`, {
       method: "PATCH",
       body: formData,
     });
     await handleResponse(response, "草稿已更新。");
+  }
+
+  async function handleRunActionResponse(response: Response) {
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string; code?: string };
+      setIsBusy(false);
+      setActionPhase("error");
+      setMessage(payload.error ?? payload.code ?? "请求失败，请检查本地运行环境后重试。");
+      return;
+    }
+    setActionPhase("accepted");
+    setMessage("已提交本地运行，正在等待状态回写。");
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => setActionPhase("refreshing"), 900);
+      window.setTimeout(() => window.location.reload(), 2200);
+    }
   }
 
   async function handleResponse(response: Response, success: string, options: { delayedReload?: boolean } = {}) {
@@ -72,20 +128,31 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
   return (
     <div className="run-action-stack">
       <div className="pill-row compact">
-        <button className="primary-link" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run")}>
+        <button className="primary-link" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run", "开始评估")}>
           {"开始评估"}
         </button>
-        <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("retry_full")}>
+        <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("retry_full", "重新评估")}>
           {"重新评估"}
         </button>
-        <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("resume_failed")}>
+        <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("resume_failed", "从失败处继续")}>
           {"从失败处继续"}
         </button>
         <button className="secondary-link danger" type="button" disabled={!canDelete || isBusy} onClick={deleteCurrentRun}>
           {"删除"}
         </button>
       </div>
+      {actionPhase !== "idle" ? <RunActionProgress phase={actionPhase} actionLabel={activeActionLabel} /> : null}
+      {draftStatus === "draft" && dependencyReport && dependencyReport.overall !== "healthy" ? (
+        <div className="notice-strip warning">
+          <strong>环境不完整</strong>
+          <span>PyMuPDF 未安装或 CLI 依赖不可用，扫描件 PDF 可能解析失败。</span>
+          <a className="secondary-link" href="/settings">
+            查看设置
+          </a>
+        </div>
+      ) : null}
       {message ? <p className="muted">{message}</p> : null}
+      {draftStatus === "draft" && cvIssues.length > 0 ? <CvTextSidecarPanel runId={runId} cvIssues={cvIssues} /> : null}
 
       {canEditDraft ? (
         <form className="draft-edit-form" onSubmit={patchDraft}>
@@ -131,6 +198,38 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
           </button>
         </form>
       ) : null}
+    </div>
+  );
+}
+
+function RunActionProgress({ phase, actionLabel }: { phase: ActionPhase; actionLabel: string }) {
+  const currentStep = phase === "submitting" ? 1 : phase === "accepted" ? 2 : phase === "refreshing" ? 3 : 0;
+  const title = phase === "error" ? "提交未完成" : `${actionLabel || "评估任务"}处理中`;
+  const helper =
+    phase === "submitting"
+      ? "正在把任务提交给本地执行器。"
+      : phase === "accepted"
+        ? "任务已接收，等待运行状态写入。"
+        : phase === "refreshing"
+          ? "正在刷新页面读取最新进度。"
+          : "请根据提示修正后重试。";
+
+  return (
+    <div className={`run-action-progress ${phase}`} role="status" aria-live="polite">
+      <div className="progress-meta">
+        <strong>{title}</strong>
+        <span>{helper}</span>
+      </div>
+      <div className="action-progress-track" aria-hidden="true">
+        <span style={{ width: `${Math.max(currentStep, 1) * 33.333}%` }} />
+      </div>
+      <div className="action-progress-steps" aria-label="运行提交进度">
+        {["提交指令", "等待回写", "刷新状态"].map((step, index) => (
+          <span key={step} className={currentStep >= index + 1 ? "active" : ""}>
+            {step}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

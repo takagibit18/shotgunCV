@@ -2,11 +2,16 @@
 
 import React, { useState, useEffect } from "react";
 
+import { CvTextSidecarPanel } from "../CvTextSidecarPanel";
+import type { CvIssue } from "../../lib/upload-drafts";
+
 type DraftSuccess = {
   runId: string;
   status: "draft";
   uploadManifestPath: string;
   nextCommand: string;
+  cvIssues?: CvIssue[];
+  needsManualText: boolean;
 };
 
 type DraftError = {
@@ -40,6 +45,17 @@ export function UploadForm() {
   const [jdTexts, setJdTexts] = useState<JdTextEntry[]>([{ id: 1, displayName: "", value: "" }]);
   const [nextTextId, setNextTextId] = useState(2);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  function handleCvTextSaved(savedOriginalNames: string[]) {
+    setResult((current) => {
+      if (!current) {
+        return current;
+      }
+      const saved = new Set(savedOriginalNames);
+      const cvIssues = (current.cvIssues ?? []).filter((issue) => !saved.has(issue.originalName));
+      return { ...current, cvIssues, needsManualText: cvIssues.length > 0 };
+    });
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -382,6 +398,10 @@ export function UploadForm() {
             <pre className="command-block">{result.nextCommand}</pre>
           </details>
         </div>
+      ) : null}
+
+      {result?.needsManualText && result.cvIssues ? (
+        <CvTextSidecarPanel runId={result.runId} cvIssues={result.cvIssues} onSaved={handleCvTextSaved} />
       ) : null}
 
       {lightboxUrl ? (

@@ -25,6 +25,8 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
   });
   const [sortKey, setSortKey] = useState<RunSortKey>("recent");
   const [page, setPage] = useState(1);
+  const [deletingRunId, setDeletingRunId] = useState("");
+  const [deleteMessage, setDeleteMessage] = useState("");
 
   const visibleRuns = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -60,20 +62,39 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
     setSortKey("recent");
   }
 
+  async function deleteRunFromQueue(run: RunSummary) {
+    if (!canDeleteRun(run)) {
+      return;
+    }
+    const confirmed = typeof window === "undefined" || window.confirm(`确认删除“${run.label || "未命名投递"}”？`);
+    if (!confirmed) {
+      return;
+    }
+    setDeletingRunId(run.runId);
+    setDeleteMessage(String());
+    try {
+      const response = await fetch(`/api/runs/${run.runId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string; code?: string };
+        setDeleteMessage(payload.error ?? payload.code ?? "删除失败，请稍后重试。");
+        return;
+      }
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      }
+    } catch {
+      setDeleteMessage("删除失败，请检查本地服务后重试。");
+    } finally {
+      setDeletingRunId("");
+    }
+  }
+
   useEffect(() => {
     setPage(1);
   }, [filters, sortKey]);
 
   return (
     <section className="section section-flush queue-section">
-      <div className="section-heading queue-heading">
-        <div>
-          <p className="eyebrow">运行队列</p>
-          <h2>投递进度</h2>
-          <p className="section-copy">看清每个投递的当前状态、进度和下一步处理动作。</p>
-        </div>
-      </div>
-
       <div className="eval-summary-strip queue-summary-strip" aria-label="运行队列总览">
         <span className="eval-summary-item">
           <Icon name="list" />
@@ -92,6 +113,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
           可查看报告 <strong>{reportCount}</strong>
         </span>
       </div>
+      {deleteMessage ? <p className="queue-delete-message" role="alert">{deleteMessage}</p> : null}
 
       <div className="queue-controls" aria-label="运行队列筛选">
         <label className="control-field queue-search">
@@ -169,7 +191,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       {runs.length > 0 && visibleRuns.length === 0 ? (
         <div className="empty-state">
           <h3>没有匹配筛选结果</h3>
-          <p>清空搜索词或放宽状态、阶段、模型条件。</p>
+          <p>清空搜索词或放宽状态、阶段条件。</p>
         </div>
       ) : null}
 
@@ -253,6 +275,16 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
                     报告
                   </Link>
                 ) : null}
+                <button
+                  className="secondary-link danger icon-link row-delete-button"
+                  type="button"
+                  disabled={!canDeleteRun(run) || deletingRunId === run.runId}
+                  title={canDeleteRun(run) ? "删除该投递" : "仅草稿或失败的投递可删除"}
+                  onClick={() => deleteRunFromQueue(run)}
+                >
+                  <Icon name="delete" />
+                  {deletingRunId === run.runId ? "删除中" : "删除"}
+                </button>
               </div>
             </article>
           ))}
@@ -260,6 +292,10 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
       ) : null}
     </section>
   );
+}
+
+function canDeleteRun(run: RunSummary): boolean {
+  return run.draftStatus === "draft" || run.draftStatus === "failed";
 }
 
 function PaginationSummary({
