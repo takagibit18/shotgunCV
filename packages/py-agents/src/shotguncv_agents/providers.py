@@ -191,6 +191,7 @@ class DeterministicAnalyzeProvider:
         ):
             if keyword in lowered:
                 skills.append(label)
+        skills = _extract_skill_labels("\n".join([resume_text, *evidence_lines])) or skills
 
         candidate = CandidateProfile(
             candidate_id=candidate_id,
@@ -213,7 +214,8 @@ class DeterministicAnalyzeProvider:
         for jd_input in jd_inputs:
             source_type = jd_input["source_type"]
             source_value = jd_input["source_value"]
-            blocks = [block.strip() for block in jd_input["content"].split("=== JD ===") if block.strip()]
+            content = _clean_jd_text_content(jd_input["content"])
+            blocks = [block.strip() for block in content.split("=== JD ===") if block.strip()]
             for block in blocks:
                 jd_counter += 1
                 title = _extract_header(block, "Title") or str(jd_input.get("display_name", "")).strip() or _first_meaningful_line(block)
@@ -475,6 +477,7 @@ class OpenAIAnalyzeProvider:
         self.run_dir = run_dir
 
     def analyze(self, candidate_id: str, candidate_resume_path: str, resume_text: str, jd_inputs: list[dict[str, str]]) -> AnalyzeFeedback:
+        cleaned_jd_inputs = _clean_jd_inputs(jd_inputs)
         prompt = (
             "请仅返回严格 JSON（不要 markdown 代码块、不要额外解释），顶层键必须是："
             "candidate_profile,jd_profiles,evidence_map。\n"
@@ -482,11 +485,17 @@ class OpenAIAnalyzeProvider:
             "抽取 candidate_profile 时必须尽量保留 CV 中可追溯硬事实：学历、学校、专业、证书、语言、公司、岗位、年限、项目、技能。"
             "不要因为 PDF 文本没有 bullet 就忽略段落；把教育/证书/语言等硬事实放入 verified_evidence 和 core_claims，"
             "把工作和项目证据放入 experiences/projects/strengths。\n"
+            "For candidate_profile.skills, extract concrete technical keywords and group coverage across programming languages, "
+            "frameworks, AI stack, tools, and domain knowledge. Do not collapse skills to a major or degree.\n"
+            "Definitions: experiences are paid or internship work history with employer/team context; "
+            "projects are portfolio, coursework, or side projects; strengths are evidence-backed reusable advantages.\n"
+            "For jd_profiles, ignore platform UI text, salary cards, company metadata, apply/save buttons, posted dates, "
+            "benefits-only labels, and section headers. Extract only job-related responsibilities and requirements.\n"
             "jd_profiles 必须包含：must_have_requirements,nice_to_have_requirements,hidden_signals,"
             "interview_focus_areas,role_level_confidence。\n"
             f"candidate_id={candidate_id}\nresume_path={candidate_resume_path}\n"
             f"resume_text={resume_text}\n"
-            f"jd_inputs={json.dumps(jd_inputs, ensure_ascii=False)}\n"
+            f"jd_inputs={json.dumps(cleaned_jd_inputs, ensure_ascii=False)}\n"
         )
         try:
             raw = _chat_completion(
@@ -511,7 +520,7 @@ class OpenAIAnalyzeProvider:
                     to_provider="deterministic",
                     reason=str(exc).strip() or exc.__class__.__name__,
                 )
-            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, jd_inputs)
+            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, cleaned_jd_inputs)
         candidate_payload = payload.get("candidate_profile", {})
         candidate = CandidateProfile(
             candidate_id=candidate_id,
@@ -532,7 +541,7 @@ class OpenAIAnalyzeProvider:
         for item in payload.get("jd_profiles", []):
             if not isinstance(item, dict):
                 continue
-            responsibilities = _safe_list(item.get("responsibilities"))
+            responsibilities = _clean_jd_items(_safe_list(item.get("responsibilities")))
             cluster = str(item.get("cluster", "")).strip() or _classify_cluster(str(item.get("title", "")), responsibilities)
             jd_profiles.append(
                 JDProfile(
@@ -541,15 +550,15 @@ class OpenAIAnalyzeProvider:
                     company=str(item.get("company", "")),
                     cluster=cluster,
                     responsibilities=responsibilities,
-                    requirements=_safe_list(item.get("requirements")),
+                    requirements=_clean_jd_items(_safe_list(item.get("requirements"))),
                     keywords=_safe_list(item.get("keywords")),
                     seniority=str(item.get("seniority", "mid")),
-                    bonuses=_safe_list(item.get("bonuses")),
+                    bonuses=_clean_jd_items(_safe_list(item.get("bonuses"))),
                     risk_signals=_safe_list(item.get("risk_signals")),
                     source_type=str(item.get("source_type", "file")),
                     source_value=str(item.get("source_value", "")),
-                    must_have_requirements=_safe_list(item.get("must_have_requirements")),
-                    nice_to_have_requirements=_safe_list(item.get("nice_to_have_requirements")),
+                    must_have_requirements=_clean_jd_items(_safe_list(item.get("must_have_requirements"))),
+                    nice_to_have_requirements=_clean_jd_items(_safe_list(item.get("nice_to_have_requirements"))),
                     hidden_signals=_safe_list(item.get("hidden_signals")),
                     interview_focus_areas=_safe_list(item.get("interview_focus_areas")),
                     role_level_confidence=_safe_score(item.get("role_level_confidence")),
@@ -557,7 +566,7 @@ class OpenAIAnalyzeProvider:
             )
         evidence_map = payload.get("evidence_map", {})
         if not jd_profiles or not candidate.experiences:
-            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, jd_inputs)
+            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, cleaned_jd_inputs)
         return AnalyzeFeedback(candidate_profile=candidate, jd_profiles=jd_profiles, evidence_map=evidence_map if isinstance(evidence_map, dict) else {})
 
 
@@ -888,6 +897,104 @@ def _load_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
+def _clean_jd_inputs(jd_inputs: list[dict[str, str]]) -> list[dict[str, str]]:
+    cleaned: list[dict[str, str]] = []
+    for item in jd_inputs:
+        copied = dict(item)
+        copied["content"] = _clean_jd_text_content(str(item.get("content", "")))
+        cleaned.append(copied)
+    return cleaned
+
+
+def _clean_jd_text_content(content: str) -> str:
+    cleaned_lines: list[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            cleaned_lines.append(raw_line)
+            continue
+        marker = ""
+        body = line
+        if line.startswith("-"):
+            marker = "- "
+            body = line.strip("- ").strip()
+        if _is_jd_ui_noise(body):
+            continue
+        cleaned_lines.append(f"{marker}{body}" if marker else raw_line)
+    return "\n".join(cleaned_lines)
+
+
+def _clean_jd_items(items: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for item in items:
+        normalized = item.strip().strip("-*•").strip()
+        if normalized and not _is_jd_ui_noise(normalized):
+            cleaned.append(normalized)
+    return _dedupe_preserve_order(cleaned)
+
+
+def _is_jd_ui_noise(item: str) -> bool:
+    text = item.strip().lower()
+    if not text:
+        return True
+    if text.startswith("@"):
+        return True
+    exact_noise = {
+        "apply",
+        "save",
+        "copy link",
+        "apply save copy link",
+        "perks/benefits",
+        "perks",
+        "benefits",
+        "mentoring",
+        "remote work",
+        "skills/tech-stack",
+        "skills",
+        "tech-stack",
+        "education",
+    }
+    if text in exact_noise:
+        return True
+    noise_patterns = [
+        r"\bpublished\b",
+        r"\bposted\b",
+        r"\bago\b",
+        r"\busd\b",
+        r"\$\s*\d",
+        r"\b\d+\s*k\s*[-–]\s*\d+\s*k\b",
+        r"\bmid[- ]level\b",
+        r"\bsenior[- ]level\b",
+    ]
+    return any(re.search(pattern, text) for pattern in noise_patterns)
+
+
+def _extract_skill_labels(text: str) -> list[str]:
+    lowered = text.lower()
+    known_skills = [
+        ("python", "Python"),
+        ("click", "Click"),
+        ("pydantic", "Pydantic"),
+        ("fastapi", "FastAPI"),
+        ("docker", "Docker"),
+        ("redis", "Redis"),
+        ("langchain", "LangChain"),
+        ("langgraph", "LangGraph"),
+        ("qdrant", "Qdrant"),
+        ("bm25", "BM25"),
+        ("ragas", "RAGAS"),
+        ("rag", "RAG"),
+        ("llm", "LLM"),
+        ("sql", "SQL"),
+        ("java", "Java"),
+        ("computer science", "Computer Science"),
+        ("pmp", "PMP"),
+        ("certificate", "Certificates"),
+        ("certification", "Certificates"),
+    ]
+    return _dedupe_preserve_order([label for keyword, label in known_skills if keyword in lowered])
+
+
 def _extract_header(block: str, label: str) -> str:
     marker = f"{label}:"
     for line in block.splitlines():
@@ -899,7 +1006,11 @@ def _extract_header(block: str, label: str) -> str:
 def _extract_body_lines(block: str) -> list[str]:
     if "Body:" in block:
         body = block.split("Body:", maxsplit=1)[1]
-        lines = [line.strip("- ").strip() for line in body.splitlines() if line.strip().startswith("-")]
+        lines = [
+            line.strip("- ").strip()
+            for line in body.splitlines()
+            if line.strip().startswith("-") and not _is_jd_ui_noise(line.strip("- ").strip())
+        ]
         if lines:
             return lines
     ignored_prefixes = ("Title:", "Company:")
@@ -909,16 +1020,19 @@ def _extract_body_lines(block: str) -> list[str]:
         if not line or line.startswith(ignored_prefixes):
             continue
         normalized = line.lstrip("-0123456789.、)） ").strip()
-        if len(normalized) >= 6:
+        if len(normalized) >= 6 and not _is_jd_ui_noise(normalized):
             lines.append(normalized)
     return lines[:24]
 
 
 def _extract_resume_sections(resume_text: str) -> dict[str, list[str]]:
-    lines = [_normalize_resume_line(line) for line in resume_text.splitlines()]
-    lines = [line for line in lines if line]
+    lines: list[str] = []
+    for raw_line in resume_text.splitlines():
+        normalized = _normalize_resume_line(raw_line)
+        if normalized:
+            lines.extend(_split_inline_resume_sections(normalized))
     if not lines:
-        return {"experiences": [], "projects": [], "strengths": [], "evidence": []}
+        return {"experiences": [], "projects": [], "skills": [], "strengths": [], "evidence": []}
 
     experiences: list[str] = []
     projects: list[str] = []
@@ -926,6 +1040,8 @@ def _extract_resume_sections(resume_text: str) -> dict[str, list[str]]:
     hard_facts: list[str] = []
     current_section = ""
     for line in lines:
+        if _is_resume_metadata_line(line):
+            continue
         section = _resume_section_name(line)
         if section:
             current_section = section
@@ -933,7 +1049,11 @@ def _extract_resume_sections(resume_text: str) -> dict[str, list[str]]:
             if not remainder:
                 continue
             line = remainder
+        if _is_resume_metadata_line(line):
+            continue
         target_section = current_section or _infer_resume_section(line)
+        if target_section == "ignore":
+            continue
         if target_section == "project":
             projects.append(line)
         elif target_section == "skill":
@@ -946,8 +1066,9 @@ def _extract_resume_sections(resume_text: str) -> dict[str, list[str]]:
     evidence = _dedupe_preserve_order(hard_facts + experiences + projects + skills)
     strengths = _dedupe_preserve_order(experiences + projects + skills)
     return {
-        "experiences": _dedupe_preserve_order(experiences)[:12] or evidence[:6],
+        "experiences": _dedupe_preserve_order(experiences)[:12],
         "projects": _dedupe_preserve_order(projects)[:8],
+        "skills": _dedupe_preserve_order(skills)[:12],
         "strengths": strengths[:6],
         "evidence": evidence[:16],
     }
@@ -959,9 +1080,67 @@ def _normalize_resume_line(line: str) -> str:
     return normalized
 
 
+def _split_inline_resume_sections(line: str) -> list[str]:
+    markers = [
+        "Education:",
+        "Certificate:",
+        "Certificates:",
+        "Certification:",
+        "Experience:",
+        "Work Experience:",
+        "Projects:",
+        "Skills:",
+        "Technical Skills:",
+        "教育背景：",
+        "教育经历：",
+        "证书：",
+        "工作经历：",
+        "项目经历：",
+        "专业技能：",
+    ]
+    pattern = "|".join(re.escape(marker) for marker in sorted(markers, key=len, reverse=True))
+    parts = re.split(f"(?=\\b(?:{pattern}))", line)
+    return [part.strip(" .") for part in parts if part.strip(" .")]
+
+
+def _is_resume_metadata_line(line: str) -> bool:
+    lowered = line.lower().strip()
+    metadata_markers = [
+        "邮箱",
+        "email:",
+        "e-mail:",
+        "个人主页",
+        "homepage:",
+        "github:",
+        "linkedin:",
+        "电话",
+        "phone:",
+    ]
+    return any(marker in lowered for marker in metadata_markers)
+
+
 def _resume_section_name(line: str) -> str:
     lowered = line.lower().strip(":：")
     section_map = {
+        "basic information": "ignore",
+        "contact": "ignore",
+        "contact information": "ignore",
+        "基本信息": "ignore",
+        "个人信息": "ignore",
+        "联系方式": "ignore",
+        "求职意向": "ignore",
+        "education background": "hard_fact",
+        "教育": "hard_fact",
+        "教育背景": "hard_fact",
+        "教育经历": "hard_fact",
+        "学历": "hard_fact",
+        "工作经历": "experience",
+        "工作经验": "experience",
+        "实习经历": "experience",
+        "项目经历": "project",
+        "项目": "project",
+        "技能": "skill",
+        "专业技能": "skill",
         "education": "hard_fact",
         "教育": "hard_fact",
         "教育经历": "hard_fact",
@@ -991,7 +1170,61 @@ def _resume_section_name(line: str) -> str:
     return ""
 
 
+def _strip_known_resume_heading(line: str) -> str:
+    headings = [
+        "basic information",
+        "contact information",
+        "contact",
+        "education background",
+        "education",
+        "certifications",
+        "certification",
+        "certificates",
+        "certificate",
+        "languages",
+        "work experience",
+        "professional experience",
+        "experience",
+        "project experience",
+        "projects",
+        "project",
+        "technical skills",
+        "skills",
+        "基本信息",
+        "个人信息",
+        "联系方式",
+        "求职意向",
+        "教育背景",
+        "教育经历",
+        "教育",
+        "学历",
+        "证书",
+        "语言",
+        "工作经历",
+        "工作经验",
+        "实习经历",
+        "项目经历",
+        "项目",
+        "专业技能",
+        "技能",
+    ]
+    lowered = line.lower()
+    stripped = line.strip()
+    for heading in sorted(headings, key=len, reverse=True):
+        heading_lower = heading.lower()
+        if lowered == heading_lower:
+            return ""
+        for separator in (":", "："):
+            prefix = f"{heading_lower}{separator}"
+            if lowered.startswith(prefix):
+                return stripped[len(prefix) :].strip()
+    return stripped
+
+
 def _strip_resume_heading(line: str) -> str:
+    known = _strip_known_resume_heading(line)
+    if known != line.strip():
+        return known
     return re.sub(
         r"^(education|certifications?|languages?|experience|work experience|professional experience|projects?|skills|"
         r"教育经历|教育|学历|证书|语言|工作经历|实习经历|项目经历|项目|专业技能|技能)\s*[:：]\s*",
