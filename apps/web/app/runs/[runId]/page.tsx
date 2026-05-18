@@ -1,9 +1,9 @@
 import React from "react";
 import Link from "next/link";
 
-import { AppShell } from "../../AppShell";
-import { STAGE_LABELS, STATUS_LABELS } from "../../../lib/labels";
-import { loadRunDetail } from "../../../lib/runs";
+import { AppShell, Icon, MetricCard } from "../../AppShell";
+import { STATUS_LABELS } from "../../../lib/labels";
+import { loadRunDetail, type JdInputPreview } from "../../../lib/runs";
 import { RunActionPanel } from "./RunActionPanel";
 import { ScoreMatrixRow } from "./ScoreMatrixRow";
 
@@ -12,324 +12,110 @@ type PageProps = {
   params: Promise<{ runId: string }>;
 };
 
+type RunDetail = Awaited<ReturnType<typeof loadRunDetail>>;
+
+
 export default async function RunPage({ params }: PageProps) {
   const resolvedParams = await params;
   const detail = await loadRunDetail(resolvedParams.runId);
-  const displayStatus =
-    detail.draftStatus === "done" && detail.runStatus?.quality_status === "warning"
-      ? "完成但有警告"
-      : STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus;
-  const qualityWarningCount = detail.observability.qualityWarnings.length + (detail.runStatus?.quality_summary ? 1 : 0);
-  const nextAction = buildNextAction(detail.draftStatus);
+  const sortedResults = detail.evaluate.topVariants.slice().sort((left, right) => right.overallScore - left.overallScore);
+  const topResult = sortedResults[0];
+  const displayTitle = detail.label || topResult?.title || "岗位评估详情";
+  const displayStatus = buildDisplayStatus(detail);
+  const riskCount = countHighRiskScores(detail);
+  const reviewCount = countReviewItems(detail);
+  const topScore = topResult ? `${Math.round(topResult.overallScore * 100)}%` : "--";
+  const canShowActions = detail.draftStatus === "draft" || detail.draftStatus === "failed";
 
   return (
-    <AppShell active="evaluation" eyebrow="运行详情">
-      <main className="app-shell operational-shell">
-      <Link href="/" className="backlink">
-        {"返回运行列表"}
-      </Link>
-
-      <div>
-        <div>
-      <section className="page-header detail-header">
-        <div>
-          <p className="eyebrow">{detail.label || "未命名运行"}</p>
-          <h1 className="page-title">{detail.runId}</h1>
-          <div className="pill-row">
-            <span className="pill">{"分析器："}{detail.analyzerProvider}</span>
-            <span className="pill">{"生成器："}{detail.generatorProvider}</span>
-            <span className="pill">{"评审器："}{detail.judgeProvider}</span>
-            <span className="pill">{"规划器："}{detail.plannerProvider}</span>
-            {detail.completedStages.map((stage) => (
-              <span key={stage} className="pill">
-                {STAGE_LABELS[stage] ?? stage}
-              </span>
-            ))}
-            <span className="pill">{displayStatus}</span>
-          </div>
-        </div>
-        <div className="run-control-panel">
-          <div className="metric-tile">
-            <span className="metric-value">
-              {detail.completedStages.length}
-              {"/6"}
-            </span>
-            <span className="metric-label">{"阶段完成"}</span>
-          </div>
-          <Link href={`/runs/${detail.runId}/report`} className="primary-link">
-            {"打开报告"}
-          </Link>
-          <RunActionPanel runId={detail.runId} draftStatus={detail.draftStatus} draft={detail.draft} />
-        </div>
-      </section>
-
-      <section className="status-strip" aria-label="运行首屏状态">
-        <StatusStripItem label="当前状态" value={displayStatus} tone={detail.draftStatus === "failed" ? "danger" : "info"} />
-        <StatusStripItem
-          label="是否可信"
-          value={qualityWarningCount > 0 ? `${qualityWarningCount} 个质量提示` : "暂无质量警告"}
-          tone={qualityWarningCount > 0 ? "warning" : "success"}
-        />
-        <StatusStripItem label="下一步动作" value={nextAction} tone="default" />
-        <StatusStripItem
-          label="硬门槛"
-          value={summarizeGates(detail.preflightGates.length, detail.preflightGates.filter((gate) => gate.status !== "pass").length)}
-          tone={detail.preflightGates.some((gate) => gate.status !== "pass") ? "warning" : "success"}
-        />
-      </section>
-
-      <section className="section">
-        <SectionHeading eyebrow="运行状态" title="运行状态" action={displayStatus} />
-        <div className="detail-grid">
-          <article className="detail-card">
-            <h3>{"阶段状态"}</h3>
-            <div className="pill-row">
-              {detail.stageStatuses.map((item) => (
-                <span key={item.stage} className={`pill stage-${item.status}`}>
-                  {(STAGE_LABELS[item.stage] ?? item.stage) + " · " + formatStageStatus(item.status)}
-                </span>
-              ))}
+    <AppShell active="evaluation" eyebrow="评估详情">
+      <main className="app-shell operational-shell evaluation-detail-shell">
+        <section className="page-header detail-header evaluation-detail-hero">
+          <div>
+            <div className="page-kicker-row">
+              <Link href="/evaluations" className="backlink icon-link">
+                <Icon name="chevron-left" />
+                返回评估结果
+              </Link>
+              <span className="breadcrumb-text">评估结果 / 详情</span>
             </div>
-          </article>
-          <article className="detail-card">
-            <h3>{"最近一次运行"}</h3>
-            <p>
-              {"动作："}
-              <span className="mono">{detail.runStatus?.last_action ?? "n/a"}</span>
-            </p>
-            <p>
-              {"当前阶段："}
-              <span className="mono">{detail.runStatus?.current_stage ?? "n/a"}</span>
-            </p>
-            {detail.runStatus?.error_summary ? (
-              <p className="risk-line">
-                {(detail.runStatus.error_stage ? STAGE_LABELS[detail.runStatus.error_stage] : "未知阶段") + "：" + detail.runStatus.error_summary}
-              </p>
-            ) : null}
-            {detail.runStatus?.quality_summary ? (
-              <p className="risk-line">
-                {"质量提示："}
-                {detail.runStatus.quality_summary}
-              </p>
-            ) : null}
-          </article>
-        </div>
-      </section>
-
-      <section className="section">
-        <SectionHeading
-          eyebrow="运行观测"
-          title="运行观测"
-          action={`${detail.observability.fallbackCount} 次兜底`}
-        />
-        <div className="detail-grid">
-          <article className="detail-card">
-            <h3>{"模型与用量"}</h3>
-            <p>
-              {"总用量："}
-              <span className="mono">{detail.observability.totalTokens ?? "n/a"}</span>
-            </p>
-            <p>
-              {"输入 / 输出："}
-              <span className="mono">
-                {(detail.observability.promptTokens ?? "n/a") + " / " + (detail.observability.completionTokens ?? "n/a")}
-              </span>
-            </p>
-            <ul>
-              {detail.observability.resolvedModels.map((model) => (
-                <li key={`${model.stage}-${model.role}-${model.resolvedModel}`}>
-                  <span className="mono">{model.stage}</span>
-                  {" · "}
-                  {model.role}
-                  {" · "}
-                  {model.provider}
-                  {" · "}
-                  {model.resolvedModel || "n/a"}
-                </li>
-              ))}
-            </ul>
-          </article>
-          <article className="detail-card">
-            <h3>{"工具与质量"}</h3>
-            <p>
-              {"工具调用："}
-              <span className="mono">{detail.observability.toolCallCount}</span>
-            </p>
-            <p>
-                {"兜底："}
-              <span className="mono">{detail.observability.fallbackCount}</span>
-            </p>
-            {detail.observability.qualityWarnings.length > 0 ? (
-              <ul>
-                {detail.observability.qualityWarnings.map((warning) => (
-                  <li key={warning} className="risk-line">{warning}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>{"暂无质量警告"}</p>
-            )}
-          </article>
-        </div>
-      </section>
-
-      {detail.draft ? (
-        <section className="section">
-        <SectionHeading eyebrow="上传草稿" title="上传草稿" action={displayStatus} />
-          <div className="detail-grid">
-            <article className="detail-card">
-              <h3>{"输入文件"}</h3>
-              <ul>
-                {detail.draft.files.map((file) => (
-                  <li key={`${file.role}-${file.storedRelativePath}`}>
-                    <span className="mono">{file.role}</span>
-                    {" · "}
-                    {file.displayName || file.originalName}
-                    {" · "}
-                    {file.originalName}
-                    {" · "}
-                    <span className="mono">{file.storedRelativePath}</span>
-                  </li>
-                ))}
-              </ul>
-            </article>
-            <article className="detail-card">
-            <h3>{"下一步操作"}</h3>
-            <p>{"网页可以创建和管理本地草稿。确认输入后可在页面启动本地流程；高级排查时也可以在本机执行："}</p>
-              <details className="advanced-command">
-                <summary>高级 / CLI 命令</summary>
-                <pre className="command-block">{detail.draft.nextCommand}</pre>
-              </details>
-            </article>
+            <p className="eyebrow">AI 评估复核</p>
+            <h1 className="page-title">{displayTitle}</h1>
+            <p className="hero-copy">聚焦岗位要求、匹配结论、风险和下一步动作；工程运行细节已收起，不参与用户判断。</p>
+          </div>
+          <div className="evaluation-hero-card">
+            <span className="semantic-icon blue" aria-hidden="true">
+              <Icon name="sparkle" />
+            </span>
+            <div>
+              <span>当前结论</span>
+              <strong>{buildPrimaryConclusion(topResult, reviewCount, riskCount)}</strong>
+              <small>{displayStatus}</small>
+            </div>
+            <Link href={`/runs/${detail.runId}/report`} className="primary-link icon-link">
+              <Icon name="document" />
+              查看报告
+            </Link>
           </div>
         </section>
-      ) : null}
 
-      <section className="section">
-        <SectionHeading eyebrow="输入来源" title="输入来源" />
-        {detail.inputSources.length > 0 ? (
-          <div className="input-source-table" role="table" aria-label="输入来源清单">
-            <div className="input-source-row header" role="row">
-              <span role="columnheader">{"角色"}</span>
-              <span role="columnheader">{"来源"}</span>
-              <span role="columnheader">{"显示名"}</span>
-              <span role="columnheader">{"原始文件名"}</span>
-              <span role="columnheader">{"相对路径"}</span>
-              <span role="columnheader">{"大小"}</span>
-              <span role="columnheader">{"抽取状态"}</span>
-            </div>
-            {detail.inputSources.map((source) => (
-              <div key={`${source.role}-${source.relativePath}-${source.originalName}`} className="input-source-row" role="row">
-                <span role="cell">{source.role}</span>
-                <span role="cell">{source.sourceOrigin}</span>
-                <span role="cell">{source.displayName || source.originalName}</span>
-                <span role="cell">{source.originalName}</span>
-                <span className="mono" role="cell">{source.relativePath}</span>
-                <span role="cell">{formatBytes(source.sizeBytes)}</span>
-                <span role="cell">
-                  {source.extractionStatus}
-                  {source.extractionError ? `: ${source.extractionError}` : ""}
-                </span>
+        <section className="metric-card-grid evaluation-detail-metrics" aria-label="评估摘要">
+          <MetricCard icon="stats" label="综合推荐" value={topScore} helper={topResult?.title ?? "等待评估结果"} tone="blue" />
+          <MetricCard
+            icon="shield-alert"
+            label="风险提醒"
+            value={riskCount}
+            helper={riskCount > 0 ? "需要先确认风险" : "未发现高风险项"}
+            tone={riskCount > 0 ? "red" : "green"}
+          />
+          <MetricCard
+            icon="shield-check"
+            label="复核事项"
+            value={reviewCount}
+            helper={reviewCount > 0 ? "存在阻断或需复核项" : "门槛检查通过"}
+            tone={reviewCount > 0 ? "orange" : "green"}
+          />
+          <MetricCard
+            icon="briefcase"
+            label="岗位结果"
+            value={sortedResults.length}
+            helper="按岗位聚合后的评估结果"
+            tone="purple"
+          />
+        </section>
+
+        {canShowActions ? (
+          <section className="section evaluation-action-section">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">下一步</p>
+                <h2>{detail.draftStatus === "draft" ? "开始评估" : "重新处理"}</h2>
+                <p className="section-copy">{detail.draftStatus === "draft" ? "确认岗位和简历材料后启动本地评估。" : "失败后可重新评估或从上次中断处继续。"}</p>
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty">{"暂无输入来源"}</div>
-        )}
-      </section>
+            </div>
+            <RunActionPanel runId={detail.runId} draftStatus={detail.draftStatus} draft={detail.draft} />
+          </section>
+        ) : null}
 
-      <section className="section">
-        <SectionHeading eyebrow="阶段分析" title="分析阶段" />
-        {detail.analyze.isComplete && detail.analyze.candidate ? (
-          <div className="detail-grid">
-            <article className="detail-card">
-              <h3>{"候选人"}</h3>
-              <p className="mono">{detail.analyze.candidate.candidate_id}</p>
-              <p>{detail.analyze.candidate.strengths.join(" / ")}</p>
-            </article>
-            <article className="detail-card">
-              <h3>{"岗位画像"}</h3>
-              <p>
-                {"共 "}
-                {detail.analyze.jdProfiles.length}
-                {" 条岗位描述"}
-              </p>
-              <ul>
-                {detail.analyze.jdProfiles.map((jd) => (
-                  <li key={jd.jd_id}>
-                    {jd.title} @ {jd.company}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          </div>
-        ) : (
-          <div className="empty">{"阶段未完成"}</div>
-        )}
-      </section>
+        <JdPreviewSection previews={detail.jdInputPreviews} />
+        <GateReviewSection detail={detail} />
 
-      <section className="section">
-        <SectionHeading eyebrow="投递前门槛" title="硬门槛审查" />
-        {detail.preflightGates.length > 0 ? (
-          <div className="gate-grid">
-            {detail.preflightGates.map((gate) => {
-              const requirements = detail.requirementMatrix.filter((item) => item.jd_id === gate.jd_id);
-              return (
-                <article key={gate.jd_id} className={`detail-card gate-card gate-${gate.status}`}>
-                  <div className="gate-card-heading">
-                    <h3>{gate.jd_id}</h3>
-                    <span className={buildGateClassName(gate.status)}>{formatGateStatus(gate.status)}</span>
-                  </div>
-                  {gate.reasons.length > 0 ? <p className="risk-line">{gate.reasons.join(" / ")}</p> : null}
-                  <ul className="requirement-list">
-                    {requirements.slice(0, 4).map((item) => (
-                      <li key={item.requirement_id}>
-                        <span className="mono">{formatRequirementTier(item.tier)}</span>
-                        {" · "}
-                        {formatEvidenceStatus(item.evidence_status)}
-                        {" · "}
-                        {item.requirement_text}
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              );
-            })}
+        <section className="section evaluation-focus-section">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">评估结果</p>
+              <h2>匹配、证据与风险</h2>
+              <p className="section-copy">每个岗位都把推荐判断、证据依据和不确定项放在同一张复核卡片里。</p>
+            </div>
           </div>
-        ) : (
-          <div className="empty">{"当前运行暂无新版硬门槛产物，继续按历史评分产物兼容展示。"}</div>
-        )}
-      </section>
 
-      <section className="section">
-        <SectionHeading eyebrow="阶段生成" title="生成阶段" />
-        {detail.generate.isComplete ? (
-          <div className="detail-grid">
-            {detail.generate.variants.map((variant) => (
-              <article key={variant.variant_id} id={buildVariantAnchorId(variant.variant_id)} className="detail-card">
-                <h3>{variant.variantDisplayName}</h3>
-                <p className="mono">{variant.variant_id}</p>
-                <p>{variant.summary}</p>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty">{"阶段未完成"}</div>
-        )}
-      </section>
-
-      <section className="section">
-        <SectionHeading eyebrow="阶段评估" title="评估阶段" />
-        {detail.evaluate.isComplete ? (
-          <div className="score-matrix">
-            {detail.evaluate.topVariants
-              .slice()
-              .sort((left, right) => right.overallScore - left.overallScore)
-              .map((item) => (
+          {sortedResults.length > 0 ? (
+            <div className="score-matrix ai-score-matrix">
+              {sortedResults.map((item) => (
                 <ScoreMatrixRow
                   key={`${item.jdId}-${item.variantId}`}
                   title={item.title}
                   variantDisplayName={item.variantDisplayName}
-                  variantId={item.variantId}
                   overallScore={item.overallScore}
                   gapCount={item.gapCount}
                   topReasons={item.topReasons}
@@ -343,30 +129,196 @@ export default async function RunPage({ params }: PageProps) {
                   strategy={detail.plan.strategies.find((strategy) => strategy.jd_id === item.jdId)}
                 />
               ))}
-          </div>
-        ) : (
-          <div className="empty">{"阶段未完成"}</div>
-        )}
-      </section>
-        </div>
-      </div>
+            </div>
+          ) : (
+            <div className="empty-state evaluation-empty-state">
+              <h3>评估结果尚未生成</h3>
+              <p>完成本地评估后，这里会展示岗位匹配、风险和投递建议。</p>
+            </div>
+          )}
+        </section>
       </main>
     </AppShell>
   );
 }
 
 
-function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: string; action?: string }) {
+function JdPreviewSection({ previews }: { previews: JdInputPreview[] }) {
+  if (previews.length === 0) {
+    return null;
+  }
   return (
-    <div className="section-heading">
-      <div>
-        <p className="eyebrow">{eyebrow}</p>
-        <h2>{title}</h2>
+    <section className="section evaluation-focus-section jd-context-section">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">岗位输入</p>
+          <h2>JD 详情</h2>
+          <p className="section-copy">截图可点击放大；文本 JD 可展开查看原始岗位描述。</p>
+        </div>
       </div>
-      {action ? <span className="status-chip">{action}</span> : null}
-    </div>
+      <div className="jd-preview-grid">
+        {previews.map((preview, index) => (
+          <JdPreviewCard key={`${preview.originalName}-${index}`} preview={preview} />
+        ))}
+      </div>
+    </section>
   );
 }
+
+
+function JdPreviewCard({ preview }: { preview: JdInputPreview }) {
+  if (preview.kind === "image" && preview.imageDataUrl) {
+    return (
+      <article className="jd-preview-card image">
+        <div className="jd-preview-card-heading">
+          <span className="semantic-icon blue" aria-hidden="true">
+            <Icon name="image-upload" />
+          </span>
+          <div>
+            <h3>{preview.label}</h3>
+            <p>{preview.note ?? "点击截图可放大查看"}</p>
+          </div>
+        </div>
+        <details className="jd-image-preview">
+          <summary>
+            <img src={preview.imageDataUrl} alt={`${preview.label} 截图预览`} />
+            <span>点击放大</span>
+          </summary>
+          <div className="jd-image-expanded">
+            <img src={preview.imageDataUrl} alt={`${preview.label} 放大截图`} />
+          </div>
+        </details>
+      </article>
+    );
+  }
+
+  if (preview.kind === "text" && preview.text) {
+    return (
+      <article className="jd-preview-card text">
+        <div className="jd-preview-card-heading">
+          <span className="semantic-icon green" aria-hidden="true">
+            <Icon name="file" />
+          </span>
+          <div>
+            <h3>{preview.label}</h3>
+            <p>岗位文本已读取，可展开核对细节。</p>
+          </div>
+        </div>
+        <details className="jd-text-preview">
+          <summary className="secondary-link icon-link">
+            <Icon name="eye" />
+            查看 JD 详情
+          </summary>
+          <pre>{preview.text}</pre>
+        </details>
+      </article>
+    );
+  }
+
+  return (
+    <article className="jd-preview-card metadata">
+      <div className="jd-preview-card-heading">
+        <span className="semantic-icon orange" aria-hidden="true">
+          <Icon name="alert-triangle" />
+        </span>
+        <div>
+          <h3>{preview.label}</h3>
+          <p>{preview.note ?? "当前岗位输入暂无可直接展示的文本或截图。"}</p>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+
+function GateReviewSection({ detail }: { detail: RunDetail }) {
+  const gateItems = detail.preflightGates.filter((gate) => gate.status !== "pass" || gate.reasons.length > 0);
+  if (gateItems.length === 0) {
+    return null;
+  }
+  return (
+    <section className="section evaluation-focus-section">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">复核事项</p>
+          <h2>需要确认的门槛</h2>
+          <p className="section-copy">只展示会影响投递判断的缺口和风险，不展开底层产物字段。</p>
+        </div>
+      </div>
+      <div className="gate-grid review-gate-grid">
+        {gateItems.map((gate) => {
+          const requirements = detail.requirementMatrix.filter((item) => item.jd_id === gate.jd_id);
+          return (
+            <article key={gate.jd_id} className={`detail-card gate-card gate-${gate.status}`}>
+              <div className="gate-card-heading">
+                <h3>{findJdTitle(detail, gate.jd_id)}</h3>
+                <span className={buildGateClassName(gate.status)}>{formatGateStatus(gate.status)}</span>
+              </div>
+              {gate.reasons.length > 0 ? <p className="risk-line">{gate.reasons.map(formatUserText).join(" / ")}</p> : null}
+              {requirements.length > 0 ? (
+                <ul className="requirement-list">
+                  {requirements.slice(0, 4).map((item) => (
+                    <li key={item.requirement_id}>
+                      {formatRequirementTier(item.tier)}
+                      {" · "}
+                      {formatEvidenceStatus(item.evidence_status)}
+                      {" · "}
+                      {item.requirement_text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+
+function buildDisplayStatus(detail: RunDetail): string {
+  if (detail.draftStatus === "done" && detail.runStatus?.quality_status === "warning") {
+    return "完成，建议复核提醒项";
+  }
+  return STATUS_LABELS[detail.draftStatus] ?? detail.draftStatus;
+}
+
+
+function buildPrimaryConclusion(
+  topResult: RunDetail["evaluate"]["topVariants"][number] | undefined,
+  reviewCount: number,
+  riskCount: number,
+): string {
+  if (!topResult) {
+    return "等待评估结果";
+  }
+  if (reviewCount > 0) {
+    return "先复核门槛，再决定投递";
+  }
+  if (riskCount > 0) {
+    return "存在风险，建议谨慎推进";
+  }
+  return `优先关注 ${topResult.title}`;
+}
+
+
+function countHighRiskScores(detail: RunDetail): number {
+  return detail.evaluate.scorecards.filter((scorecard) => (scorecard.risk_score ?? scorecard.gap_risk_score ?? 0) >= 0.7).length;
+}
+
+
+function countReviewItems(detail: RunDetail): number {
+  return detail.preflightGates.filter((gate) => gate.status === "blocked" || gate.status === "needs_review").length;
+}
+
+
+function findJdTitle(detail: RunDetail, jdId: string): string {
+  const topVariant = detail.evaluate.topVariants.find((item) => item.jdId === jdId);
+  const profile = detail.analyze.jdProfiles.find((item) => item.jd_id === jdId);
+  return topVariant?.title || [profile?.company, profile?.title].filter(Boolean).join(" - ") || "目标岗位";
+}
+
 
 function buildGateClassName(status: string): string {
   if (status === "blocked") {
@@ -381,106 +333,50 @@ function buildGateClassName(status: string): string {
   return "status-chip";
 }
 
-function StatusStripItem({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "default" | "info" | "success" | "warning" | "danger";
-}) {
-  return (
-    <article className={`status-strip-item ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
-  );
-}
-
-function buildNextAction(status: string): string {
-  if (status === "draft") {
-    return "确认输入后运行";
-  }
-  if (status === "failed") {
-    return "查看错误并重试";
-  }
-  if (status === "done") {
-    return "审查评分与报告";
-  }
-  if (status === "running" || status === "queued") {
-    return "等待阶段更新";
-  }
-  return "检查输入来源";
-}
-
-
-function formatStageStatus(status: string): string {
-  const labels: Record<string, string> = {
-    complete: "已完成",
-    running: "运行中",
-    failed: "失败",
-    pending: "等待中",
-  };
-  return labels[status] ?? status;
-}
-
-function summarizeGates(total: number, blockedOrReview: number): string {
-  if (total === 0) {
-    return "暂无门槛产物";
-  }
-  if (blockedOrReview > 0) {
-    return `${blockedOrReview}/${total} 需处理`;
-  }
-  return `${total}/${total} 通过`;
-}
-
-
-function buildVariantAnchorId(variantId: string): string {
-  return `variant-${variantId}`;
-}
-
 
 function formatGateStatus(status: string): string {
   const labels: Record<string, string> = {
     pass: "通过",
-    blocked: "阻断",
-    needs_review: "需复核",
+    blocked: "暂不建议投递",
+    needs_review: "需要复核",
   };
-  return labels[status] ?? status;
+  return labels[status] ?? formatUserText(status);
 }
 
 
 function formatRequirementTier(tier: string): string {
   const labels: Record<string, string> = {
-    hard_gate: "硬门槛",
+    hard_gate: "硬性要求",
     high_priority: "高优先级",
     medium_priority: "中优先级",
     nice_to_have: "加分项",
   };
-  return labels[tier] ?? tier;
+  return labels[tier] ?? formatUserText(tier);
 }
 
 
 function formatEvidenceStatus(status: string): string {
   const labels: Record<string, string> = {
-    verified: "已验证",
+    verified: "已有证据",
     inferred: "可推断",
-    missing: "缺失",
+    missing: "缺少证据",
     mismatch: "不匹配",
-    simulatable: "可模拟补强",
-    forbidden_to_fabricate: "禁止编造",
+    simulatable: "可补强",
+    forbidden_to_fabricate: "不能编造",
   };
-  return labels[status] ?? status;
+  return labels[status] ?? formatUserText(status);
 }
 
 
-function formatBytes(sizeBytes: number): string {
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-    return "--";
-  }
-  if (sizeBytes < 1024) {
-    return `${sizeBytes} B`;
-  }
-  return `${(sizeBytes / 1024).toFixed(1)} KB`;
+function formatUserText(value: string): string {
+  const labels: Record<string, string> = {
+    hard_gate_missing: "硬性要求缺少证据",
+    needs_review: "需要复核",
+    manual_review: "人工复核",
+    apply: "建议投递",
+    hold: "暂缓",
+    skip: "跳过",
+    review: "复核",
+  };
+  return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
 }

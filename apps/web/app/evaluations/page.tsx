@@ -26,28 +26,28 @@ export default async function EvaluationPage() {
             <span className="breadcrumb-text">评估结果 / 队列</span>
           </div>
           <div>
-            <h1 className="page-title">评估结果列表</h1>
-            <p className="hero-copy">按岗位聚合已固化的评分、门槛、证据和投递建议，优先处理风险与复核项。</p>
+            <h1 className="page-title">岗位评估结果</h1>
+            <p className="hero-copy">按岗位聚合匹配度、风险和投递建议，优先处理需要复核的机会。</p>
           </div>
         </section>
 
         <section className="metric-card-grid evaluation-metric-grid" aria-label="评估结果总览">
-          <MetricCard icon="stats" label="总评估" value={total} helper="已完成评估的岗位行" tone="blue" />
+          <MetricCard icon="stats" label="岗位结果" value={total} helper="已完成评估的机会" tone="blue" />
           <MetricCard
             icon="alert-triangle"
-            label="需复核门槛"
+            label="需复核"
             value={blockedOrReview}
-            helper="阻断或需人工复核"
+            helper="建议人工确认"
             tone={blockedOrReview > 0 ? "orange" : "green"}
           />
           <MetricCard
             icon="shield-alert"
             label="高风险岗位"
             value={highRisk}
-            helper="risk_score ≥ 70%"
+            helper="风险达到高位"
             tone={highRisk > 0 ? "red" : "green"}
           />
-          <MetricCard icon="clock" label="历史产物" value={legacy} helper="缺少新版门槛字段" tone="purple" />
+          <MetricCard icon="clock" label="历史结果" value={legacy} helper="旧版本评估，仅供参考" tone="purple" />
         </section>
 
         <div className="eval-summary-strip" aria-label="趋势与评估边界">
@@ -60,7 +60,7 @@ export default async function EvaluationPage() {
             平均风险分 <strong>{averageRisk}</strong>
           </span>
           <span className="eval-summary-hint">
-            评估基于已固化评分快照，不包含实时策略变更。
+            评估基于最近一次生成结果，不代表新的岗位变化。
           </span>
         </div>
 

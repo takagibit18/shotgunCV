@@ -73,10 +73,10 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
     <div className="run-action-stack">
       <div className="pill-row compact">
         <button className="primary-link" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run")}>
-          {"运行"}
+          {"开始评估"}
         </button>
         <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("retry_full")}>
-          {"完整重试"}
+          {"重新评估"}
         </button>
         <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("resume_failed")}>
           {"从失败处继续"}
@@ -91,11 +91,11 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
         <form className="draft-edit-form" onSubmit={patchDraft}>
           <div className="detail-grid">
             <label className="field-label">
-              <span>{"候选人标识"}</span>
+              <span>{"候选人备注"}</span>
               <input name="candidateId" defaultValue={draft.candidateId} />
             </label>
             <label className="field-label">
-              <span>{"运行标签"}</span>
+              <span>{"投递名称"}</span>
               <input name="label" defaultValue={draft.label} />
             </label>
           </div>

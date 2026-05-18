@@ -65,6 +65,16 @@ type InputSourceDisplay = {
   extractionError: string;
 };
 
+type JdInputPreview = {
+  label: string;
+  kind: "image" | "text" | "metadata";
+  originalName: string;
+  contentType: string;
+  imageDataUrl?: string;
+  text?: string;
+  note?: string;
+};
+
 type ObservabilitySummary = {
   resolvedModels: {
     stage: string;
@@ -85,11 +95,15 @@ type ObservabilitySummary = {
 type ManifestInputItem = {
   role?: "cv" | "jd";
   source_origin?: string;
+  source_type?: string;
   display_name?: string;
   original_name?: string;
   relative_path?: string;
   size_bytes?: number;
   source_value?: string;
+  media_type?: string;
+  text?: string;
+  content?: string;
   extraction_status?: string;
   extraction_error?: string;
 };
@@ -135,6 +149,7 @@ type RunDetail = {
   stageStatuses: StageStatus[];
   timeline: RunTimelineEvent[];
   inputSources: InputSourceDisplay[];
+  jdInputPreviews: JdInputPreview[];
   observability: ObservabilitySummary;
 };
 
@@ -292,6 +307,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     stageStatuses: buildStageStatuses(completedStages, runStatus),
     timeline,
     inputSources: buildInputSources(ingestManifest, draft),
+    jdInputPreviews: await buildJdInputPreviews(runDir, ingestManifest, draft),
     observability,
   };
 }
@@ -436,7 +452,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 
-export type { ObservabilitySummary, RunDetail, RunReport, RunSummary };
+export type { JdInputPreview, ObservabilitySummary, RunDetail, RunReport, RunSummary };
 
 
 function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadManifest | null): InputSourceDisplay[] {
@@ -466,6 +482,167 @@ function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadM
     extractionStatus: "draft",
     extractionError: "",
   }));
+}
+
+
+async function buildJdInputPreviews(
+  runDir: string,
+  ingestManifest: IngestManifest | null,
+  draft: UploadManifest | null,
+): Promise<JdInputPreview[]> {
+  const manifestInputs = ingestManifest?.jd_inputs ?? [];
+  if (manifestInputs.length > 0) {
+    return Promise.all(
+      manifestInputs.map((item, index) =>
+        buildJdPreview({
+          runDir,
+          label: item.display_name || item.original_name || `岗位 ${index + 1}`,
+          originalName: item.original_name ?? item.display_name ?? `岗位 ${index + 1}`,
+          contentType: item.media_type ?? inferContentType(item.original_name ?? item.relative_path ?? item.source_value ?? ""),
+          relativePath: item.relative_path,
+          sourceValue: item.source_value,
+          inlineText: item.text || item.content || "",
+          extractionError: item.extraction_error,
+        }),
+      ),
+    );
+  }
+
+  return Promise.all(
+    (draft?.files ?? [])
+      .filter((file) => file.role === "jd")
+      .map((file, index) =>
+        buildJdPreview({
+          runDir,
+          label: file.displayName || file.originalName || `岗位 ${index + 1}`,
+          originalName: file.originalName || `岗位 ${index + 1}`,
+          contentType: file.contentType || inferContentType(file.originalName),
+          relativePath: file.storedRelativePath,
+          sourceValue: file.storedRelativePath,
+          inlineText: "",
+          extractionError: "",
+        }),
+      ),
+  );
+}
+
+
+async function buildJdPreview({
+  runDir,
+  label,
+  originalName,
+  contentType,
+  relativePath,
+  sourceValue,
+  inlineText,
+  extractionError,
+}: {
+  runDir: string;
+  label: string;
+  originalName: string;
+  contentType: string;
+  relativePath?: string;
+  sourceValue?: string;
+  inlineText: string;
+  extractionError?: string;
+}): Promise<JdInputPreview> {
+  const candidatePath = resolveRunFilePath(runDir, relativePath || sourceValue || "");
+  if (isImageInput(contentType, originalName)) {
+    const bytes = candidatePath ? await readFileIfExists(candidatePath) : null;
+    return {
+      label,
+      kind: bytes ? "image" : "metadata",
+      originalName,
+      contentType: contentType || inferContentType(originalName),
+      imageDataUrl: bytes ? `data:${contentType || inferContentType(originalName)};base64,${bytes.toString("base64")}` : undefined,
+      note: bytes ? "点击截图可放大查看" : extractionError || "岗位截图尚未生成可预览文件。",
+    };
+  }
+
+  const fileText = candidatePath && isTextInput(contentType, originalName) ? await readTextIfExists(candidatePath) : "";
+  const text = truncatePreviewText(inlineText || fileText);
+  if (text) {
+    return {
+      label,
+      kind: "text",
+      originalName,
+      contentType: contentType || inferContentType(originalName),
+      text,
+    };
+  }
+
+  return {
+    label,
+    kind: "metadata",
+    originalName,
+    contentType: contentType || inferContentType(originalName),
+    note: extractionError || "当前岗位输入暂无可直接展示的文本或截图。",
+  };
+}
+
+
+function resolveRunFilePath(runDir: string, filePath: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const resolved = path.resolve(path.isAbsolute(trimmed) ? trimmed : path.join(runDir, trimmed));
+  const relative = path.relative(path.resolve(runDir), resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return null;
+  }
+  return resolved;
+}
+
+
+async function readFileIfExists(filePath: string): Promise<Buffer | null> {
+  try {
+    return await readFile(filePath);
+  } catch {
+    return null;
+  }
+}
+
+
+async function readTextIfExists(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+
+function inferContentType(fileName: string): string {
+  const extension = path.extname(fileName).toLowerCase();
+  const contentTypes: Record<string, string> = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+  };
+  return contentTypes[extension] ?? "application/octet-stream";
+}
+
+
+function isImageInput(contentType: string, fileName: string): boolean {
+  return contentType.startsWith("image/") || [".jpg", ".jpeg", ".png", ".webp"].includes(path.extname(fileName).toLowerCase());
+}
+
+
+function isTextInput(contentType: string, fileName: string): boolean {
+  return contentType.startsWith("text/") || [".txt", ".md"].includes(path.extname(fileName).toLowerCase());
+}
+
+
+function truncatePreviewText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= 12000) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 12000)}\n\n[内容较长，已截取前 12000 个字符用于页面预览。]`;
 }
 
 

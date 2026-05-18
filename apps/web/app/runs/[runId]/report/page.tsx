@@ -18,6 +18,7 @@ export default async function ReportPage({ params }: PageProps) {
     loadRunDetail(resolvedParams.runId),
   ]);
   const reportSummary = buildReportSummary(detail);
+  const reportTitle = detail.label || reportSummary.topTitle || "评估报告";
 
   return (
     <AppShell active="evaluation" eyebrow="评估结果 / 报告" freshnessText="本地数据">
@@ -31,9 +32,9 @@ export default async function ReportPage({ params }: PageProps) {
             <span className="breadcrumb-text">评估结果 / 报告</span>
           </div>
           <div>
-            <p className="eyebrow">运行报告 · 投递复盘</p>
-            <h1 className="page-title">{resolvedParams.runId}</h1>
-            <p className="hero-copy">先读投递结论、证据和面试/改进重点；原始报告保留为可追溯来源。</p>
+            <p className="eyebrow">评估报告 · 投递复盘</p>
+            <h1 className="page-title">{reportTitle}</h1>
+            <p className="hero-copy">先读投递结论、关键证据和面试准备；系统字段已转换为可读判断。</p>
           </div>
         </section>
 
@@ -54,9 +55,9 @@ export default async function ReportPage({ params }: PageProps) {
           />
           <MetricCard
             icon="layers"
-            label="引用 / 来源依据"
+            label="依据完整度"
             value={reportSummary.sourceBasis}
-            helper="每条摘要保留来源标签"
+            helper="来自评分、证据和投递建议"
             tone="purple"
           />
         </section>
@@ -87,10 +88,10 @@ export default async function ReportPage({ params }: PageProps) {
             </summary>
             {report ? (
               <div className="markdown">
-                <ReactMarkdown>{report.markdown}</ReactMarkdown>
+                <ReactMarkdown>{sanitizeReportMarkdown(report.markdown)}</ReactMarkdown>
               </div>
             ) : (
-              <div className="empty">阶段未完成</div>
+              <div className="empty">报告尚未生成。</div>
             )}
           </details>
         </section>
@@ -121,7 +122,6 @@ function SummaryCard({ icon, title, items }: { icon: Parameters<typeof Icon>[0][
           visibleItems.map((item) => (
             <li key={`${item.source}-${item.text}`}>
               <span>{item.text}</span>
-              <small>{"来源：" + item.source}</small>
             </li>
           ))
         ) : (
@@ -157,10 +157,10 @@ function buildReportSummary(detail: DetailForReport) {
     ? detail.evaluate.gapMaps.find((gapMap) => gapMap.jd_id === topVariant.jdId)
     : detail.evaluate.gapMaps[0];
   const gapItems = Array.isArray(topGapMap?.items) ? topGapMap.items : [];
-  const strategyReason = topStrategy?.reason_summary ? `。${topStrategy.reason_summary}` : "";
+  const strategyReason = topStrategy?.reason_summary ? `。${formatUserText(topStrategy.reason_summary)}` : "";
 
   return {
-    topTitle: topVariant?.title ?? topStrategy?.jd_id ?? "暂无推荐岗位",
+    topTitle: topVariant?.title ?? "暂无推荐岗位",
     sourceBasis: uniqueItems([
       topVariant ? { text: "评分快照", source: "评分产物" } : null,
       topStrategy ? { text: "投递策略", source: "策略产物" } : null,
@@ -168,12 +168,12 @@ function buildReportSummary(detail: DetailForReport) {
       topGapMap ? { text: "差距分析", source: "差距产物" } : null,
     ])
       .map((item) => item.text)
-      .join(" / ") || "暂无来源",
+      .join(" / ") || "暂无依据",
     recommendations: uniqueItems([
       topVariant
         ? { text: `优先投递 ${topVariant.title}，综合得分 ${Math.round(topVariant.overallScore * 100)}%。`, source: "评分产物" }
         : null,
-      topStrategy ? { text: `投递决策：${topStrategy.apply_decision}${strategyReason}`, source: "策略产物" } : null,
+      topStrategy ? { text: `投递建议：${formatDecision(topStrategy.apply_decision)}${strategyReason}`, source: "策略产物" } : null,
     ]),
     evidence: uniqueItems([
       ...toSummaryItems(topExplanation?.evidence_refs, "证据引用"),
@@ -199,7 +199,7 @@ function toSummaryItems(value: unknown, source: string): SummaryItem[] {
   return Array.isArray(value)
     ? value
         .filter((text): text is string => typeof text === "string" && text.trim().length > 0)
-        .map((text) => ({ text, source }))
+        .map((text) => ({ text: formatUserText(text), source }))
     : [];
 }
 
@@ -213,7 +213,38 @@ function uniqueItems(items: Array<SummaryItem | null>): SummaryItem[] {
       return;
     }
     seen.add(text);
-    results.push({ text, source: item.source });
+    results.push({ text: formatUserText(text), source: item.source });
   });
   return results;
+}
+
+
+function sanitizeReportMarkdown(markdown: string): string {
+  return markdown.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => formatUserText(token));
+}
+
+
+function formatDecision(value: string): string {
+  const labels: Record<string, string> = {
+    apply: "建议投递",
+    manual_review: "人工复核",
+    hold: "暂缓",
+    skip: "跳过",
+    review: "复核后决定",
+  };
+  return labels[value] ?? formatUserText(value);
+}
+
+
+function formatUserText(value: string): string {
+  const labels: Record<string, string> = {
+    hard_gate_missing: "硬性要求缺少证据",
+    needs_review: "需要复核",
+    manual_review: "人工复核",
+    final_overall_score: "综合得分",
+    risk_score: "风险",
+    gate_status: "门槛状态",
+    apply_decision: "投递建议",
+  };
+  return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
 }
