@@ -10,6 +10,7 @@ import HomePage from "../app/page";
 import EvaluationPage from "../app/evaluations/page";
 import ResumePage from "../app/resume/page";
 import RunsPage from "../app/runs/page";
+import JdImagePreviewPage from "../app/runs/[runId]/jd-preview/[index]/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
 import {
@@ -17,6 +18,10 @@ import {
   POST as resetLocalConfigRoute,
   PUT as putLocalConfigRoute,
 } from "../app/api/settings/local-config/route";
+import {
+  GET as getDependencyRoute,
+  POST as postDependencyRoute,
+} from "../app/api/settings/dependencies/route";
 import SettingsPage from "../app/settings/page";
 import UploadPage from "../app/upload/page";
 import { filterEvaluationResults, loadEvaluationResults, sortEvaluationResults } from "./evaluations";
@@ -29,6 +34,7 @@ import {
 import { loadResumeWorkspace } from "./resume";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
 import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
+import { checkPythonDependencies } from "./python-env";
 import { loadSettingsOverview } from "./settings";
 import { createRunDraft, DraftCreationError } from "./upload-drafts";
 
@@ -38,6 +44,7 @@ describe("run viewer data loading", () => {
     delete process.env.SHOTGUNCV_RUNS_DIR;
     delete process.env.OPENAI_API_KEY;
     delete process.env.SHOTGUNCV_WEB_PROJECT_ROOT;
+    delete process.env.SHOTGUNCV_PYTHON;
   });
 
   it("lists runs with completed stages and provider labels", async () => {
@@ -86,7 +93,7 @@ describe("run viewer data loading", () => {
     expect(detail.completedStages).toEqual(["report"]);
     expect(html).toContain("评估详情");
     expect(html).toContain("评估结果尚未生成");
-    expect(html).not.toContain("运行状态");
+    expect(html).toContain("结果已就绪");
   });
 
   it("renders legacy partial run with downstream artifacts but no config or analyze output", async () => {
@@ -146,7 +153,7 @@ describe("run viewer data loading", () => {
 
     expect(html).toContain("Legacy role");
     expect(html).toContain("匹配、证据与风险");
-    expect(html).not.toContain("运行状态");
+    expect(html).toContain("结果已就绪");
   });
 
   it("renders run detail when one optional artifact contains malformed json", async () => {
@@ -790,7 +797,7 @@ describe("run viewer data loading", () => {
     const result = await startRunAction(draft.runId, "run", () => child);
     child.stderr.emit("data", Buffer.from("missing python package"));
     child.emit("exit", 1, null);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForRunStatus(path.join(runsDir, draft.runId, "run_status.json"), "failed");
 
     const status = JSON.parse(await readFile(path.join(runsDir, draft.runId, "run_status.json"), "utf-8"));
     expect(result).toMatchObject({ runId: draft.runId, status: "queued", action: "run" });
@@ -802,6 +809,10 @@ describe("run viewer data loading", () => {
     });
     expect(status.error_summary).toContain("CLI 运行失败，退出码 1");
     expect(status.error_summary).toContain("missing python package");
+    const actionLog = await readFile(path.join(runsDir, draft.runId, "logs", "web_run_action.jsonl"), "utf-8");
+    expect(actionLog).toContain("web_cli_start");
+    expect(actionLog).toContain("web_cli_exit");
+    expect(actionLog).toContain("missing python package");
   });
 
   it("rejects duplicate draft run ids", async () => {
@@ -819,6 +830,77 @@ describe("run viewer data loading", () => {
     await createRunDraft(input);
 
     await expect(createRunDraft(input)).rejects.toMatchObject({ code: "run_exists" });
+  });
+
+  it("detects scanned PDF and returns needsManualText in draft result", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File([Buffer.from("%PDF-1.4\n%%EOF")], "resume.pdf", { type: "application/pdf" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    expect(draft.needsManualText).toBe(true);
+    expect(draft.cvIssues).toEqual([{ originalName: "resume.pdf", quality: "empty" }]);
+    const manifest = JSON.parse(await readFile(path.join(runsDir, draft.runId, "ingest", "upload_manifest.json"), "utf-8"));
+    expect(manifest.needsManualText).toBe(true);
+    expect(manifest.cvIssues).toEqual([{ originalName: "resume.pdf", quality: "empty" }]);
+  });
+
+  it("patches draft with cvText and writes sidecar file", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File([Buffer.from("%PDF-1.4\n%%EOF")], "resume.pdf", { type: "application/pdf" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    await patchRunDraft(draft.runId, { cvText: "候选人简历纯文本内容" });
+
+    const sidecarPath = path.join(runsDir, draft.runId, "input_files", "cv", "resume.txt");
+    expect(await readFile(sidecarPath, "utf-8")).toBe("候选人简历纯文本内容");
+    const manifest = JSON.parse(await readFile(path.join(runsDir, draft.runId, "ingest", "upload_manifest.json"), "utf-8"));
+    expect(manifest.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "cv",
+          originalName: "resume.txt",
+          storedRelativePath: "input_files/cv/resume.txt",
+          contentType: "text/plain",
+        }),
+      ]),
+    );
+  });
+
+  it("dependency check reports fitz missing when not installed", async () => {
+    process.env.SHOTGUNCV_PYTHON = process.execPath;
+
+    const report = await checkPythonDependencies({ forceRefresh: true });
+
+    expect(report.python.found).toBe(true);
+    expect(report.python.path).toBe(process.execPath);
+    expect(report.fitz.installed).toBe(false);
+    expect(report.overall).toBe("blocked");
+  });
+
+  it("POST /api/settings/dependencies rejects unknown packages", async () => {
+    const response = await postDependencyRoute(
+      new Request("http://localhost/api/settings/dependencies", {
+        method: "POST",
+        body: JSON.stringify({ package: "requests" }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toMatchObject({ code: "unsupported_package" });
   });
 
   it("exposes stable draft creation errors", async () => {
@@ -879,7 +961,7 @@ describe("run viewer pages", () => {
     expect(runsHtml).toContain("状态筛选");
     expect(runsHtml).toContain("阶段筛选");
     expect(runsHtml).toContain("排序");
-    expect(runsHtml).toContain("投递进度");
+    expect(runsHtml).toContain("集中查看每个投递的状态");
     expect(runsHtml).toContain("operational-shell");
     expect(html).not.toContain("editorial-hero");
     expect(html).not.toContain("dark-product-surface");
@@ -932,9 +1014,10 @@ describe("run viewer pages", () => {
     expect(dashboardHtml).toContain("Workflow Health");
     expect(dashboardHtml).toContain("完成率");
     expect(dashboardHtml).toContain("打开运行队列");
-    expect(html).toContain("投递进度");
+    expect(html).toContain("运行队列");
     expect(html).toContain("全部投递");
     expect(html).toContain("进行中");
+    expect(html).toContain("删除");
     expect(html).toContain("第 1 / 2 页");
     expect(html).toContain("每页 10 条");
     expect(html).toContain("共 12 条");
@@ -1076,9 +1159,17 @@ describe("run viewer pages", () => {
     });
     expect(detail.jdInputPreviews[0].imageDataUrl).toContain("data:image/png;base64,");
     expect(html).toContain("Example AI - Screenshot JD");
-    expect(html).toContain("点击放大");
+    expect(html).toContain("打开大图预览");
+    expect(html).toContain(`href="/runs/demo-full/jd-preview/0"`);
     expect(html).toContain("data:image/png;base64,");
     expect(html).not.toContain("input_files/jd/jd-scan.png");
+
+    const previewHtml = renderToStaticMarkup(
+      await JdImagePreviewPage({ params: Promise.resolve({ runId: "demo-full", index: "0" }) }),
+    );
+    expect(previewHtml).toContain("JD 图片预览");
+    expect(previewHtml).toContain("返回评估详情");
+    expect(previewHtml).toContain("Example AI - Screenshot JD");
   });
 
   it("renders the upload page as a three-step draft workflow", () => {
@@ -2086,4 +2177,15 @@ async function makeRunRisky(runsDir: string, runId: string): Promise<void> {
 
 async function writeJson(filePath: string, payload: unknown): Promise<void> {
   await writeFile(filePath, JSON.stringify(payload, null, 2), "utf-8");
+}
+
+
+async function waitForRunStatus(statusPath: string, expectedStatus: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const status = JSON.parse(await readFile(statusPath, "utf-8")) as { status?: string };
+    if (status.status === expectedStatus) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }

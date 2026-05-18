@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 
 import { AppShell, Icon, MetricCard } from "../../AppShell";
-import { STATUS_LABELS } from "../../../lib/labels";
+import { STAGE_LABELS, STATUS_LABELS } from "../../../lib/labels";
 import { loadRunDetail, type JdInputPreview } from "../../../lib/runs";
 import { RunActionPanel } from "./RunActionPanel";
 import { ScoreMatrixRow } from "./ScoreMatrixRow";
@@ -84,6 +84,8 @@ export default async function RunPage({ params }: PageProps) {
           />
         </section>
 
+        <RunExecutionState detail={detail} />
+
         {canShowActions ? (
           <section className="section evaluation-action-section">
             <div className="section-heading">
@@ -97,7 +99,7 @@ export default async function RunPage({ params }: PageProps) {
           </section>
         ) : null}
 
-        <JdPreviewSection previews={detail.jdInputPreviews} />
+        <JdPreviewSection runId={detail.runId} previews={detail.jdInputPreviews} />
         <GateReviewSection detail={detail} />
 
         <section className="section evaluation-focus-section">
@@ -143,7 +145,94 @@ export default async function RunPage({ params }: PageProps) {
 }
 
 
-function JdPreviewSection({ previews }: { previews: JdInputPreview[] }) {
+function RunExecutionState({ detail }: { detail: RunDetail }) {
+  const status = detail.runStatus?.status ?? detail.draftStatus;
+  const currentStage = detail.runStatus?.current_stage ?? null;
+  const stageLabel = currentStage ? STAGE_LABELS[currentStage] ?? currentStage : "";
+
+  if (status === "running" || status === "queued") {
+    const runningText = buildRunningText(currentStage);
+    return (
+      <section className="section run-state-panel running" aria-live="polite">
+        <div>
+          <p className="eyebrow">运行状态</p>
+          <h2>
+            <AnimatedRunningText text={runningText} />
+          </h2>
+          <p className="section-copy">{stageLabel ? `当前阶段：${stageLabel}。页面会读取本地状态更新结果。` : "任务已进入本地执行队列。"}</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <section className="section run-state-panel failed" role="alert">
+        <div>
+          <p className="eyebrow">运行失败</p>
+          <h2>评估未完成</h2>
+          <p className="section-copy">
+            {stageLabel ? `失败阶段：${stageLabel}。` : "失败阶段：未知。"}
+            {detail.runStatus?.error_summary ? `原因：${detail.runStatus.error_summary}` : "请查看本地运行日志确认原因。"}
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (detail.completedStages.includes("report")) {
+    return (
+      <section className="section run-state-panel success">
+        <div>
+          <p className="eyebrow">运行状态</p>
+          <h2>结果已就绪</h2>
+          <p className="section-copy">评估、策略和报告产物已生成，可以进入复核。</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (status === "draft") {
+    return (
+      <section className="section run-state-panel idle">
+        <div>
+          <p className="eyebrow">运行状态</p>
+          <h2>尚未开始</h2>
+          <p className="section-copy">确认岗位和简历材料后，点击开始评估启动本地流程。</p>
+        </div>
+      </section>
+    );
+  }
+
+  return null;
+}
+
+
+function AnimatedRunningText({ text }: { text: string }) {
+  return (
+    <span className="running-wave-text" aria-label={text}>
+      {Array.from(text).map((char, index) => (
+        <span key={`${char}-${index}`} style={{ animationDelay: `${index * 80}ms` }} aria-hidden="true">
+          {char}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+
+function buildRunningText(stage: string | null): string {
+  if (stage === "generate" || stage === "plan" || stage === "report") {
+    return "生成中...";
+  }
+  if (stage === "evaluate" || stage === "analyze") {
+    return "分析中...";
+  }
+  return "思考中...";
+}
+
+
+function JdPreviewSection({ runId, previews }: { runId: string; previews: JdInputPreview[] }) {
   if (previews.length === 0) {
     return null;
   }
@@ -158,7 +247,7 @@ function JdPreviewSection({ previews }: { previews: JdInputPreview[] }) {
       </div>
       <div className="jd-preview-grid">
         {previews.map((preview, index) => (
-          <JdPreviewCard key={`${preview.originalName}-${index}`} preview={preview} />
+          <JdPreviewCard key={`${preview.originalName}-${index}`} runId={runId} preview={preview} index={index} />
         ))}
       </div>
     </section>
@@ -166,7 +255,7 @@ function JdPreviewSection({ previews }: { previews: JdInputPreview[] }) {
 }
 
 
-function JdPreviewCard({ preview }: { preview: JdInputPreview }) {
+function JdPreviewCard({ runId, preview, index }: { runId: string; preview: JdInputPreview; index: number }) {
   if (preview.kind === "image" && preview.imageDataUrl) {
     return (
       <article className="jd-preview-card image">
@@ -179,15 +268,10 @@ function JdPreviewCard({ preview }: { preview: JdInputPreview }) {
             <p>{preview.note ?? "点击截图可放大查看"}</p>
           </div>
         </div>
-        <details className="jd-image-preview">
-          <summary>
+        <Link href={`/runs/${runId}/jd-preview/${index}`} className="jd-image-preview-link" aria-label={`打开 ${preview.label} 图片预览`}>
             <img src={preview.imageDataUrl} alt={`${preview.label} 截图预览`} />
-            <span>点击放大</span>
-          </summary>
-          <div className="jd-image-expanded">
-            <img src={preview.imageDataUrl} alt={`${preview.label} 放大截图`} />
-          </div>
-        </details>
+            <span>打开大图预览</span>
+        </Link>
       </article>
     );
   }

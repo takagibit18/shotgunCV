@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getRunsDir } from "./runs";
@@ -20,17 +20,35 @@ type SpawnRunner = (command: string, args: string[], options: { cwd: string; env
 type CliResolution = {
   command: string;
   prefixArgs: string[];
+  runtime: string;
 };
 
 type DraftPatchInput = {
   candidateId?: string;
   label?: string;
   cvFiles?: File[];
+  cvText?: string;
+  cvTexts?: Array<{ originalName?: string; text: string }>;
   jdFiles?: File[];
   jdFileDisplayNames?: string[];
   jdTexts?: string[];
   jdTextDisplayNames?: string[];
   now?: Date;
+};
+
+type CvIssue = {
+  originalName: string;
+  quality: "readable" | "scanned" | "empty";
+};
+
+type WebUploadManifest = UploadManifest & {
+  cvIssues?: CvIssue[];
+  needsManualText?: boolean;
+};
+
+type CvSidecarRecord = {
+  record: UploadedInputFile;
+  pdfOriginalName: string;
 };
 
 const STAGES = ["ingest", "analyze", "generate", "evaluate", "plan", "report"] as const;
@@ -72,14 +90,17 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
   const cliArgs = await buildCliArgs(runDir, action);
   let command: string;
   let finalArgs: string[];
+  let cliRuntime: string;
 
   if (spawnRunner === defaultSpawnRunner) {
     const resolved = await resolveCli();
     command = resolved.command;
     finalArgs = [...resolved.prefixArgs, ...cliArgs];
+    cliRuntime = resolved.runtime;
   } else {
     command = process.env.SHOTGUNCV_CLI_COMMAND ?? "shotguncv";
     finalArgs = cliArgs;
+    cliRuntime = "test-runner";
   }
 
   const startedAt = nowIso();
@@ -104,19 +125,77 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
     last_action: action,
   });
 
-  const child = spawnRunner(command, finalArgs, { cwd: path.resolve(getRunsDir(), ".."), env: process.env });
+  const cwd = path.resolve(getRunsDir(), "..");
+  const expectedOutputs = expectedOutputPaths(runDir);
+  await appendRunActionLog(runDir, {
+    event: "web_cli_start",
+    runId,
+    action,
+    candidateId: (await readManifestIfExists(runDir))?.candidateId ?? null,
+    cwd,
+    command,
+    args: finalArgs,
+    cliRuntime,
+    runDir,
+    cvPath: path.join(runDir, "input_files", "cv"),
+    jdPath: path.join(runDir, "input_files", "jd"),
+    expectedOutputPath: expectedOutputs.report,
+  });
+
+  const child = spawnRunner(command, finalArgs, { cwd, env: process.env });
   const output = createOutputBuffer();
-  child.stdout?.on("data", (chunk) => output.push(chunk));
-  child.stderr?.on("data", (chunk) => output.push(chunk));
+  child.stdout?.on("data", (chunk) => output.push("stdout", chunk));
+  child.stderr?.on("data", (chunk) => output.push("stderr", chunk));
   child.on("error", async (error) => {
-    await markRunFailed(runDir, startedAt, currentStage, action, `CLI 启动失败：${error.message}${formatCapturedOutput(output.text())}`);
+    const outputSnapshot = output.snapshot();
+    await appendRunActionLog(runDir, {
+      event: "web_cli_error",
+      runId,
+      action,
+      cwd,
+      command,
+      args: finalArgs,
+      errorMessage: error.message,
+      stdout: outputSnapshot.stdout,
+      stderr: outputSnapshot.stderr,
+      expectedOutputPath: expectedOutputs.report,
+      expectedOutputExists: await exists(expectedOutputs.report),
+    });
+    await markRunFailed(runDir, startedAt, currentStage, action, `CLI 启动失败：${error.message}${formatCapturedOutput(outputSnapshot.all)}`);
   });
   child.on("exit", async (code, signal) => {
+    const outputSnapshot = output.snapshot();
+    const outputExists = await exists(expectedOutputs.report);
+    const statusAfterExit = await readRunStatus(runDir);
+    await appendRunActionLog(runDir, {
+      event: "web_cli_exit",
+      runId,
+      action,
+      cwd,
+      command,
+      args: finalArgs,
+      exitCode: code,
+      signal,
+      stdout: outputSnapshot.stdout,
+      stderr: outputSnapshot.stderr,
+      expectedOutputPath: expectedOutputs.report,
+      expectedOutputExists: outputExists,
+      parsedResultSummary: summarizeRunStatus(statusAfterExit),
+    });
     if (code === 0) {
+      if (!outputExists) {
+        await markRunFailed(
+          runDir,
+          startedAt,
+          currentStage,
+          action,
+          `CLI 已退出但未生成预期报告：${expectedOutputs.report}${formatCapturedOutput(outputSnapshot.all)}`,
+        );
+      }
       return;
     }
     const reason = signal ? `CLI 运行失败，信号 ${signal}` : `CLI 运行失败，退出码 ${code ?? "未知"}`;
-    await markRunFailed(runDir, startedAt, currentStage, action, `${reason}${formatCapturedOutput(output.text())}`);
+    await markRunFailed(runDir, startedAt, currentStage, action, `${reason}${formatCapturedOutput(outputSnapshot.all)}`);
   });
   child.unref?.();
 
@@ -148,7 +227,7 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
   }
 
   const manifestPath = path.join(runDir, "ingest", "upload_manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as UploadManifest;
+  const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as WebUploadManifest;
   const now = input.now ?? new Date();
   const uploadedAt = now.toISOString();
 
@@ -178,6 +257,20 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
     await mkdir(cvDir, { recursive: true });
     manifest.files = manifest.files.filter((file) => file.role !== "cv");
     manifest.files.unshift(...(await writeRoleFiles(runDir, "cv", input.cvFiles, uploadedAt)));
+  }
+
+  const cvTextEntries = normalizeCvTextEntries(input);
+  if (cvTextEntries.length > 0) {
+    const sidecars = await writeCvTextSidecars(runDir, manifest, cvTextEntries, uploadedAt);
+    const sidecarRecords = sidecars.map((sidecar) => sidecar.record);
+    const replacedPaths = new Set(sidecarRecords.map((record) => record.storedRelativePath));
+    manifest.files = [
+      ...manifest.files.filter((file) => !replacedPaths.has(file.storedRelativePath)),
+      ...sidecarRecords,
+    ];
+    const resolvedOriginalNames = new Set(sidecars.map((sidecar) => sidecar.pdfOriginalName));
+    manifest.cvIssues = (manifest.cvIssues ?? []).filter((issue) => !resolvedOriginalNames.has(issue.originalName));
+    manifest.needsManualText = (manifest.cvIssues ?? []).length > 0;
   }
 
   const usedJdNames = new Set(
@@ -210,6 +303,72 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
 }
 
 
+function normalizeCvTextEntries(input: DraftPatchInput): Array<{ originalName?: string; text: string }> {
+  if (input.cvTexts && input.cvTexts.length > 0) {
+    return input.cvTexts
+      .map((entry) => ({ originalName: entry.originalName?.trim(), text: entry.text.trim() }))
+      .filter((entry) => entry.text);
+  }
+  const cvText = input.cvText?.trim();
+  return cvText ? [{ text: cvText }] : [];
+}
+
+
+async function writeCvTextSidecars(
+  runDir: string,
+  manifest: WebUploadManifest,
+  entries: Array<{ originalName?: string; text: string }>,
+  uploadedAt: string,
+): Promise<CvSidecarRecord[]> {
+  const pdfFiles = manifest.files.filter((file) => file.role === "cv" && isPdfUpload(file));
+  const usedPdfIndexes = new Set<number>();
+  const records: CvSidecarRecord[] = [];
+  for (const entry of entries) {
+    const matchIndex = findPdfForCvText(pdfFiles, entry.originalName, usedPdfIndexes);
+    if (matchIndex < 0) {
+      throw new RunActionError("cv_pdf_not_found", "未找到可匹配的 PDF 简历文件。", 400);
+    }
+    usedPdfIndexes.add(matchIndex);
+    const pdfFile = pdfFiles[matchIndex];
+    const pdfRelativePath = pdfFile.storedRelativePath.replaceAll("\\", "/");
+    const parsed = path.posix.parse(pdfRelativePath);
+    const sidecarRelativePath = path.posix.join(parsed.dir, `${parsed.name}.txt`);
+    const outputPath = path.join(runDir, sidecarRelativePath);
+    assertInside(path.join(runDir, parsed.dir), outputPath);
+    await writeFile(outputPath, entry.text, "utf-8");
+    records.push({
+      pdfOriginalName: pdfFile.originalName,
+      record: {
+        role: "cv",
+        originalName: `${parsed.name}.txt`,
+        storedRelativePath: sidecarRelativePath,
+        sizeBytes: Buffer.byteLength(entry.text, "utf-8"),
+        contentType: "text/plain",
+        uploadedAt,
+      },
+    });
+  }
+  return records;
+}
+
+
+function findPdfForCvText(files: UploadedInputFile[], originalName: string | undefined, usedIndexes: Set<number>): number {
+  if (originalName) {
+    const target = originalName.toLowerCase();
+    const explicitIndex = files.findIndex((file, index) => !usedIndexes.has(index) && file.originalName.toLowerCase() === target);
+    if (explicitIndex >= 0) {
+      return explicitIndex;
+    }
+  }
+  return files.findIndex((_, index) => !usedIndexes.has(index));
+}
+
+
+function isPdfUpload(file: UploadedInputFile): boolean {
+  return file.contentType === "application/pdf" || path.extname(file.originalName).toLowerCase() === ".pdf";
+}
+
+
 function defaultSpawnRunner(command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) {
   return spawn(command, args, {
     cwd: options.cwd,
@@ -225,7 +384,7 @@ async function resolveCli(): Promise<CliResolution> {
   const explicitCommand = process.env.SHOTGUNCV_CLI_COMMAND;
   if (explicitCommand) {
     if (await commandAvailable(explicitCommand)) {
-      return { command: explicitCommand, prefixArgs: [] };
+      return { command: explicitCommand, prefixArgs: [], runtime: "explicit" };
     }
     throw new RunActionError(
       "cli_not_found",
@@ -234,18 +393,18 @@ async function resolveCli(): Promise<CliResolution> {
     );
   }
 
-  if (await commandAvailable("shotguncv")) {
-    return { command: "shotguncv", prefixArgs: [] };
+  const python = await findPython();
+  if (python) {
+    return { command: python, prefixArgs: ["-m", "shotguncv_cli.main"], runtime: "python-module" };
   }
 
-  const python = await findPython();
-  if (python && (await pythonModuleAvailable(python, "shotguncv_cli.main"))) {
-    return { command: python, prefixArgs: ["-m", "shotguncv_cli.main"] };
+  if (await commandAvailable("shotguncv")) {
+    return { command: "shotguncv", prefixArgs: [], runtime: "path-script" };
   }
 
   throw new RunActionError(
     "cli_not_found",
-    "未找到 shotguncv 命令。请执行 `pip install -e .` 安装 CLI，或设置 SHOTGUNCV_CLI_COMMAND 环境变量。",
+    "未找到可用的 shotguncv CLI 运行时。请确认 Python 环境可以导入 shotguncv_cli.main 和 PyMuPDF，或设置 SHOTGUNCV_CLI_COMMAND。",
     503,
   );
 }
@@ -265,17 +424,29 @@ async function commandAvailable(command: string): Promise<boolean> {
 }
 
 async function findPython(): Promise<string | null> {
-  for (const candidate of ["python", "python3"]) {
-    if (await commandAvailable(candidate)) {
+  const candidates = [
+    process.env.SHOTGUNCV_PYTHON,
+    path.join(path.resolve(getRunsDir(), ".."), ".venv", "Scripts", "python.exe"),
+    "python",
+    "python3",
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    if (await commandAvailable(candidate) && (await pythonRuntimeAvailable(candidate))) {
       return candidate;
     }
   }
   return null;
 }
 
-async function pythonModuleAvailable(pythonCmd: string, moduleName: string): Promise<boolean> {
+async function pythonRuntimeAvailable(pythonCmd: string): Promise<boolean> {
   try {
-    const result = spawnSync(pythonCmd, ["-c", `import ${moduleName}`], {
+    const result = spawnSync(pythonCmd, ["-c", "import shotguncv_cli.main; import fitz"], {
       env: process.env,
       encoding: "utf-8",
       windowsHide: true,
@@ -289,16 +460,27 @@ async function pythonModuleAvailable(pythonCmd: string, moduleName: string): Pro
 
 
 function createOutputBuffer() {
-  const chunks: string[] = [];
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  function trim(chunks: string[]) {
+    while (chunks.join("").length > 4000) {
+      chunks.shift();
+    }
+  }
   return {
-    push(chunk: unknown) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk));
-      while (chunks.join("").length > 4000) {
-        chunks.shift();
-      }
+    push(stream: "stdout" | "stderr", chunk: unknown) {
+      const target = stream === "stdout" ? stdoutChunks : stderrChunks;
+      target.push(Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk));
+      trim(target);
     },
-    text() {
-      return chunks.join("").trim().slice(-4000);
+    snapshot() {
+      const stdout = stdoutChunks.join("").trim().slice(-4000);
+      const stderr = stderrChunks.join("").trim().slice(-4000);
+      return {
+        stdout,
+        stderr,
+        all: [stdout, stderr].filter(Boolean).join("\n").slice(-4000),
+      };
     },
   };
 }
@@ -325,6 +507,35 @@ async function markRunFailed(
     error_summary: errorSummary,
     last_action: action,
   });
+}
+
+function expectedOutputPaths(runDir: string) {
+  return {
+    report: path.join(runDir, "report", "summary.md"),
+  };
+}
+
+function summarizeRunStatus(status: RunStatusFile | null) {
+  if (!status) {
+    return null;
+  }
+  return {
+    status: status.status,
+    currentStage: status.current_stage,
+    errorStage: status.error_stage,
+    errorSummary: status.error_summary,
+    finishedAt: status.finished_at,
+  };
+}
+
+async function appendRunActionLog(runDir: string, payload: Record<string, unknown>): Promise<void> {
+  const logsDir = path.join(runDir, "logs");
+  await mkdir(logsDir, { recursive: true });
+  await appendFile(
+    path.join(logsDir, "web_run_action.jsonl"),
+    `${JSON.stringify({ timestamp: nowIso(), ...payload })}\n`,
+    "utf-8",
+  );
 }
 
 

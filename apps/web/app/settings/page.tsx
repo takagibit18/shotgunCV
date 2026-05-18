@@ -4,6 +4,7 @@ import Link from "next/link";
 import { loadLocalConfig } from "../../lib/local-config";
 import { loadSettingsOverview, type SettingsCheck, type SettingsOverview } from "../../lib/settings";
 import { AppShell, Icon, MetricCard } from "../AppShell";
+import { DependencyPanel } from "./DependencyPanel";
 import { LocalConfigPanel } from "./LocalConfigPanel";
 
 export default async function SettingsPage() {
@@ -53,6 +54,7 @@ export default async function SettingsPage() {
         </section>
 
         <LocalConfigPanel initialConfig={localConfig} />
+        <DependencyPanel />
 
         <section className="settings-grid" aria-label="本地设置摘要">
           <section className="section settings-panel">
