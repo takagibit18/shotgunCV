@@ -3,221 +3,306 @@ import Link from "next/link";
 
 import { STATUS_LABELS } from "../lib/labels";
 import { listRuns, type RunSummary } from "../lib/runs";
-import { AppShell, Icon } from "./AppShell";
-import { RunQueue } from "./RunQueue";
+import { Icon, type IconName } from "./AppShell";
+import { HomeOnboardingGuide } from "./HomeOnboardingGuide";
+
+const STAGE_TOTAL = 6;
+
+const FEATURES: Array<{
+  icon: IconName;
+  title: string;
+  body: string;
+}> = [
+  {
+    icon: "briefcase",
+    title: "从岗位反推简历策略",
+    body: "从 JD 中提炼要求，生成可执行的简历优化方向，让修改有明确依据。",
+  },
+  {
+    icon: "shield-check",
+    title: "本地优先，边界清晰",
+    body: "Web 用于状态定位、风险提示与结果查看，不替代本地 CLI pipeline。",
+  },
+  {
+    icon: "check-square",
+    title: "证据化评估结果",
+    body: "输出 scorecard、gap map、匹配度、风险项与下一步建议。",
+  },
+  {
+    icon: "layers",
+    title: "串联完整工作流",
+    body: "将 ingest、analyze、generate、evaluate、plan、report 串成完整流程。",
+  },
+];
+
+const USAGE_STEPS = [
+  "上传简历、补充材料和岗位描述，创建可复现的本地 run。",
+  "按草稿命令执行 pipeline，让本地流程生成结构化产物。",
+  "回到 Web 查看证据、风险、差距和下一步优化策略。",
+];
+
+const FAQS = [
+  {
+    question: "首页会展示原始 CV 或 JD 内容吗？",
+    answer: "不会。首页只展示 run 元数据、流程状态、风险提示和入口动作，避免暴露原始文本。",
+  },
+  {
+    question: "Web 会替代本地 CLI pipeline 吗？",
+    answer: "不会。Web 是工作流入口和证据复核层，核心执行仍保持本地优先。",
+  },
+  {
+    question: "第一次打开应该先做什么？",
+    answer: "先创建草稿 run，再执行本地 pipeline，最后复核评估和简历优化结果。",
+  },
+];
 
 export default async function HomePage() {
   const runs = await listRuns();
   const totalRuns = runs.length;
   const activeRuns = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued").length;
+  const draftRuns = runs.filter((run) => run.draftStatus === "draft" || run.draftStatus === "ingest-ready").length;
   const warningRuns = runs.filter((run) => run.runStatus?.quality_summary || run.runStatus?.error_summary).length;
   const doneRuns = runs.filter((run) => run.draftStatus === "done").length;
   const completionRate = totalRuns === 0 ? 0 : Math.round((doneRuns / totalRuns) * 100);
-  const recentRuns = runs.slice(0, 4);
+  const stageCoverage =
+    totalRuns === 0
+      ? 0
+      : Math.round((runs.reduce((sum, run) => sum + run.completedStages.length, 0) / (totalRuns * STAGE_TOTAL)) * 100);
+  const recentRuns = runs.slice(0, 3);
 
   return (
-    <AppShell active="dashboard" eyebrow="仪表盘">
-      <main className="app-shell operational-shell">
-        <section className="page-header with-actions dashboard-header">
-          <div>
-            <h1>运行队列</h1>
+    <main className="landing-page">
+      <LandingNav />
+
+      <section className="landing-hero" aria-labelledby="landing-hero-title">
+        <div className="landing-hero-copy">
+          <span className="landing-badge">
+            <Icon name="sparkle" />
+            AI-Powered
+          </span>
+          <h1 id="landing-hero-title">从岗位输入到证据化简历策略，一屏掌控</h1>
+          <p className="landing-hero-lead">从 JD 输入、草稿 run、pipeline 执行到证据复核，帮助你高效完成简历优化与投递准备。</p>
+          <p className="landing-hero-support">
+            ShotgunCV Web 保持本地优先：只展示 run 产物、评分证据、风险提示和下一步动作，不暴露原始 CV/JD 正文，只聚焦当前 workflow。
+          </p>
+          <div className="landing-actions">
+            <Link href="/upload" className="landing-button primary">
+              立即开始
+            </Link>
+            <a href="#workflow" className="landing-button secondary">
+              查看工作流
+            </a>
+            <Link href="/resume" className="landing-button ghost">
+              查看简历优化
+            </Link>
           </div>
-          <Link href="/upload" className="primary-link dashboard-primary-cta icon-link">
-            <Icon name="play" />
-            开始新投递
-          </Link>
-        </section>
-
-        <div className="workspace-grid">
-          <div className="workspace-main">
-            <section className="metric-card-grid" aria-label="运行总览">
-              <MetricTile value={totalRuns} label="运行批次" tone="info" />
-              <MetricTile value={activeRuns} label="进行中" tone="success" />
-              <MetricTile value={warningRuns} label="警告/失败" tone="warning" />
-              <MetricTile value={doneRuns} label="已完成" tone="purple" />
-            </section>
-
-            <section className="trend-strip" aria-label="趋势概览">
-              <div>
-                <p className="eyebrow">趋势概览</p>
-                <h2>批次容量与健康度</h2>
-              </div>
-              <TrendMetric label="运行数" value={totalRuns} />
-              <TrendMetric label="完成率" value={`${completionRate}%`} />
-              <TrendMetric label="警告/失败" value={warningRuns} tone={warningRuns > 0 ? "warning" : "success"} />
-            </section>
-
-            <RunQueue runs={runs} />
-          </div>
-
-          <aside className="insight-rail" aria-label="运行洞察">
-            <section className="rail-card">
-              <div className="section-heading">
-                <div>
-                  <h3>近期活动</h3>
-                </div>
-              </div>
-              <div className="activity-list">
-                {recentRuns.length > 0 ? (
-                  recentRuns.map((run) => (
-                    <div className="activity-item" key={run.runId}>
-                      <span className={buildActivityDotClassName(run.draftStatus)} />
-                      <span className="activity-meta">
-                        <strong title={run.label || run.runId}>{truncateText(run.label || run.runId, 24)}</strong>
-                        <small>
-                          阶段 {buildStageSummary(run.completedStages.length)} · {STATUS_LABELS[run.draftStatus] ?? run.draftStatus}
-                        </small>
-                      </span>
-                      <span className="muted">{formatTime(run.lastModified)}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted">暂无运行活动。</p>
-                )}
-              </div>
-            </section>
-
-            {buildPrimaryInsight(runs) ? (
-              <section className="rail-card purple">
-                <div className="section-heading">
-                  <div>
-                    <h3>智能洞察</h3>
-                  </div>
-                </div>
-                <div className="recommendation-list">
-                  {runs.length === 0 ? (
-                    <Link href="/upload" className="recommendation-item safe dashboard-first-run-card">
-                      <Icon name="play" />
-                      <div>
-                        <strong>开始您的第一次投递</strong>
-                        <p>上传简历和岗位信息，创建投递草稿后即可在详情页启动本地流程。</p>
-                      </div>
-                    </Link>
-                  ) : (
-                    <div className={buildPrimaryInsight(runs)!.tone}>
-                      <Icon name="sparkle" />
-                      <div>
-                        <strong>{buildPrimaryInsight(runs)!.title}</strong>
-                        <p>{buildPrimaryInsight(runs)!.reason}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-            ) : null}
-
-          </aside>
         </div>
-      </main>
-    </AppShell>
+
+        <HeroShowcase
+          totalRuns={totalRuns}
+          activeRuns={activeRuns}
+          warningRuns={warningRuns}
+          draftRuns={draftRuns}
+          completionRate={completionRate}
+          stageCoverage={stageCoverage}
+          recentRuns={recentRuns}
+        />
+      </section>
+
+      <section id="features" className="landing-section landing-values" aria-labelledby="landing-features-title">
+        <div className="landing-section-heading">
+          <span className="landing-kicker">功能特色</span>
+          <h2 id="landing-features-title">为什么用智能简历工作台</h2>
+          <p>让简历优化从经验驱动，走向证据驱动；同时把风险、证据和下一步动作放在用户真正需要的位置。</p>
+        </div>
+        <div className="landing-feature-grid">
+          {FEATURES.map((feature) => (
+            <article className="landing-feature-card" key={feature.title}>
+              <span className="landing-feature-icon" aria-hidden="true">
+                <Icon name={feature.icon} />
+              </span>
+              <h3>{feature.title}</h3>
+              <p>{feature.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="usage" className="landing-section landing-usage" aria-labelledby="landing-usage-title">
+        <div className="landing-section-heading compact">
+          <span className="landing-kicker">使用方式</span>
+          <h2 id="landing-usage-title">三步进入一轮完整简历工作流</h2>
+        </div>
+        <div className="landing-usage-strip">
+          {USAGE_STEPS.map((step, index) => (
+            <article className="landing-usage-item" key={step}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <p>{step}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <HomeOnboardingGuide totalRuns={totalRuns} draftRuns={draftRuns} activeRuns={activeRuns} />
+
+      <section id="faq" className="landing-section landing-faq" aria-labelledby="landing-faq-title">
+        <div className="landing-section-heading compact">
+          <span className="landing-kicker">常见问题</span>
+          <h2 id="landing-faq-title">保持入口清晰，也保持执行边界清晰</h2>
+        </div>
+        <div className="landing-faq-list">
+          {FAQS.map((item) => (
+            <article className="landing-faq-item" key={item.question}>
+              <h3>{item.question}</h3>
+              <p>{item.answer}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-final-cta" aria-labelledby="landing-final-title">
+        <h2 id="landing-final-title">准备开始你的第一轮简历工作流了吗？</h2>
+        <p>从岗位输入开始，快速生成更清晰、更可执行的简历优化路径。</p>
+        <div className="landing-actions">
+          <Link href="/upload" className="landing-button primary">
+            立即开始
+          </Link>
+          <a href="#workflow" className="landing-button secondary">
+            查看工作流说明
+          </a>
+        </div>
+      </section>
+    </main>
   );
 }
 
-function TrendMetric({ label, value, tone }: { label: string; value: number | string; tone?: "warning" | "success" }) {
+function LandingNav() {
   return (
-    <div className={tone ? `trend-metric ${tone}` : "trend-metric"}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <header className="landing-nav">
+      <Link href="/" className="landing-brand" aria-label="智能简历工作台">
+        <span className="landing-brand-mark">
+          <Icon name="ai" />
+        </span>
+        <strong>智能简历工作台</strong>
+      </Link>
+      <nav className="landing-nav-links" aria-label="首页导航">
+        <a href="#features">功能特色</a>
+        <a href="#workflow">工作流</a>
+        <a href="#usage">使用方式</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+      <div className="landing-nav-actions">
+        <Link href="/runs" className="landing-nav-secondary">
+          打开运行队列
+        </Link>
+        <Link href="/upload" className="landing-nav-primary">
+          立即开始
+        </Link>
+      </div>
+    </header>
   );
 }
 
-function MetricTile({
-  value,
-  label,
-  tone,
+function HeroShowcase({
+  totalRuns,
+  activeRuns,
+  warningRuns,
+  draftRuns,
+  completionRate,
+  stageCoverage,
+  recentRuns,
 }: {
-  value: number;
-  label: string;
-  tone: "info" | "success" | "warning" | "purple";
+  totalRuns: number;
+  activeRuns: number;
+  warningRuns: number;
+  draftRuns: number;
+  completionRate: number;
+  stageCoverage: number;
+  recentRuns: RunSummary[];
 }) {
+  const rows = recentRuns.length > 0 ? recentRuns : buildPreviewFallbackRows();
+  const hasRuns = recentRuns.length > 0;
+
   return (
-    <div className="metric-tile">
-      <span className={`metric-icon ${tone === "info" ? "" : tone}`}>
-        <Icon name={tone === "warning" ? "bell" : tone === "purple" ? "check-square" : "list"} />
-      </span>
-      <span className="metric-body">
-        <span className="metric-label">{label}</span>
-        <span className="metric-value">{value}</span>
-      </span>
+    <div className="landing-showcase" aria-label="智能简历工作台产品预览">
+      <div className="landing-showcase-tabs" aria-hidden="true">
+        <span className="active">AI 工作流</span>
+        <span>证据复核</span>
+        <span>本地执行</span>
+      </div>
+      <div className="landing-product-card">
+        <div className="landing-product-left">
+          <span className="landing-product-label">Workflow Health</span>
+          <strong>{totalRuns === 0 ? "等待首个 run" : `${totalRuns} 个 run 已接入`}</strong>
+          <div className="landing-pipeline-track" aria-label={`阶段覆盖 ${stageCoverage}%`}>
+            {["ingest", "analyze", "generate", "evaluate", "plan", "report"].map((stage, index) => (
+              <span key={stage} className={index < Math.max(1, Math.ceil((stageCoverage / 100) * STAGE_TOTAL)) ? "active" : ""} />
+            ))}
+          </div>
+          <div className="landing-mini-stats">
+            <MiniStat label="完成率" value={`${completionRate}%`} />
+            <MiniStat label="草稿" value={draftRuns} />
+            <MiniStat label="运行中" value={activeRuns} />
+            <MiniStat label="风险" value={warningRuns} tone={warningRuns > 0 ? "warn" : "good"} />
+          </div>
+        </div>
+        <div className="landing-product-right">
+          {rows.map((run) => (
+            <div className="landing-run-preview" key={run.runId}>
+              <span>
+                <strong>{run.label || run.runId}</strong>
+                <small>{run.runId}</small>
+              </span>
+              <span className={buildStatusClassName(run.draftStatus)}>
+                {STATUS_LABELS[run.draftStatus] ?? run.draftStatus}
+              </span>
+              <Link href={hasRuns ? `/runs/${run.runId}` : "/upload"}>{hasRuns ? "检查证据" : "创建草稿"}</Link>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
 
-function truncateText(text: string, maxLen: number): string {
-  if (text.length <= maxLen) {
-    return text;
-  }
-  return text.slice(0, maxLen - 1) + "…";
+function MiniStat({ label, value, tone = "neutral" }: { label: string; value: number | string; tone?: "neutral" | "good" | "warn" }) {
+  return (
+    <span className={`landing-mini-stat ${tone}`}>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
 }
 
-function buildPrimaryInsight(runs: RunSummary[]): {
-  title: string;
-  reason: string;
-  tone: string;
-} | null {
-  const failedRuns = runs.filter((run) => run.draftStatus === "failed");
-  const warningRuns = runs.filter((run) => run.runStatus?.quality_summary || run.runStatus?.error_summary);
-  const runningRuns = runs.filter((run) => run.draftStatus === "running" || run.draftStatus === "queued");
-
-  if (failedRuns.length > 0) {
-    return {
-      title: `${failedRuns.length} 个运行批次失败`,
-      reason: "查看详情排查错误摘要，修复后重新运行。",
-      tone: "recommendation-item priority",
-    };
-  }
-  if (warningRuns.length > warningRuns.filter((r) => r.draftStatus === "failed").length) {
-    return {
-      title: `${warningRuns.length} 个运行批次有质量警告`,
-      reason: "优先复查警告项，确认是否需要调整输入或模型配置。",
-      tone: "recommendation-item watch",
-    };
-  }
-  if (runningRuns.length > 0) {
-    return {
-      title: `${runningRuns.length} 个运行批次正在执行`,
-      reason: "关注阶段进度，完成后进入评估与报告。",
-      tone: "recommendation-item safe",
-    };
-  }
-  if (runs.length === 0) {
-    return {
-      title: "尚无运行数据",
-      reason: "创建投递草稿开始评估。",
-      tone: "recommendation-item safe",
-    };
-  }
-  return null;
+function buildPreviewFallbackRows(): RunSummary[] {
+  return [
+    {
+      runId: "draft-preview",
+      label: "创建草稿后显示在这里",
+      draftStatus: "draft",
+      completedStages: [],
+      lastModified: new Date("2026-05-17T08:00:00.000Z").toISOString(),
+      analyzerProvider: "deterministic",
+      generatorProvider: "openai",
+      judgeProvider: "openai",
+      plannerProvider: "openai",
+      runStatus: null,
+      stageStatuses: [],
+      timeline: [],
+      draft: null,
+    },
+  ];
 }
 
-function buildStageSummary(completedCount: number): string {
-  if (completedCount >= 6) {
-    return "完成";
-  }
-  if (completedCount > 0) {
-    return "进行中";
-  }
-  return "待导入";
-}
-
-function buildActivityDotClassName(status: string): string {
+function buildStatusClassName(status: string): string {
   if (status === "failed") {
-    return "activity-dot danger";
+    return "status-chip danger";
   }
   if (status === "done") {
-    return "activity-dot success";
+    return "status-chip success";
   }
-  if (status === "draft" || status === "queued") {
-    return "activity-dot warning";
+  if (status === "running" || status === "queued") {
+    return "status-chip info";
   }
-  return "activity-dot";
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return date.toISOString().slice(11, 16);
+  return "status-chip";
 }

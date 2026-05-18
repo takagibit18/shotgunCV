@@ -10,7 +10,7 @@ export default function UploadPage() {
   return (
     <AppShell active="resume" eyebrow="简历优化 / 创建草稿" freshnessText="本地数据">
       <main className="app-shell operational-shell">
-      <Link href="/" className="backlink">
+      <Link href="/runs" className="backlink">
         {"返回运行列表"}
       </Link>
 

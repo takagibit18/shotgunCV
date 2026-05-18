@@ -158,7 +158,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
         <div className="empty-state">
           <h3>暂无评估结果</h3>
           <p>等待运行批次完成评估阶段后，这里会按岗位聚合评分、门槛、风险和投递建议。</p>
-          <Link href="/" className="primary-link">
+          <Link href="/runs" className="primary-link">
             返回运行队列
           </Link>
         </div>

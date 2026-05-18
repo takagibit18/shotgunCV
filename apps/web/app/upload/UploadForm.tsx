@@ -365,7 +365,7 @@ export function UploadForm() {
             <a className="primary-link" href={`/runs/${result.runId}`}>
               {"进入详情页"}
             </a>
-            <a className="secondary-link" href="/">
+            <a className="secondary-link" href="/runs">
               {"返回运行队列"}
             </a>
           </div>

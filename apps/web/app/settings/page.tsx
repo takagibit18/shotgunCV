@@ -15,7 +15,7 @@ export default async function SettingsPage() {
       <main className="app-shell operational-shell">
         <section className="page-header settings-page-header">
           <div className="page-kicker-row">
-            <Link href="/" className="backlink icon-link">
+            <Link href="/runs" className="backlink icon-link">
               <Icon name="chevron-left" />
               返回运行队列
             </Link>

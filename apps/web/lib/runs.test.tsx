@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import HomePage from "../app/page";
 import EvaluationPage from "../app/evaluations/page";
 import ResumePage from "../app/resume/page";
+import RunsPage from "../app/runs/page";
 import RunPage from "../app/runs/[runId]/page";
 import ReportPage from "../app/runs/[runId]/report/page";
 import {
@@ -832,7 +833,7 @@ describe("run viewer pages", () => {
     delete process.env.SHOTGUNCV_RUNS_DIR;
   });
 
-  it("renders the run index page", async () => {
+  it("renders the landing home page", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -840,41 +841,68 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("智能简历工作台");
+    expect(html).toContain("从岗位输入到证据化简历策略，一屏掌控");
     expect(html).toContain("demo");
-    expect(html).toContain("导入");
-    expect(html).toContain("开始新投递");
+    expect(html).toContain("为什么用智能简历工作台");
+    expect(html).toContain("准备开始你的第一轮简历工作流了吗");
+    expect(html).toContain("打开运行队列");
     expect(html).toContain('href="/upload"');
+    expect(html).toContain('href="/runs"');
+    expect(html).not.toContain("app-sidebar");
+    expect(html).not.toContain("app-commandbar");
   });
 
-  it("renders the v0.6 operational run workspace language and controls", async () => {
+  it("renders landing navigation and keeps full queue controls on the queue page", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const html = renderToStaticMarkup(await HomePage());
+    const runsHtml = renderToStaticMarkup(await RunsPage());
 
     expect(html).toContain("智能简历工作台");
-    expect(html).toContain("仪表盘");
-    expect(html).toContain("简历优化");
-    expect(html).toContain("运行队列");
-    expect(html).toContain("评估结果");
-    expect(html).toContain("设置");
+    expect(html).toContain("功能特色");
+    expect(html).toContain("工作流");
+    expect(html).toContain("使用方式");
+    expect(html).toContain("常见问题");
     expect(html).toContain('href="/resume"');
-    expect(html).toContain('href="/settings"');
+    expect(html).toContain('href="#features"');
+    expect(html).toContain('href="#workflow"');
     expect(html).not.toContain("模板库");
     expect(html).not.toContain("sidebar-nav-item disabled");
-    expect(html).toContain("近期活动");
-    expect(html).toContain("智能洞察");
-    expect(html).toContain("搜索运行批次、标签、模型");
-    expect(html).toContain("状态筛选");
-    expect(html).toContain("阶段筛选");
-    expect(html).toContain("模型筛选");
-    expect(html).toContain("排序");
-    expect(html).toContain("operational-shell");
+    expect(html).toContain("本地优先，边界清晰");
+    expect(html).toContain("先把工作流跑通，再进入证据复核");
+    expect(html).not.toContain("搜索运行批次、标签、模型");
+    expect(runsHtml).toContain("搜索运行批次、标签、模型");
+    expect(runsHtml).toContain("状态筛选");
+    expect(runsHtml).toContain("阶段筛选");
+    expect(runsHtml).toContain("模型筛选");
+    expect(runsHtml).toContain("排序");
+    expect(runsHtml).toContain("operational-shell");
     expect(html).not.toContain("editorial-hero");
     expect(html).not.toContain("dark-product-surface");
     expect(html).not.toContain("coral-cta");
     expect(html).not.toContain("v0.5.8");
+  });
+
+  it("keeps the landing hero separate from the full run queue", async () => {
+    const runsDir = await createTempRunsDir();
+    for (let index = 0; index < 12; index += 1) {
+      await createIncompleteRun(runsDir, `dashboard-run-${String(index + 1).padStart(2, "0")}`);
+    }
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await HomePage());
+
+    expect(html).toContain("从岗位输入到证据化简历策略，一屏掌控");
+    expect(html).toContain('href="/runs"');
+    expect(html).toContain("landing-workflow-card");
+    expect(html).toContain("aria-label=\"下一步\"");
+    expect(html).toContain("aria-label=\"查看第 2 步\"");
+    expect(html).not.toContain("搜索运行批次、标签、模型");
+    expect(html).not.toContain("状态筛选");
+    expect(html).not.toContain("第 1 / 2 页");
+    expect(html).not.toContain("每页 10 条");
   });
 
   it("renders the draft upload entry point on the run index page", async () => {
@@ -884,23 +912,24 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("/upload");
-    expect(html).toContain("开始新投递");
-    expect(html).toContain("开始您的第一次投递");
-    expect(html).toContain("创建投递草稿");
+    expect(html).toContain("创建草稿 run");
+    expect(html).toContain("等待首个 run");
+    expect(html).toContain("整理输入");
   });
 
-  it("renders run pagination and trend summary for dense queues", async () => {
+  it("renders run pagination on the dedicated queue page", async () => {
     const runsDir = await createTempRunsDir();
     for (let index = 0; index < 12; index += 1) {
       await createIncompleteRun(runsDir, `dense-run-${String(index + 1).padStart(2, "0")}`);
     }
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
-    const html = renderToStaticMarkup(await HomePage());
+    const dashboardHtml = renderToStaticMarkup(await HomePage());
+    const html = renderToStaticMarkup(await RunsPage());
 
-    expect(html).toContain("趋势概览");
-    expect(html).toContain("完成率");
-    expect(html).toContain("警告/失败");
+    expect(dashboardHtml).toContain("趋势概览");
+    expect(dashboardHtml).toContain("完成率");
+    expect(dashboardHtml).toContain("警告/失败");
     expect(html).toContain("第 1 / 2 页");
     expect(html).toContain("每页 10 条");
     expect(html).toContain("共 12 条");
@@ -914,10 +943,11 @@ describe("run viewer pages", () => {
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
 
     const homeHtml = renderToStaticMarkup(await HomePage());
+    const runsHtml = renderToStaticMarkup(await RunsPage());
     const uploadHtml = renderToStaticMarkup(UploadPage());
     const runHtml = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
     const reportHtml = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v060" }) }));
-    const combinedHtml = [homeHtml, uploadHtml, runHtml, reportHtml].join("\n");
+    const combinedHtml = [homeHtml, runsHtml, uploadHtml, runHtml, reportHtml].join("\n");
 
     expect(combinedHtml).toContain("智能简历工作台");
     expect(combinedHtml).toContain("运行队列");
