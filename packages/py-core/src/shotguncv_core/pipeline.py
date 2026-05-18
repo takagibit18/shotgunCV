@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -584,62 +585,45 @@ def _collect_jd_requirements(jd: JDProfile) -> list[str]:
     requirements: list[str] = []
     for source in [jd.must_have_requirements, jd.requirements, jd.responsibilities, jd.nice_to_have_requirements, jd.bonuses]:
         for raw_item in source:
-            item = raw_item.strip()
-            if not item or item in seen:
+            item = _normalize_jd_requirement_item(raw_item)
+            key = item.lower()
+            if not item or _is_jd_ui_noise(item) or key in seen:
                 continue
-            seen.add(item)
+            seen.add(key)
             requirements.append(item)
     return requirements
 
 
 def _classify_requirement_tier(requirement: str) -> str:
     text = requirement.lower()
-    hard_needles = [
-        "学历",
-        "本科",
-        "硕士",
-        "博士",
-        "专业",
-        "证书",
-        "认证",
-        "持有",
-        "工作许可",
-        "签证",
-        "语言",
-        "英语",
-        "cet",
-        "ielts",
-        "toefl",
-        "degree",
-        "bachelor",
-        "master",
-        "phd",
-        "certification",
-        "certificate",
-        "license",
-        "work authorization",
-    ]
-    if any(needle in text for needle in hard_needles) or _has_explicit_year_requirement(text):
+    if _is_hard_gate_requirement(text) or _has_explicit_year_requirement(text):
         return "hard_gate"
-    medium_needles = ["项目", "经历", "场景", "负责", "参与", "主导", "落地", "project", "experience", "case study"]
-    if any(needle in text for needle in medium_needles):
-        return "medium_priority"
     high_needles = [
         "python",
         "llm",
-        "ai",
         "automation",
+        "agent",
         "evaluation",
         "ranking",
         "prompt",
-        "framework",
-        "平台",
+        "rag",
+        "langchain",
+        "langgraph",
+        "qdrant",
+        "fastapi",
+        "pydantic",
+        "docker",
+        "redis",
+        "machine learning",
+        "deep learning",
         "模型",
         "算法",
-        "核心",
     ]
     if any(needle in text for needle in high_needles):
         return "high_priority"
+    medium_needles = ["项目", "经历", "场景", "project", "experience", "case study"]
+    if any(needle in text for needle in medium_needles):
+        return "medium_priority"
     return "nice_to_have"
 
 
@@ -663,11 +647,13 @@ def _evaluate_requirement_evidence(
 
 
 def _evaluate_hard_gate(requirement: str, candidate_text: str) -> str:
-    if any(item in requirement for item in ["硕士", "master"]) and any(item in candidate_text for item in ["本科", "bachelor"]):
+    if _requires_master_only(requirement) and _has_bachelor(candidate_text) and not _has_master_or_above(candidate_text):
         return "mismatch"
     checks: list[bool] = []
     if any(item in requirement for item in ["学历", "本科", "bachelor", "degree"]):
         checks.append(any(item in candidate_text for item in ["本科", "bachelor", "degree", "硕士", "master", "phd", "博士"]))
+    if any(item in requirement for item in ["硕士", "master"]) and not any(item in requirement for item in ["本科", "bachelor"]):
+        checks.append(_has_master_or_above(candidate_text))
     if any(item in requirement for item in ["计算机", "专业", "computer", "cs"]):
         checks.append(any(item in candidate_text for item in ["计算机", "computer", "computer science", "cs", "software"]))
     if any(item in requirement for item in ["证书", "认证", "certificate", "certification", "pmp"]):
@@ -686,10 +672,108 @@ def _matching_evidence_refs(requirement: str, candidate_items: list[str]) -> lis
     tokens = [token for token in _requirement_tokens(requirement) if len(token) >= 2]
     refs: list[str] = []
     for item in candidate_items:
+        if _is_resume_metadata_evidence(item):
+            continue
         lowered = item.lower()
         if any(token in lowered for token in tokens):
             refs.append(item)
     return refs[:3]
+
+
+def _normalize_jd_requirement_item(item: str) -> str:
+    return item.strip().strip("-*•").strip()
+
+
+def _is_jd_ui_noise(item: str) -> bool:
+    text = item.strip().lower()
+    if not text:
+        return True
+    if text.startswith("@"):
+        return True
+    exact_noise = {
+        "apply",
+        "save",
+        "copy link",
+        "apply save copy link",
+        "perks/benefits",
+        "perks",
+        "benefits",
+        "mentoring",
+        "remote work",
+        "skills/tech-stack",
+        "skills",
+        "tech-stack",
+        "education",
+    }
+    if text in exact_noise:
+        return True
+    noise_patterns = [
+        r"\bpublished\b",
+        r"\bposted\b",
+        r"\bago\b",
+        r"\busd\b",
+        r"\$\s*\d",
+        r"\b\d+\s*k\s*[-–]\s*\d+\s*k\b",
+        r"\bmid[- ]level\b",
+        r"\bsenior[- ]level\b",
+    ]
+    return any(re.search(pattern, text) for pattern in noise_patterns)
+
+
+def _is_hard_gate_requirement(text: str) -> bool:
+    if _looks_like_label_only(text):
+        return False
+    education_terms = ["学历", "本科", "硕士", "博士", "bachelor", "master", "phd", "degree"]
+    credential_terms = ["证书", "认证", "持有", "certification", "certificate", "license", "pmp"]
+    authorization_terms = ["工作许可", "签证", "work authorization", "visa", "sponsorship"]
+    language_terms = ["cet", "ielts", "toefl"]
+    if any(term in text for term in education_terms + credential_terms + authorization_terms + language_terms):
+        return True
+    if "专业" in text and any(term in text for term in ["学历", "本科", "硕士", "博士", "degree", "相关"]):
+        return True
+    return False
+
+
+def _looks_like_label_only(text: str) -> bool:
+    normalized = text.strip().strip(":：")
+    return normalized in {"education", "skills", "requirements", "responsibilities", "perks", "benefits"}
+
+
+def _requires_master_only(requirement: str) -> bool:
+    text = requirement.lower()
+    if not any(item in text for item in ["硕士", "master"]):
+        return False
+    if any(item in text for item in ["本科", "bachelor"]):
+        return False
+    if any(item in text for item in ["preferred", "nice to have", "plus", "加分", "优先"]):
+        return False
+    return True
+
+
+def _has_bachelor(text: str) -> bool:
+    return any(item in text for item in ["本科", "bachelor"])
+
+
+def _has_master_or_above(text: str) -> bool:
+    return any(item in text for item in ["硕士", "master", "博士", "phd"])
+
+
+def _is_resume_metadata_evidence(item: str) -> bool:
+    text = item.strip().lower()
+    return any(
+        marker in text
+        for marker in [
+            "邮箱",
+            "email:",
+            "e-mail:",
+            "个人主页",
+            "homepage:",
+            "github:",
+            "linkedin:",
+            "电话",
+            "phone:",
+        ]
+    )
 
 
 def _requirement_tokens(text: str) -> list[str]:
@@ -1159,7 +1243,7 @@ def _build_scorecard(
             llm_risk_score=0.0,
             llm_overall_score=0.0,
             final_overall_score=requirement_scores["final_overall_score"],
-            final_decision_source="v0.5.7-rules+guardrail-fallback",
+            final_decision_source="guardrail-fallback",
             guardrail_flags=["llm_assessment_missing"],
             provider=provider,
             model=model,
