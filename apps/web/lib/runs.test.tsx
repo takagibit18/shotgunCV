@@ -35,6 +35,7 @@ import { loadResumeWorkspace } from "./resume";
 import { loadRunDetail, listRuns, loadRunReport } from "./runs";
 import { deleteRun, patchRunDraft, startRunAction } from "./run-actions";
 import { checkPythonDependencies } from "./python-env";
+import { listCandidates } from "./candidates";
 import { loadSettingsOverview } from "./settings";
 import { createRunDraft, DraftCreationError } from "./upload-drafts";
 
@@ -352,6 +353,98 @@ describe("run viewer data loading", () => {
     );
     expect(manifest.candidateId).toBe("cand-20260425-083000123");
     expect(result.nextCommand).toContain("--candidate-id cand-20260425-083000123");
+  });
+
+  it("lists registered candidates from upload manifests", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const first = await createRunDraft({
+      candidateId: "cand-lihua",
+      candidateDisplayName: "李华",
+      label: "first role",
+      cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - Applied AI Engineer"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+    await createRunDraft({
+      candidateId: "cand-lihua",
+      candidateDisplayName: "李华",
+      label: "second role",
+      cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - Platform PM"],
+      now: new Date("2026-04-26T08:30:00.000Z"),
+    });
+
+    const candidates = await listCandidates();
+
+    expect(first.runId).toBe("first-role-20260425-083000");
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      candidateId: "cand-lihua",
+      displayName: "李华",
+      initials: "李华",
+      runCount: 2,
+      latestRunId: "second-role-20260426-083000",
+    });
+    expect(candidates[0].cvFiles).toHaveLength(1);
+    expect(candidates[0].cvFiles[0]).toMatchObject({
+      originalName: "resume.md",
+      storedRelativePath: "input_files/cv/resume.md",
+    });
+  });
+
+  it("creates a draft from selected candidate CV references", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const source = await createRunDraft({
+      candidateId: "cand-lihua",
+      candidateDisplayName: "李华",
+      label: "source role",
+      cvFiles: [new File(["resume text"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd text"], "jd.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - Source"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    const result = await createRunDraft({
+      candidateId: "cand-lihua",
+      candidateDisplayName: "李华",
+      label: "reuse role",
+      cvFiles: [],
+      existingCvFiles: [{ sourceRunId: source.runId, storedRelativePath: "input_files/cv/resume.md" }],
+      jdFiles: [new File(["new jd"], "new-jd.txt", { type: "text/plain" })],
+      jdFileDisplayNames: ["Example - Reuse"],
+      now: new Date("2026-04-27T08:30:00.000Z"),
+    });
+
+    const manifest = JSON.parse(
+      await readFile(path.join(runsDir, result.runId, "ingest", "upload_manifest.json"), "utf-8"),
+    );
+
+    expect(manifest).toMatchObject({
+      candidateId: "cand-lihua",
+      candidateDisplayName: "李华",
+    });
+    expect(manifest.files).toEqual([
+      expect.objectContaining({
+        role: "cv",
+        originalName: "resume.md",
+        storedRelativePath: "input_files/cv/resume.md",
+        contentType: "text/markdown",
+      }),
+      expect.objectContaining({
+        role: "jd",
+        originalName: "new-jd.txt",
+        displayName: "Example - Reuse",
+      }),
+    ]);
+    expect(await readFile(path.join(runsDir, result.runId, "input_files", "cv", "resume.md"), "utf-8")).toBe(
+      "resume text",
+    );
   });
 
   it("creates separate metadata-only JD files from pasted text entries", async () => {
