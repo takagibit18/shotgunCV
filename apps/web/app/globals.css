@@ -5458,8 +5458,90 @@ html {
   grid-column: 1 / -1;
 }
 
+.matrix-detail-block.tone-evidence,
+.matrix-detail-block.tone-risk {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.matrix-detail-block.tone-evidence {
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.matrix-detail-block.tone-risk {
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.matrix-detail-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+}
+
+.matrix-detail-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.12);
+  color: #0f766e;
+}
+
+.matrix-detail-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
+.matrix-detail-meta {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.matrix-detail-block.tone-analysis .matrix-detail-icon {
+  background: rgba(20, 184, 166, 0.12);
+  color: #0f766e;
+}
+
+.matrix-detail-block.tone-evidence .matrix-detail-icon {
+  background: rgba(37, 99, 235, 0.11);
+  color: #1d4ed8;
+}
+
+.matrix-detail-block.tone-risk .matrix-detail-icon {
+  background: rgba(239, 68, 68, 0.11);
+  color: #dc2626;
+}
+
+.matrix-detail-block.tone-decision .matrix-detail-icon {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.matrix-detail-block.tone-action .matrix-detail-icon {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.matrix-detail-block.tone-interview .matrix-detail-icon {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.matrix-detail-block.tone-rewrite .matrix-detail-icon {
+  background: rgba(124, 58, 237, 0.12);
+  color: #7c3aed;
+}
+
 .matrix-detail-block h5 {
-  margin: 0 0 9px;
+  margin: 0;
   color: var(--text);
   font-size: 13px;
 }
@@ -5469,6 +5551,14 @@ html {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.matrix-detail-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .matrix-icon-list,
