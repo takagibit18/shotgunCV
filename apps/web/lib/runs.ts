@@ -66,6 +66,8 @@ type InputSourceDisplay = {
 };
 
 type JdInputPreview = {
+  jdId?: string;
+  previewIndex?: number;
   label: string;
   kind: "image" | "text" | "metadata";
   originalName: string;
@@ -307,7 +309,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     stageStatuses: buildStageStatuses(completedStages, runStatus),
     timeline,
     inputSources: buildInputSources(ingestManifest, draft),
-    jdInputPreviews: await buildJdInputPreviews(runDir, ingestManifest, draft),
+    jdInputPreviews: await buildJdInputPreviews(runDir, ingestManifest, draft, jdProfiles),
     observability,
   };
 }
@@ -489,13 +491,24 @@ async function buildJdInputPreviews(
   runDir: string,
   ingestManifest: IngestManifest | null,
   draft: UploadManifest | null,
+  jdProfiles: JDProfile[],
 ): Promise<JdInputPreview[]> {
   const manifestInputs = ingestManifest?.jd_inputs ?? [];
+  const resolveJdId = buildJdPreviewJdResolver(jdProfiles);
   if (manifestInputs.length > 0) {
     return Promise.all(
       manifestInputs.map((item, index) =>
         buildJdPreview({
           runDir,
+          jdId: resolveJdId(
+            {
+              sourceValue: item.source_value,
+              relativePath: item.relative_path,
+              originalName: item.original_name,
+            },
+            index,
+          ),
+          previewIndex: index,
           label: item.display_name || item.original_name || `岗位 ${index + 1}`,
           originalName: item.original_name ?? item.display_name ?? `岗位 ${index + 1}`,
           contentType: item.media_type ?? inferContentType(item.original_name ?? item.relative_path ?? item.source_value ?? ""),
@@ -514,6 +527,15 @@ async function buildJdInputPreviews(
       .map((file, index) =>
         buildJdPreview({
           runDir,
+          jdId: resolveJdId(
+            {
+              sourceValue: file.storedRelativePath,
+              relativePath: file.storedRelativePath,
+              originalName: file.originalName,
+            },
+            index,
+          ),
+          previewIndex: index,
           label: file.displayName || file.originalName || `岗位 ${index + 1}`,
           originalName: file.originalName || `岗位 ${index + 1}`,
           contentType: file.contentType || inferContentType(file.originalName),
@@ -527,8 +549,62 @@ async function buildJdInputPreviews(
 }
 
 
+function buildJdPreviewJdResolver(jdProfiles: JDProfile[]) {
+  const bySource = new Map<string, string>();
+  const byBasename = new Map<string, string>();
+  jdProfiles.forEach((profile) => {
+    const sourceKey = normalizeSourceKey(profile.source_value);
+    if (sourceKey) {
+      bySource.set(sourceKey, profile.jd_id);
+    }
+    const basename = getSourceBasename(profile.source_value);
+    if (basename) {
+      byBasename.set(basename, profile.jd_id);
+    }
+  });
+
+  return (
+    item: {
+      sourceValue?: string;
+      relativePath?: string;
+      originalName?: string;
+    },
+    index: number,
+  ): string | undefined => {
+    const sourceCandidates = [item.sourceValue, item.relativePath, item.originalName];
+    for (const candidate of sourceCandidates) {
+      const sourceKey = normalizeSourceKey(candidate);
+      if (sourceKey && bySource.has(sourceKey)) {
+        return bySource.get(sourceKey);
+      }
+      const basename = getSourceBasename(candidate);
+      if (basename && byBasename.has(basename)) {
+        return byBasename.get(basename);
+      }
+    }
+    return jdProfiles[index]?.jd_id;
+  };
+}
+
+
+function normalizeSourceKey(value: string | undefined): string {
+  return (value ?? "").replace(/\\/g, "/").trim().toLowerCase();
+}
+
+
+function getSourceBasename(value: string | undefined): string {
+  const sourceKey = normalizeSourceKey(value);
+  if (!sourceKey) {
+    return "";
+  }
+  return sourceKey.split("/").pop() ?? "";
+}
+
+
 async function buildJdPreview({
   runDir,
+  jdId,
+  previewIndex,
   label,
   originalName,
   contentType,
@@ -538,6 +614,8 @@ async function buildJdPreview({
   extractionError,
 }: {
   runDir: string;
+  jdId?: string;
+  previewIndex: number;
   label: string;
   originalName: string;
   contentType: string;
@@ -550,6 +628,8 @@ async function buildJdPreview({
   if (isImageInput(contentType, originalName)) {
     const bytes = candidatePath ? await readFileIfExists(candidatePath) : null;
     return {
+      jdId,
+      previewIndex,
       label,
       kind: bytes ? "image" : "metadata",
       originalName,
@@ -563,6 +643,8 @@ async function buildJdPreview({
   const text = truncatePreviewText(inlineText || fileText);
   if (text) {
     return {
+      jdId,
+      previewIndex,
       label,
       kind: "text",
       originalName,
@@ -572,6 +654,8 @@ async function buildJdPreview({
   }
 
   return {
+    jdId,
+    previewIndex,
     label,
     kind: "metadata",
     originalName,
