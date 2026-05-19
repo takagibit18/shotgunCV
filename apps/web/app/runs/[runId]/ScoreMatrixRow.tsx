@@ -36,6 +36,10 @@ type ScoreTier = "excellent" | "good" | "caution" | "blocked";
 
 type DecisionKind = "strong" | "apply" | "review" | "hold" | "skip";
 
+type DetailTone = "analysis" | "evidence" | "risk" | "decision" | "action" | "interview" | "rewrite";
+
+type DetailIconName = "target" | "file-text" | "shield-alert" | "route" | "list-check" | "user-check" | "edit-3";
+
 
 export function ScoreMatrixRow({
   jdId,
@@ -205,25 +209,6 @@ export function ScoreMatrixRow({
           </div>
         </div>
 
-        <div className="matrix-expansion">
-          <div className="matrix-expansion-card">
-            <h5>证据引用</h5>
-            <ul>
-              {(evidenceRefs.length ? evidenceRefs.slice(0, 3) : signals.slice(0, 3)).map((item, i) => (
-                <li key={`${i}-${item.slice(0, 20)}`}>{item}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="matrix-expansion-card">
-            <h5>风险解释</h5>
-            <ul>
-              {(risks.length ? risks.slice(0, 3) : ["当前岗位未记录显著风险。"]).map((item, i) => (
-                <li key={`${i}-${item.slice(0, 20)}`}>{formatUserText(item)}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
         <div className="matrix-bottom-accordion">
           <button
             type="button"
@@ -237,7 +222,7 @@ export function ScoreMatrixRow({
             </span>
             <span className="cta-copy">
               <strong>查看匹配详情与建议动作</strong>
-              <small>查看完整证据链、风险说明与面试/投递建议</small>
+              <small>证据引用 / 风险解释 / 简历修改建议 / 面试准备</small>
             </span>
             <InlineIcon name="arrow-right" className="accordion-chevron" />
           </button>
@@ -247,23 +232,29 @@ export function ScoreMatrixRow({
             aria-hidden={!fitDetailsOpen}
           >
             <div className="matrix-bottom-details-inner">
-              <DetailBlock title="适配度分析" className="wide">
-                <p>{overallReason || fallbackReason}</p>
+              <DetailBlock title="适配度分析" className="wide" icon="target" tone="analysis" meta={score === null ? "待评分" : `${score}%`}>
+                <p className="matrix-detail-summary">{toPreviewText(overallReason || fallbackReason, 150)}</p>
               </DetailBlock>
-              <DetailBlock title="决策驱动">
-                <IconList items={decisionDrivers} emptyText="暂无决策驱动记录。" />
+              <DetailBlock title="证据引用" icon="file-text" tone="evidence" meta={`${evidenceCount || 0} 条`}>
+                <IconList items={evidenceRefs.length ? evidenceRefs.slice(0, 3) : signals.slice(0, 3)} emptyText="暂无证据引用记录。" />
               </DetailBlock>
-              <DetailBlock title="建议动作">
-                <NumberedList items={recommendedActions} emptyText="暂无建议动作。" />
+              <DetailBlock title="风险解释" icon="shield-alert" tone="risk" meta={riskScore === null ? "待评估" : `${riskScore}%`}>
+                <IconList items={risks.length ? risks.slice(0, 3) : ["当前岗位未记录显著风险。"]} />
+              </DetailBlock>
+              <DetailBlock title="决策驱动" icon="route" tone="decision" meta={`${decisionDrivers.length || 0} 项`}>
+                <IconList items={decisionDrivers.slice(0, 3)} emptyText="暂无决策驱动记录。" />
+              </DetailBlock>
+              <DetailBlock title="建议动作" icon="list-check" tone="action" meta={`${recommendedActions.length || 0} 项`}>
+                <NumberedList items={recommendedActions.slice(0, 3)} emptyText="暂无建议动作。" />
               </DetailBlock>
               {interviewPrepPoints.length ? (
-                <DetailBlock title="面试准备要点">
-                  <IconList items={interviewPrepPoints} />
+                <DetailBlock title="面试准备要点" icon="user-check" tone="interview" meta={`${interviewPrepPoints.length} 项`}>
+                  <IconList items={interviewPrepPoints.slice(0, 3)} />
                 </DetailBlock>
               ) : null}
               {resumeRevisionTasks.length ? (
-                <DetailBlock title="简历修改建议">
-                  <Checklist items={resumeRevisionTasks} />
+                <DetailBlock title="简历修改建议" icon="edit-3" tone="rewrite" meta={`${resumeRevisionTasks.length} 项`}>
+                  <Checklist items={resumeRevisionTasks.slice(0, 3)} />
                 </DetailBlock>
               ) : null}
             </div>
@@ -430,10 +421,30 @@ function JdInlinePreview({
 }
 
 
-function DetailBlock({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) {
+function DetailBlock({
+  title,
+  children,
+  className = "",
+  icon,
+  tone = "analysis",
+  meta,
+}: {
+  title: string;
+  children: ReactNode;
+  className?: string;
+  icon: DetailIconName;
+  tone?: DetailTone;
+  meta?: string;
+}) {
   return (
-    <section className={["matrix-detail-block", className].filter(Boolean).join(" ")}>
-      <h5>{title}</h5>
+    <section className={["matrix-detail-block", `tone-${tone}`, className].filter(Boolean).join(" ")}>
+      <div className="matrix-detail-heading">
+        <span className="matrix-detail-icon" aria-hidden="true">
+          <InlineIcon name={icon} />
+        </span>
+        <h5>{title}</h5>
+        {meta ? <span className="matrix-detail-meta">{meta}</span> : null}
+      </div>
       {children}
     </section>
   );
@@ -636,6 +647,15 @@ function formatUserText(value: string): string {
 }
 
 
+function toPreviewText(value: string, maxLength: number): string {
+  const normalized = formatUserText(value).replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength).replace(/[，。；、\s]+$/u, "")}...`;
+}
+
+
 function buildScoreBarClassName(tone?: DimensionItem["tone"]): string {
   return ["score-bar", tone === "risk" ? "risk-bar" : "", tone === "rewrite" ? "rewrite-bar" : "", tone === "evidence" ? "evidence-bar" : ""]
     .filter(Boolean)
@@ -643,7 +663,7 @@ function buildScoreBarClassName(tone?: DimensionItem["tone"]): string {
 }
 
 
-function InlineIcon({ name, className = "" }: { name: "search-document" | "chevron-down" | "close" | "external" | "arrow-right"; className?: string }) {
+function InlineIcon({ name, className = "" }: { name: "search-document" | "chevron-down" | "close" | "external" | "arrow-right" | DetailIconName; className?: string }) {
   const paths: Record<typeof name, ReactNode> = {
     "search-document": (
       <>
@@ -654,6 +674,50 @@ function InlineIcon({ name, className = "" }: { name: "search-document" | "chevr
       </>
     ),
     "chevron-down": <path d="m6 9 6 6 6-6" />,
+    target: (
+      <>
+        <circle cx="12" cy="12" r="7.5" />
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M12 2.5v3M21.5 12h-3M12 21.5v-3M2.5 12h3" />
+      </>
+    ),
+    "file-text": (
+      <>
+        <path d="M7 3.5h6.2L18 8.3V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5Z" />
+        <path d="M13 3.8V9h5M8.5 12.5h7M8.5 16h5" />
+      </>
+    ),
+    "shield-alert": (
+      <>
+        <path d="M12 3.5 19 6v5.5c0 4.4-2.8 7.9-7 9-4.2-1.1-7-4.6-7-9V6l7-2.5Z" />
+        <path d="M12 8.5v5M12 16.8h.01" />
+      </>
+    ),
+    route: (
+      <>
+        <circle cx="6" cy="6" r="2.5" />
+        <circle cx="18" cy="18" r="2.5" />
+        <path d="M8.5 6h3.8a3.2 3.2 0 0 1 0 6.4h-.6a3.2 3.2 0 0 0 0 6.4H15.5" />
+      </>
+    ),
+    "list-check": (
+      <>
+        <path d="m5 7 1.5 1.5L9.5 5.5M5 13l1.5 1.5 3-3M12.5 7h6M12.5 13h6M5 19h13.5" />
+      </>
+    ),
+    "user-check": (
+      <>
+        <circle cx="10" cy="7.5" r="3.5" />
+        <path d="M3.8 20a6.2 6.2 0 0 1 11.7-2.9" />
+        <path d="m16.2 19 2 2 3.5-4" />
+      </>
+    ),
+    "edit-3": (
+      <>
+        <path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-3-3l-10 10-1 3Z" />
+        <path d="m14 8 3 3M12 19.5h8" />
+      </>
+    ),
     external: (
       <>
         <path d="M14 5h5v5" />
