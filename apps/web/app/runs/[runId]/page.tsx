@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { AppShell, Icon, MetricCard } from "../../AppShell";
 import { STAGE_LABELS, STATUS_LABELS } from "../../../lib/labels";
-import { loadRunDetail, type JdInputPreview } from "../../../lib/runs";
+import { loadRunDetail } from "../../../lib/runs";
 import { RunActionPanel } from "./RunActionPanel";
 import { ScoreMatrixRow } from "./ScoreMatrixRow";
 
@@ -99,7 +99,6 @@ export default async function RunPage({ params }: PageProps) {
           </section>
         ) : null}
 
-        <JdPreviewSection runId={detail.runId} previews={detail.jdInputPreviews} />
         <GateReviewSection detail={detail} />
 
         <section className="section evaluation-focus-section">
@@ -113,24 +112,34 @@ export default async function RunPage({ params }: PageProps) {
 
           {sortedResults.length > 0 ? (
             <div className="score-matrix ai-score-matrix">
-              {sortedResults.map((item) => (
-                <ScoreMatrixRow
-                  key={`${item.jdId}-${item.variantId}`}
-                  title={item.title}
-                  variantDisplayName={item.variantDisplayName}
-                  overallScore={item.overallScore}
-                  gapCount={item.gapCount}
-                  topReasons={item.topReasons}
-                  jdId={item.jdId}
-                  scorecard={detail.evaluate.scorecards.find(
-                    (scorecard) => scorecard.jd_id === item.jdId && scorecard.variant_id === item.variantId,
-                  )}
-                  explanation={detail.evaluate.explanations.find(
-                    (explanation) => explanation.jd_id === item.jdId && explanation.variant_id === item.variantId,
-                  )}
-                  strategy={detail.plan.strategies.find((strategy) => strategy.jd_id === item.jdId)}
-                />
-              ))}
+              {sortedResults.map((item) => {
+                const scorecard = detail.evaluate.scorecards.find(
+                  (candidateScorecard) => candidateScorecard.jd_id === item.jdId && candidateScorecard.variant_id === item.variantId,
+                );
+                const gate = detail.preflightGates.find((candidateGate) => candidateGate.jd_id === item.jdId);
+                const previewEntry = findJdPreviewEntry(detail.jdInputPreviews, item.jdId);
+                return (
+                  <ScoreMatrixRow
+                    key={`${item.jdId}-${item.variantId}`}
+                    title={item.title}
+                    variantDisplayName={item.variantDisplayName}
+                    overallScore={item.overallScore}
+                    gapCount={item.gapCount}
+                    topReasons={item.topReasons}
+                    jdId={item.jdId}
+                    runId={detail.runId}
+                    scorecard={scorecard}
+                    explanation={detail.evaluate.explanations.find(
+                      (explanation) => explanation.jd_id === item.jdId && explanation.variant_id === item.variantId,
+                    )}
+                    strategy={detail.plan.strategies.find((strategy) => strategy.jd_id === item.jdId)}
+                    gateStatus={gate?.status}
+                    gateReasons={gate?.reasons}
+                    jdPreview={previewEntry?.preview}
+                    jdPreviewIndex={previewEntry?.index}
+                  />
+                );
+              })}
             </div>
           ) : (
             <div className="empty-state evaluation-empty-state">
@@ -221,6 +230,22 @@ function AnimatedRunningText({ text }: { text: string }) {
 }
 
 
+function findJdPreviewEntry(previews: RunDetail["jdInputPreviews"], jdId: string) {
+  const explicitIndex = previews.findIndex((preview) => preview.jdId === jdId);
+  if (explicitIndex >= 0) {
+    return { preview: previews[explicitIndex], index: previews[explicitIndex].previewIndex ?? explicitIndex };
+  }
+
+  const match = /^jd-(\d+)$/i.exec(jdId);
+  if (!match) {
+    return null;
+  }
+  const fallbackIndex = Number.parseInt(match[1], 10) - 1;
+  const preview = previews[fallbackIndex];
+  return preview ? { preview, index: preview.previewIndex ?? fallbackIndex } : null;
+}
+
+
 function buildRunningText(stage: string | null): string {
   if (stage === "generate" || stage === "plan" || stage === "report") {
     return "生成中...";
@@ -229,89 +254,6 @@ function buildRunningText(stage: string | null): string {
     return "分析中...";
   }
   return "思考中...";
-}
-
-
-function JdPreviewSection({ runId, previews }: { runId: string; previews: JdInputPreview[] }) {
-  if (previews.length === 0) {
-    return null;
-  }
-  return (
-    <section className="section evaluation-focus-section jd-context-section">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">岗位输入</p>
-          <h2>JD 详情</h2>
-          <p className="section-copy">截图可点击放大；文本 JD 可展开查看原始岗位描述。</p>
-        </div>
-      </div>
-      <div className="jd-preview-grid">
-        {previews.map((preview, index) => (
-          <JdPreviewCard key={`${preview.originalName}-${index}`} runId={runId} preview={preview} index={index} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-
-function JdPreviewCard({ runId, preview, index }: { runId: string; preview: JdInputPreview; index: number }) {
-  if (preview.kind === "image" && preview.imageDataUrl) {
-    return (
-      <article className="jd-preview-card image">
-        <div className="jd-preview-card-heading">
-          <span className="semantic-icon blue" aria-hidden="true">
-            <Icon name="image-upload" />
-          </span>
-          <div>
-            <h3>{preview.label}</h3>
-            <p>{preview.note ?? "点击截图可放大查看"}</p>
-          </div>
-        </div>
-        <Link href={`/runs/${runId}/jd-preview/${index}`} className="jd-image-preview-link" aria-label={`打开 ${preview.label} 图片预览`}>
-            <img src={preview.imageDataUrl} alt={`${preview.label} 截图预览`} />
-            <span>打开大图预览</span>
-        </Link>
-      </article>
-    );
-  }
-
-  if (preview.kind === "text" && preview.text) {
-    return (
-      <article className="jd-preview-card text">
-        <div className="jd-preview-card-heading">
-          <span className="semantic-icon green" aria-hidden="true">
-            <Icon name="file" />
-          </span>
-          <div>
-            <h3>{preview.label}</h3>
-            <p>岗位文本已读取，可展开核对细节。</p>
-          </div>
-        </div>
-        <details className="jd-text-preview">
-          <summary className="secondary-link icon-link">
-            <Icon name="eye" />
-            查看 JD 详情
-          </summary>
-          <pre>{preview.text}</pre>
-        </details>
-      </article>
-    );
-  }
-
-  return (
-    <article className="jd-preview-card metadata">
-      <div className="jd-preview-card-heading">
-        <span className="semantic-icon orange" aria-hidden="true">
-          <Icon name="alert-triangle" />
-        </span>
-        <div>
-          <h3>{preview.label}</h3>
-          <p>{preview.note ?? "当前岗位输入暂无可直接展示的文本或截图。"}</p>
-        </div>
-      </div>
-    </article>
-  );
 }
 
 

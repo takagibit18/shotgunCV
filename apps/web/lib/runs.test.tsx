@@ -1163,10 +1163,10 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("开始评估");
     expect(html).toContain("投递名称");
-    expect(html).toContain("JD 详情");
-    expect(html).toContain("查看 JD 详情");
     expect(html).toContain("Example - Draft Role");
     expect(html).toContain("草稿");
+    expect(html).not.toContain("JD 详情");
+    expect(html).not.toContain("查看 JD 详情");
     expect(html).not.toContain("shotguncv run");
     expect(html).not.toContain("input_files/cv");
     expect(html).not.toContain("输入来源");
@@ -1205,7 +1205,7 @@ describe("run viewer pages", () => {
       text: "jd text",
     });
     expect(html).toContain("JD 详情");
-    expect(html).toContain("查看 JD 详情");
+    expect(html).toContain("JD 原文");
     expect(html).toContain("jd text");
     expect(html).toContain("Example AI - LLM Product Engineer");
     expect(html).not.toContain("输入来源");
@@ -1252,7 +1252,7 @@ describe("run viewer pages", () => {
     });
     expect(detail.jdInputPreviews[0].imageDataUrl).toContain("data:image/png;base64,");
     expect(html).toContain("Example AI - Screenshot JD");
-    expect(html).toContain("打开大图预览");
+    expect(html).toContain("放大查看 Example AI - Screenshot JD");
     expect(html).toContain(`href="/runs/demo-full/jd-preview/0"`);
     expect(html).toContain("data:image/png;base64,");
     expect(html).not.toContain("input_files/jd/jd-scan.png");
