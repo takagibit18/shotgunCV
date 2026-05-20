@@ -43,6 +43,13 @@ def test_cli_run_help_lists_image_extraction_options() -> None:
     assert "--ocr-languages" in output
 
 
+def test_cli_retrieve_help_lists_optional_run_dir_for_timeline_logs() -> None:
+    exit_code, output = run(["retrieve", "--help"])
+
+    assert exit_code == 0
+    assert "--run-dir" in output
+
+
 def test_cli_command_descriptions_use_neutral_jd_specific_language() -> None:
     parser = build_parser()
     subcommands = parser._subparsers._group_actions[0].choices

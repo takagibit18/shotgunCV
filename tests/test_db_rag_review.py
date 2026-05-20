@@ -64,6 +64,44 @@ def test_index_runs_against_postgres_when_database_url_is_configured(tmp_path: P
     assert first["chunks"] == second["chunks"]
 
 
+def test_index_runs_logs_per_run_batch_without_changing_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shotguncv_core.db.indexer as indexer
+    import shotguncv_core.db.session as session
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def commit(self) -> None:
+            return None
+
+    run_dir = _prepare_completed_run(tmp_path)
+    upserted: list[str] = []
+
+    monkeypatch.setattr(session, "connect", lambda database_url: FakeConnection())
+    monkeypatch.setattr(indexer, "_ensure_schema", lambda conn: None)
+    monkeypatch.setattr(indexer, "_upsert_batch", lambda conn, batch, *, skip_chunks: upserted.append(batch.run.run_id))
+
+    first = indexer.index_runs(tmp_path, "postgresql://example/test")
+    second = indexer.index_runs(tmp_path, "postgresql://example/test")
+
+    assert first["runs"] == second["runs"] == 1
+    assert first["chunks"] == second["chunks"]
+    assert upserted == [run_dir.name, run_dir.name]
+    events = _read_events(run_dir)
+    index_batches = [event for event in events if event["event"] == "index_batch"]
+    assert len(index_batches) == 2
+    assert index_batches[0]["run_id"] == run_dir.name
+    assert index_batches[0]["artifact_count"] > 0
+    assert index_batches[0]["chunk_count"] == first["chunks"]
+    assert index_batches[0]["skip_chunks"] is False
+    assert any(event["event"] == "stage_started" and event["stage"] == "index" for event in events)
+    assert any(event["event"] == "stage_finished" and event["stage"] == "index" for event in events)
+
+
 def test_deterministic_retriever_preserves_metadata(tmp_path: Path) -> None:
     from shotguncv_core.db.indexer import build_projection_batch
     from shotguncv_core.rag.retrieval import InMemoryVectorRetriever
@@ -93,8 +131,74 @@ def test_review_command_writes_artifacts_with_citations_and_validation(tmp_path:
     assert review["retrieval"]["misses"] == []
     assert review["validation"]["fabrication_policy"] == "passed"
     assert "unsupported_hard_fact_tasks_removed" in review["validation"]
+    events = _read_events(run_dir)
+    finished_nodes = [event for event in events if event["event"] == "graph_node_finished"]
+    assert len(finished_nodes) == 8
+    retrieve_node = [event for event in finished_nodes if event["node"] == "retrieve_relevant_evidence"][0]
+    assert retrieve_node["stage"] == "review"
+    assert isinstance(retrieve_node["duration_ms"], int)
+    assert retrieve_node["output_summary"]["retrieval_result_count"] == review["retrieval"]["result_count"]
+    retrieval_queries = [event for event in events if event["event"] == "retrieval_query" and event["stage"] == "review"]
+    assert len(retrieval_queries) >= len(review["jd_ids"])
+    first_query = retrieval_queries[0]
+    assert first_query["retriever_type"] == "InMemoryVectorRetriever"
+    assert "query_preview" in first_query
+    assert "query_chars" in first_query
+    assert "query" not in first_query
+    assert isinstance(first_query["duration_ms"], int)
     assert "面试准备" in prep
     assert "证据" in prep
+
+
+def test_retrieve_command_can_write_run_timeline_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from shotguncv_core.rag.retrieval import RetrievalResult
+
+    class FakePgVectorRetriever:
+        def __init__(self, database_url: str) -> None:
+            self.database_url = database_url
+
+        def search(self, query: str, **filters: object) -> list[RetrievalResult]:
+            return [
+                RetrievalResult(
+                    text="Python automation evidence",
+                    metadata={
+                        "source_type": "candidate_evidence",
+                        "source_id": "source-1",
+                        "artifact_path": "analyze/candidate_profile.json",
+                    },
+                    score=0.9,
+                )
+            ]
+
+    run_dir = _prepare_completed_run(tmp_path)
+    monkeypatch.setattr("shotguncv_core.db.config.get_database_url", lambda env_name: "postgresql://example/test")
+    monkeypatch.setattr("shotguncv_core.rag.retrieval.PgVectorRetriever", FakePgVectorRetriever)
+
+    query = "Python automation evidence with enough details to log only a preview"
+    exit_code, output = run(
+        [
+            "retrieve",
+            "--run-dir",
+            str(run_dir),
+            "--query",
+            query,
+            "--candidate-id",
+            "cand-001",
+        ]
+    )
+
+    assert exit_code == 0, output
+    assert "Retrieve completed: results=1" in output
+    events = _read_events(run_dir)
+    assert any(event["event"] == "stage_started" and event["stage"] == "retrieve" for event in events)
+    assert any(event["event"] == "stage_finished" and event["stage"] == "retrieve" for event in events)
+    retrieval_event = [event for event in events if event["event"] == "retrieval_query" and event["stage"] == "retrieve"][0]
+    assert retrieval_event["query_preview"] == query
+    assert retrieval_event["query_chars"] == len(query)
+    assert retrieval_event["filters"] == {"candidate_id": "cand-001"}
+    assert retrieval_event["hit_count"] == 1
+    assert retrieval_event["miss"] is False
+    assert "query" not in retrieval_event
 
 
 def _prepare_completed_run(tmp_path: Path) -> Path:
@@ -132,3 +236,11 @@ def _write_deterministic_config(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return config_path
+
+
+def _read_events(run_dir: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]

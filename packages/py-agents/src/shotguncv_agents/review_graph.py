@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from shotguncv_core.db.indexer import build_projection_batch
 from shotguncv_core.rag.retrieval import InMemoryVectorRetriever, PgVectorRetriever, RetrievalResult
+from shotguncv_core.run_logs import log_graph_node_finished, log_graph_node_started, log_retrieval_query
 from shotguncv_core.storage import dump_json, load_json, stage_dir
 
 
@@ -20,11 +22,12 @@ def run_post_run_review(run_dir: Path, *, jd_id: str | None = None, database_url
         ("validate_against_fabrication_policy", _validate_against_fabrication_policy),
         ("write_review_artifact", _write_review_artifact),
     ]
-    graph_result = _run_langgraph_if_available(state, nodes)
+    logged_nodes = _wrap_graph_nodes(nodes)
+    graph_result = _run_langgraph_if_available(state, logged_nodes)
     if graph_result is not None:
         return graph_result["review"]
     state["graph_runtime"] = "sequential-fallback"
-    for _, node in nodes:
+    for _, node in logged_nodes:
         state = node(state)
     return state["review"]
 
@@ -45,6 +48,74 @@ def _run_langgraph_if_available(
     graph.add_edge(nodes[-1][0], END)
     compiled = graph.compile()
     return compiled.invoke({**state, "graph_runtime": "langgraph"})
+
+
+def _wrap_graph_nodes(nodes: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    return [(name, _logged_node(name, node)) for name, node in nodes]
+
+
+def _logged_node(name: str, node: Any) -> Any:
+    def _run(state: dict[str, Any]) -> dict[str, Any]:
+        run_dir: Path = state["run_dir"]
+        graph_runtime = str(state.get("graph_runtime") or "unknown")
+        run_id = str(state.get("run_id") or run_dir.name)
+        jd_count = len(state.get("jd_ids") or [])
+        input_summary = _state_summary(state)
+        started = log_graph_node_started(
+            run_dir,
+            graph="post_run_review",
+            graph_runtime=graph_runtime,
+            node=name,
+            run_id=run_id,
+            jd_count=jd_count,
+            input_summary=input_summary,
+        )
+        try:
+            next_state = node(state)
+        except Exception as exc:
+            log_graph_node_finished(
+                run_dir,
+                graph="post_run_review",
+                graph_runtime=graph_runtime,
+                node=name,
+                run_id=run_id,
+                jd_count=jd_count,
+                started=started,
+                status="failed",
+                input_summary=input_summary,
+                output_summary={"error_type": exc.__class__.__name__, "error_summary": str(exc)[:500]},
+            )
+            raise
+        log_graph_node_finished(
+            run_dir,
+            graph="post_run_review",
+            graph_runtime=graph_runtime,
+            node=name,
+            run_id=str(next_state.get("run_id") or run_id),
+            jd_count=len(next_state.get("jd_ids") or []),
+            started=started,
+            status="ok",
+            input_summary=input_summary,
+            output_summary=_state_summary(next_state),
+        )
+        return next_state
+
+    return _run
+
+
+def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": state.get("run_id") or Path(state["run_dir"]).name,
+        "requested_jd_id": state.get("requested_jd_id"),
+        "jd_count": len(state.get("jd_ids") or []),
+        "retrieval_result_count": len(state.get("retrieval_results") or []),
+        "retrieval_miss_count": len(state.get("retrieval_misses") or []),
+        "decision_count": len(state.get("decision_review") or []),
+        "question_count": len(state.get("interview_questions") or []),
+        "answer_count": len(state.get("reference_answers") or []),
+        "revision_task_count": len(state.get("revision_tasks") or []),
+        "has_database_url": bool(state.get("database_url")),
+    }
 
 
 def _load_run_context(state: dict[str, Any]) -> dict[str, Any]:
@@ -76,18 +147,45 @@ def _retrieve_relevant_evidence(state: dict[str, Any]) -> dict[str, Any]:
         retriever = PgVectorRetriever(state["database_url"])
     else:
         retriever = InMemoryVectorRetriever.from_chunks(state["batch"].retrieval_chunks)
+    retriever_type = type(retriever).__name__
     all_results: list[RetrievalResult] = []
     misses: list[str] = []
     for jd_id in state["jd_ids"]:
         query = _query_for_jd(state, jd_id)
+        started = perf_counter()
         results = retriever.search(query, limit=5, candidate_id=state["candidate_id"], jd_id=jd_id)
+        log_retrieval_query(
+            state["run_dir"],
+            stage="review",
+            query=query,
+            retriever_type=retriever_type,
+            filters=_retrieval_filters(candidate_id=state["candidate_id"], jd_id=jd_id),
+            limit=5,
+            hit_count=len(results),
+            started=started,
+        )
         if not results:
+            started = perf_counter()
             results = retriever.search(query, limit=5, candidate_id=state["candidate_id"], source_type="candidate_evidence")
+            log_retrieval_query(
+                state["run_dir"],
+                stage="review",
+                query=query,
+                retriever_type=retriever_type,
+                filters=_retrieval_filters(candidate_id=state["candidate_id"], source_type="candidate_evidence"),
+                limit=5,
+                hit_count=len(results),
+                started=started,
+            )
         if results:
             all_results.extend(results)
         else:
             misses.append(jd_id)
     return {**state, "retrieval_results": all_results, "retrieval_misses": misses}
+
+
+def _retrieval_filters(**filters: str | None) -> dict[str, str]:
+    return {key: value for key, value in filters.items() if value}
 
 
 def _inspect_score_and_gates(state: dict[str, Any]) -> dict[str, Any]:

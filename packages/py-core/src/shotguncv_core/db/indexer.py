@@ -10,6 +10,7 @@ from typing import Any
 from shotguncv_core.db.schema import all_schema_sql
 from shotguncv_core.rag.embeddings import deterministic_embedding
 from shotguncv_core.rag.documents import build_retrieval_chunks
+from shotguncv_core.run_logs import log_index_batch, log_stage_failed, log_stage_finished, log_stage_started
 from shotguncv_core.storage import load_json
 
 
@@ -134,14 +135,30 @@ def build_projection_batch(run_dir: Path, *, include_chunks: bool = True) -> Pro
 def index_runs(runs_dir: Path, database_url: str, *, skip_chunks: bool = False) -> dict[str, int]:
     from shotguncv_core.db.session import connect
 
-    batches = [build_projection_batch(path, include_chunks=not skip_chunks) for path in sorted(runs_dir.iterdir()) if path.is_dir()]
+    run_dirs = [path for path in sorted(runs_dir.iterdir()) if path.is_dir()]
     with connect(database_url) as conn:
         _ensure_schema(conn)
         counts = {"runs": 0, "chunks": 0}
-        for batch in batches:
-            _upsert_batch(conn, batch, skip_chunks=skip_chunks)
-            counts["runs"] += 1
-            counts["chunks"] += len(batch.retrieval_chunks)
+        for run_dir in run_dirs:
+            stage_started = log_stage_started(run_dir, "index")
+            try:
+                batch = build_projection_batch(run_dir, include_chunks=not skip_chunks)
+                _upsert_batch(conn, batch, skip_chunks=skip_chunks)
+                chunk_count = len(batch.retrieval_chunks)
+                counts["runs"] += 1
+                counts["chunks"] += chunk_count
+                log_index_batch(
+                    run_dir,
+                    run_id=batch.run.run_id,
+                    artifact_count=len(batch.run_artifacts),
+                    chunk_count=chunk_count,
+                    started=stage_started,
+                    skip_chunks=skip_chunks,
+                )
+                log_stage_finished(run_dir, "index", stage_started)
+            except Exception as exc:
+                log_stage_failed(run_dir, "index", stage_started, exc)
+                raise
         conn.commit()
         return counts
 

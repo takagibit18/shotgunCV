@@ -195,6 +195,7 @@ export type EvalSummaryItem = {
 export type RunDraftStatus = "draft" | "queued" | "running" | "done" | "failed" | "ingest-ready";
 
 export type StageName = "ingest" | "analyze" | "generate" | "evaluate" | "plan" | "report";
+export type TimelineStageName = StageName | "index" | "retrieve" | "review";
 
 export type StageStatus = {
   stage: StageName;
@@ -232,8 +233,12 @@ export type RunTimelineEvent = {
     | "tool_call_failed"
     | "agent_reasoning_summary"
     | "quality_gate_checked"
-    | "fallback_used";
-  stage?: StageName;
+    | "fallback_used"
+    | "graph_node_started"
+    | "graph_node_finished"
+    | "retrieval_query"
+    | "index_batch";
+  stage?: TimelineStageName;
   status?: string;
   duration_ms?: number;
   error_code?: string;
@@ -269,6 +274,23 @@ export type RunTimelineEvent = {
   resolved_cv_files?: number;
   resolved_jd_files?: number;
   jd_text_blocks?: number;
+  graph?: string;
+  graph_runtime?: string;
+  node?: string;
+  run_id?: string;
+  jd_count?: number;
+  input_summary?: Record<string, unknown>;
+  output_summary?: Record<string, unknown>;
+  query_preview?: string;
+  query_chars?: number;
+  retriever_type?: string;
+  filters?: Record<string, unknown>;
+  limit?: number;
+  hit_count?: number;
+  miss?: boolean;
+  artifact_count?: number;
+  chunk_count?: number;
+  skip_chunks?: boolean;
 };
 
 export type UploadedInputFile = {

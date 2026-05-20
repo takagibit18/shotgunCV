@@ -18,6 +18,7 @@ from shotguncv_core.pipeline import (
     report_run,
 )
 from shotguncv_core.run_logs import (
+    log_retrieval_query,
     log_run_finished,
     log_run_started,
     log_stage_failed,
@@ -152,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     retrieve_parser.add_argument("--candidate-id", required=False)
     retrieve_parser.add_argument("--jd-id", required=False)
     retrieve_parser.add_argument("--run-id", required=False)
+    retrieve_parser.add_argument("--run-dir", type=Path, required=False, help="Optional run workspace for retrieval timeline logs.")
     retrieve_parser.add_argument("--source-type", required=False)
     retrieve_parser.add_argument(
         "--database-url-env",
@@ -367,14 +369,39 @@ def _run_retrieve(args: argparse.Namespace) -> str:
     from shotguncv_core.db.config import get_database_url
     from shotguncv_core.rag.retrieval import PgVectorRetriever
 
-    database_url = get_database_url(args.database_url_env)
-    results = PgVectorRetriever(database_url).search(
-        args.query,
-        candidate_id=args.candidate_id,
-        jd_id=args.jd_id,
-        run_id=args.run_id,
-        source_type=args.source_type,
-    )
+    stage_started = log_stage_started(args.run_dir, "retrieve") if getattr(args, "run_dir", None) else None
+    query_started = perf_counter()
+    try:
+        database_url = get_database_url(args.database_url_env)
+        retriever = PgVectorRetriever(database_url)
+        results = retriever.search(
+            args.query,
+            candidate_id=args.candidate_id,
+            jd_id=args.jd_id,
+            run_id=args.run_id,
+            source_type=args.source_type,
+        )
+        if stage_started is not None:
+            log_retrieval_query(
+                args.run_dir,
+                stage="retrieve",
+                query=args.query,
+                retriever_type=type(retriever).__name__,
+                filters=_retrieval_filters(
+                    candidate_id=args.candidate_id,
+                    jd_id=args.jd_id,
+                    run_id=args.run_id,
+                    source_type=args.source_type,
+                ),
+                limit=5,
+                hit_count=len(results),
+                started=query_started,
+            )
+            log_stage_finished(args.run_dir, "retrieve", stage_started)
+    except Exception as exc:
+        if stage_started is not None:
+            log_stage_failed(args.run_dir, "retrieve", stage_started, exc)
+        raise
     lines = [f"Retrieve completed: results={len(results)}"]
     for item in results:
         metadata = item.metadata
@@ -391,8 +418,18 @@ def _run_review(args: argparse.Namespace) -> str:
     from shotguncv_agents.review_graph import run_post_run_review
 
     database_url = os.environ.get(args.database_url_env, "").strip() or None
-    review = run_post_run_review(args.run_dir, jd_id=args.jd_id, database_url=database_url)
+    stage_started = log_stage_started(args.run_dir, "review")
+    try:
+        review = run_post_run_review(args.run_dir, jd_id=args.jd_id, database_url=database_url)
+    except Exception as exc:
+        log_stage_failed(args.run_dir, "review", stage_started, exc)
+        raise
+    log_stage_finished(args.run_dir, "review", stage_started)
     return f"Review completed: `{args.run_dir / 'review' / 'post_run_review.json'}`, jd_count={len(review['jd_ids'])}"
+
+
+def _retrieval_filters(**filters: str | None) -> dict[str, str]:
+    return {key: value for key, value in filters.items() if value}
 
 
 def _resolve_start_stage(args: argparse.Namespace) -> StageName:

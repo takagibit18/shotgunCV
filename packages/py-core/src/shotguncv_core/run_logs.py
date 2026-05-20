@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from shotguncv_core.run_config import default_run_config, load_run_config
@@ -11,6 +11,7 @@ from shotguncv_core.storage import ensure_directory, to_plain_data
 
 
 LOG_PATH = Path("logs") / "run_events.jsonl"
+LogStageName = StageName | Literal["index", "retrieve", "review"]
 
 
 def append_event(run_dir: Path, event: dict[str, Any]) -> Path:
@@ -294,16 +295,124 @@ def log_agent_reasoning_summary(
     )
 
 
-def log_stage_started(run_dir: Path, stage: StageName) -> float:
+def log_graph_node_started(
+    run_dir: Path,
+    *,
+    graph: str,
+    graph_runtime: str,
+    node: str,
+    run_id: str,
+    jd_count: int,
+    input_summary: dict[str, Any],
+) -> float:
+    append_event(
+        run_dir,
+        {
+            "event": "graph_node_started",
+            "stage": "review",
+            "graph": graph,
+            "graph_runtime": graph_runtime,
+            "node": node,
+            "run_id": run_id,
+            "jd_count": jd_count,
+            "input_summary": input_summary,
+        },
+    )
+    return perf_counter()
+
+
+def log_graph_node_finished(
+    run_dir: Path,
+    *,
+    graph: str,
+    graph_runtime: str,
+    node: str,
+    run_id: str,
+    jd_count: int,
+    started: float,
+    status: str,
+    input_summary: dict[str, Any],
+    output_summary: dict[str, Any],
+) -> None:
+    append_event(
+        run_dir,
+        {
+            "event": "graph_node_finished",
+            "stage": "review",
+            "graph": graph,
+            "graph_runtime": graph_runtime,
+            "node": node,
+            "run_id": run_id,
+            "jd_count": jd_count,
+            "duration_ms": _duration_ms(started),
+            "status": status,
+            "input_summary": input_summary,
+            "output_summary": output_summary,
+        },
+    )
+
+
+def log_retrieval_query(
+    run_dir: Path,
+    *,
+    stage: LogStageName,
+    query: str,
+    retriever_type: str,
+    filters: dict[str, Any],
+    limit: int,
+    hit_count: int,
+    started: float,
+) -> None:
+    append_event(
+        run_dir,
+        {
+            "event": "retrieval_query",
+            "stage": stage,
+            "query_preview": query[:160],
+            "query_chars": len(query),
+            "retriever_type": retriever_type,
+            "filters": filters,
+            "limit": limit,
+            "hit_count": hit_count,
+            "miss": hit_count == 0,
+            "duration_ms": _duration_ms(started),
+        },
+    )
+
+
+def log_index_batch(
+    run_dir: Path,
+    *,
+    run_id: str,
+    artifact_count: int,
+    chunk_count: int,
+    started: float,
+    skip_chunks: bool,
+) -> None:
+    append_event(
+        run_dir,
+        {
+            "event": "index_batch",
+            "stage": "index",
+            "run_id": run_id,
+            "artifact_count": artifact_count,
+            "chunk_count": chunk_count,
+            "duration_ms": _duration_ms(started),
+            "skip_chunks": skip_chunks,
+        },
+    )
+
+
+def log_stage_started(run_dir: Path, stage: LogStageName) -> float:
     append_event(run_dir, {"event": "stage_started", "stage": stage})
     return perf_counter()
 
 
-def log_stage_finished(run_dir: Path, stage: StageName, started: float) -> None:
+def log_stage_finished(run_dir: Path, stage: LogStageName, started: float) -> None:
     append_event(run_dir, {"event": "stage_finished", "stage": stage, "duration_ms": _duration_ms(started)})
 
 
-def log_stage_failed(run_dir: Path, stage: StageName, started: float, error: Exception) -> None:
+def log_stage_failed(run_dir: Path, stage: LogStageName, started: float, error: Exception) -> None:
     summary = str(error).strip() or error.__class__.__name__
     append_event(
         run_dir,
