@@ -49,6 +49,12 @@ COMMAND_DESCRIPTIONS = {
     "report": "Render run artifacts into readable summaries.",
 }
 
+DB_COMMAND_DESCRIPTIONS = {
+    "index": "Index existing run artifacts into the optional PostgreSQL projection.",
+    "retrieve": "Run a metadata-preserving retrieval smoke query against the optional projection.",
+    "review": "Generate post-run review and interview-prep artifacts from an existing run.",
+}
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -122,6 +128,51 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Override OCR languages, for example `eng` or `eng+chi_sim`.",
             )
 
+    index_parser = subparsers.add_parser(
+        "index",
+        help=DB_COMMAND_DESCRIPTIONS["index"],
+        description=DB_COMMAND_DESCRIPTIONS["index"],
+    )
+    index_parser.set_defaults(command_name="index")
+    index_parser.add_argument("--runs-dir", type=Path, required=True, help="Directory containing run workspaces.")
+    index_parser.add_argument(
+        "--database-url-env",
+        default="SHOTGUNCV_DATABASE_URL",
+        help="Environment variable that contains the PostgreSQL database URL.",
+    )
+    index_parser.add_argument("--skip-chunks", action="store_true", help="Index relational projection rows without RAG chunks.")
+
+    retrieve_parser = subparsers.add_parser(
+        "retrieve",
+        help=DB_COMMAND_DESCRIPTIONS["retrieve"],
+        description=DB_COMMAND_DESCRIPTIONS["retrieve"],
+    )
+    retrieve_parser.set_defaults(command_name="retrieve")
+    retrieve_parser.add_argument("--query", required=True, help="Retrieval query text.")
+    retrieve_parser.add_argument("--candidate-id", required=False)
+    retrieve_parser.add_argument("--jd-id", required=False)
+    retrieve_parser.add_argument("--run-id", required=False)
+    retrieve_parser.add_argument("--source-type", required=False)
+    retrieve_parser.add_argument(
+        "--database-url-env",
+        default="SHOTGUNCV_DATABASE_URL",
+        help="Environment variable that contains the PostgreSQL database URL.",
+    )
+
+    review_parser = subparsers.add_parser(
+        "review",
+        help=DB_COMMAND_DESCRIPTIONS["review"],
+        description=DB_COMMAND_DESCRIPTIONS["review"],
+    )
+    review_parser.set_defaults(command_name="review")
+    review_parser.add_argument("--run-dir", type=Path, required=True, help="Workspace directory for staged artifacts.")
+    review_parser.add_argument("--jd-id", required=False, help="Optional JD id to review.")
+    review_parser.add_argument(
+        "--database-url-env",
+        default="SHOTGUNCV_DATABASE_URL",
+        help="Optional environment variable for PostgreSQL retrieval during review.",
+    )
+
     return parser
 
 
@@ -163,6 +214,9 @@ def _execute_command(command_name: str, args: argparse.Namespace, argv: list[str
         "evaluate": _run_evaluate,
         "plan": _run_plan,
         "report": _run_report,
+        "index": _run_index,
+        "retrieve": _run_retrieve,
+        "review": _run_review,
     }
     print(handlers[command_name](args) if command_name != "run" else _run_full_pipeline(args, argv))
 
@@ -298,6 +352,47 @@ def _run_plan(args: argparse.Namespace) -> str:
 def _run_report(args: argparse.Namespace) -> str:
     report_path = _execute_single_stage(args.run_dir, "report", lambda: report_run(args.run_dir))
     return f"Report completed: `{report_path}`"
+
+
+def _run_index(args: argparse.Namespace) -> str:
+    from shotguncv_core.db.config import get_database_url
+    from shotguncv_core.db.indexer import index_runs
+
+    database_url = get_database_url(args.database_url_env)
+    result = index_runs(args.runs_dir, database_url, skip_chunks=args.skip_chunks)
+    return f"Index completed: runs={result['runs']}, chunks={result['chunks']}"
+
+
+def _run_retrieve(args: argparse.Namespace) -> str:
+    from shotguncv_core.db.config import get_database_url
+    from shotguncv_core.rag.retrieval import PgVectorRetriever
+
+    database_url = get_database_url(args.database_url_env)
+    results = PgVectorRetriever(database_url).search(
+        args.query,
+        candidate_id=args.candidate_id,
+        jd_id=args.jd_id,
+        run_id=args.run_id,
+        source_type=args.source_type,
+    )
+    lines = [f"Retrieve completed: results={len(results)}"]
+    for item in results:
+        metadata = item.metadata
+        lines.append(
+            f"- score={item.score:.3f} source_type={metadata.get('source_type')} "
+            f"source_id={metadata.get('source_id')} artifact={metadata.get('artifact_path')}"
+        )
+    return "\n".join(lines)
+
+
+def _run_review(args: argparse.Namespace) -> str:
+    import os
+
+    from shotguncv_agents.review_graph import run_post_run_review
+
+    database_url = os.environ.get(args.database_url_env, "").strip() or None
+    review = run_post_run_review(args.run_dir, jd_id=args.jd_id, database_url=database_url)
+    return f"Review completed: `{args.run_dir / 'review' / 'post_run_review.json'}`, jd_count={len(review['jd_ids'])}"
 
 
 def _resolve_start_stage(args: argparse.Namespace) -> StageName:

@@ -94,6 +94,28 @@ type ObservabilitySummary = {
   qualityWarnings: string[];
 };
 
+type PostRunReview = {
+  schema_version: string;
+  run_id: string;
+  candidate_id: string;
+  jd_ids: string[];
+  evidence_citations: {
+    source_type?: string;
+    source_id?: string;
+    candidate_id?: string;
+    jd_id?: string | null;
+    run_id?: string;
+    artifact_path?: string;
+    provenance_summary?: string;
+    text?: string;
+    score?: number;
+  }[];
+  interview_questions: { jd_id?: string; question: string }[];
+  revision_tasks: { jd_id?: string; task: string }[];
+  retrieval?: { result_count?: number; misses?: string[] };
+  validation?: { fabrication_policy?: string; warnings?: string[] };
+};
+
 type ManifestInputItem = {
   role?: "cv" | "jd";
   source_origin?: string;
@@ -153,6 +175,10 @@ type RunDetail = {
   inputSources: InputSourceDisplay[];
   jdInputPreviews: JdInputPreview[];
   observability: ObservabilitySummary;
+  review: {
+    postRunReview: PostRunReview | null;
+    interviewPrepMarkdown: string;
+  };
 };
 
 type RunReport = {
@@ -252,6 +278,8 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const evalSummary = (await readJsonIfExists<EvalSummaryItem[]>(path.join(runDir, "evaluate", "eval_summary.json"))) ?? [];
   const strategies =
     (await readJsonIfExists<ApplicationStrategy[]>(path.join(runDir, "plan", "application_strategies.json"))) ?? [];
+  const postRunReview = await readJsonIfExists<PostRunReview>(path.join(runDir, "review", "post_run_review.json"));
+  const interviewPrepMarkdown = await readTextIfExists(path.join(runDir, "review", "interview_prep.md"));
 
   const gapCounts = new Map(gapMaps.map((gapMap) => [gapMap.jd_id, gapMap.items.length]));
   const jdIndex = new Map(jdProfiles.map((jd) => [jd.jd_id, jd]));
@@ -311,6 +339,10 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     inputSources: buildInputSources(ingestManifest, draft),
     jdInputPreviews: await buildJdInputPreviews(runDir, ingestManifest, draft, jdProfiles),
     observability,
+    review: {
+      postRunReview,
+      interviewPrepMarkdown,
+    },
   };
 }
 
@@ -454,7 +486,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 
-export type { JdInputPreview, ObservabilitySummary, RunDetail, RunReport, RunSummary };
+export type { JdInputPreview, ObservabilitySummary, PostRunReview, RunDetail, RunReport, RunSummary };
 
 
 function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadManifest | null): InputSourceDisplay[] {

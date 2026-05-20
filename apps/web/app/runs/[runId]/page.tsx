@@ -101,6 +101,8 @@ export default async function RunPage({ params }: PageProps) {
 
         <GateReviewSection detail={detail} />
 
+        <PostRunReviewSection detail={detail} />
+
         <section className="section evaluation-focus-section">
           <div className="section-heading">
             <div>
@@ -297,6 +299,65 @@ function GateReviewSection({ detail }: { detail: RunDetail }) {
             </article>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+
+function PostRunReviewSection({ detail }: { detail: RunDetail }) {
+  const review = detail.review.postRunReview;
+  if (!review) {
+    return null;
+  }
+  const citations = review.evidence_citations ?? [];
+  const questions = review.interview_questions ?? [];
+  const tasks = review.revision_tasks ?? [];
+  return (
+    <section className="section evaluation-focus-section">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">复盘产物</p>
+          <h2>面试准备与复盘建议</h2>
+          <p className="section-copy">只读取 review artifact，展示证据摘要、面试问题和安全修订任务。</p>
+        </div>
+      </div>
+      <div className="gate-grid review-gate-grid">
+        <article className="detail-card gate-card">
+          <div className="gate-card-heading">
+            <h3>证据依据</h3>
+            <span className="status-chip success">{review.validation?.fabrication_policy ?? "reviewed"}</span>
+          </div>
+          <ul className="requirement-list">
+            {citations.slice(0, 4).map((citation, index) => (
+              <li key={`${citation.source_type ?? "source"}-${index}`}>
+                {citation.provenance_summary || citation.artifact_path || "证据产物"}
+              </li>
+            ))}
+          </ul>
+        </article>
+        <article className="detail-card gate-card">
+          <div className="gate-card-heading">
+            <h3>面试准备</h3>
+            <span className="status-chip">{questions.length}</span>
+          </div>
+          <ul className="requirement-list">
+            {questions.slice(0, 4).map((item, index) => (
+              <li key={`${item.jd_id ?? "jd"}-${index}`}>{item.question}</li>
+            ))}
+          </ul>
+        </article>
+        <article className="detail-card gate-card">
+          <div className="gate-card-heading">
+            <h3>安全修订任务</h3>
+            <span className="status-chip">{tasks.length}</span>
+          </div>
+          <ul className="requirement-list">
+            {tasks.slice(0, 4).map((item, index) => (
+              <li key={`${item.jd_id ?? "jd"}-${index}`}>{item.task}</li>
+            ))}
+          </ul>
+        </article>
       </div>
     </section>
   );

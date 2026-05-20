@@ -16,6 +16,9 @@ def test_cli_exposes_v1_command_family() -> None:
         "evaluate",
         "plan",
         "report",
+        "index",
+        "retrieve",
+        "review",
     }
 
 
@@ -27,6 +30,9 @@ def test_cli_run_lists_commands() -> None:
     assert "ingest" in output
     assert "run" in output
     assert "report" in output
+    assert "index" in output
+    assert "retrieve" in output
+    assert "review" in output
 
 
 def test_cli_run_help_lists_image_extraction_options() -> None:
