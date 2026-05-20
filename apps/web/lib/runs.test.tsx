@@ -200,6 +200,42 @@ describe("run viewer data loading", () => {
     });
   });
 
+  it("loads and renders post-run review artifacts without raw source text", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-full");
+    const runDir = path.join(runsDir, "demo-full");
+    await mkdir(path.join(runDir, "review"), { recursive: true });
+    await writeJson(path.join(runDir, "review", "post_run_review.json"), {
+      schema_version: "post-run-review-v1",
+      run_id: "demo-full",
+      candidate_id: "cand-001",
+      jd_ids: ["jd-001"],
+      evidence_citations: [
+        {
+          source_type: "candidate_evidence",
+          artifact_path: "analyze/candidate_profile.json",
+          provenance_summary: "候选人画像证据",
+          text: "围绕 LLM 辅助工作流搭建过内部工具",
+        },
+      ],
+      interview_questions: [{ jd_id: "jd-001", question: "请说明项目证据。" }],
+      revision_tasks: [{ jd_id: "jd-001", task: "补强指标表达。" }],
+      retrieval: { result_count: 1, misses: [] },
+      validation: { fabrication_policy: "passed", warnings: [] },
+    });
+    await writeFile(path.join(runDir, "review", "interview_prep.md"), "# 面试准备\n\n- 证据\n", "utf-8");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const detail = await loadRunDetail("demo-full");
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "demo-full" }) }));
+
+    expect(detail.review.postRunReview?.schema_version).toBe("post-run-review-v1");
+    expect(detail.review.interviewPrepMarkdown).toContain("面试准备");
+    expect(html).toContain("面试准备");
+    expect(html).toContain("候选人画像证据");
+    expect(html).not.toContain("input_files");
+  });
+
   it("loads v0.5.7 gate and three-score artifacts", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });
