@@ -99,3 +99,50 @@ RAG、数据库投影和 post-run review 的观测事件继续写入对应 run �
 - 检索 miss 率，作为后续 RAG 召回率优化的 baseline。
 - 每 run 的 chunk 总数和 index 耗时，作为索引效率和 LLM 索引成本对比基线。
 - 当前 review 流没有新增 LLM token 消耗；后续引入 LLM review 或 LLM index 时，使用主 pipeline 已有 token 日志做增量对比。
+
+## Indeed MCP 岗位导入后置规划
+
+Indeed MCP 岗位导入属于 RAG、数据库投影、LangGraph 复盘 Agent 等基础能力稳定后的后置扩展，不进入当前基础优化优先级。该能力的目标不是自动投递，而是在 JD 信息输入阶段新增一个 `Indeed 导入` 来源：用户输入关键词、地点、工作类型等条件，系统搜索 Indeed 岗位，用户勾选目标 JD，后端拉取 Job Detail，并把完整 JD 标准化为当前 pipeline 已支持的文本 JD，再写入同一套 run draft。
+
+当前规划边界：
+- 保持 `run_dir` 与 Python pipeline 为业务真源；Indeed 只作为 JD 输入来源，不改变 `ingest -> analyze -> generate -> evaluate -> plan -> report`。
+- 首期只做“搜索、预览、勾选、导入”，不做账号登录、浏览器自动化、ATS 自动提交或代用户申请。
+- 导入后的 JD 需要保留来源元数据，例如 `sourceProvider=indeed`、Indeed job id、申请链接、抓取时间、搜索条件和公司/岗位显示名，但 Web 主界面仍避免暴露内部路径和完整原文。
+- 技术可达性需要单独 spike：Indeed 官方 MCP 文档当前标注 beta 且 only available for Claude Connector。直接 MCP client 是否可调用取决于 Indeed 对 OAuth client、connector host 或授权策略的限制。
+
+推荐后续验证顺序：
+1. 先完成 RAG、数据库投影、LangGraph review、检索观测事件和质量基线。
+2. 做一个只读技术 spike，验证 `https://mcp.indeed.com/claude/mcp` 是否接受通用 MCP client 的 `initialize`、OAuth discovery 和 `tools/list`。
+3. 如果直接 MCP 不开放，优先评估 Claude MCP connector bridge：由 Claude 连接 Indeed MCP，jobPilot 只接收结构化 JD JSON 并落到现有草稿入口。
+4. 若该能力进入生产化，再评估 Indeed 官方 API/Partner 路线，避免把 beta connector 作为唯一长期依赖。
+
+该功能只有在基础 RAG 和 Agent 工作流稳定、JD/简历来源追溯字段完成、并且合规调用路径明确后，才进入产品实现阶段。
+
+## 2026-05-20 当前有效 JD 基线
+
+从本节开始，正式 baseline 记录只以 `baseline-formal-*` run 为准；更早的 `baseline-rag-*`、`baseline-next-*`、`baseline-ocr-*` run 和对应 JSON 已删除，不进入后续优化前后对比。
+
+当前 raw JD 素材库统一为 `baseline/jd_corpus_supplement_20260520/`。该目录现在包含 19 个文本 JD、1 个 PDF JD 和 7 张图片 JD。PDF `量化派AI Native 全栈工程师如LLM  Agent AI应用开发.pdf` 已通过 `local_pdf` 提取出可用文本；图片 JD 已通过本机 Tesseract OCR 以 `eng+chi_sim` 抽取文本。本轮不启用 vision fallback。
+
+正式 baseline 采用 7 个组合模板，每个模板重复 3 次，共 21 个 deterministic CLI run，并在每个 run 后执行 `shotguncv review`：
+
+- `baseline-formal-r{1,2,3}-small-high-image-pdf-20260520`：少 JD，高优先，包含图片和 PDF。
+- `baseline-formal-r{1,2,3}-small-image-only-20260520`：少 JD，图片-only。
+- `baseline-formal-r{1,2,3}-small-low-plus-image-20260520`：少 JD，低优先，包含图片。
+- `baseline-formal-r{1,2,3}-mixed-balanced-media-20260520`：少到中等规模，混合优先，包含图片和 PDF。
+- `baseline-formal-r{1,2,3}-many-high-priority-media-20260520`：多 JD，高优先，包含图片和 PDF。
+- `baseline-formal-r{1,2,3}-many-low-medium-media-20260520`：多 JD，中低优先，包含图片。
+- `baseline-formal-r{1,2,3}-full-raw-library-20260520`：全量 raw JD，共 27 个文件：19 txt、1 pdf、7 png。
+
+机器可读当前基线：
+
+- `baseline/baseline_runs_formal_20260520.json`：正式 run 清单、重复轮次、JD 来源、优先级桶、媒体类型计数和事件计数。
+- `baseline/baseline_metrics_formal_20260520.json`：正式聚合指标、重复采样分布、节点耗时、数据库指标和分流决策分布。
+
+当前正式聚合结果：21 个 run，跨 run 共 204 个 JD 输入，覆盖 raw 库中 27 个唯一 JD 文件；review 阶段 `retrieval_query` 204 条，`graph_node_finished` 168 条；InMemory retrieval 耗时 avg 0.74ms、p50 1ms、p95 2ms、p99 3ms；命中数分布为 204/204 条 query 均命中 5 条，miss 率 0。
+
+数据库基线已在 PostgreSQL + pgvector Docker 容器上完成。仅索引正式 `baseline-formal-*` runs，使用 `baseline/runs-formal-20260520` 作为索引目录，避免历史 run 混入统计。索引结果：21 条 `index_batch`，总 chunk 数 4866；index 耗时 avg 608.38ms、p50 436ms、p95 1663ms、p99 1773ms。
+
+PgVector retrieve 采样已扩展到 30 条代表查询，覆盖高相关 AI/Agent/RAG、中相关产品/数据/客户成功、低相关 HR/法务/销售/财务/市场、图片 OCR、PDF 和无关边界 query；30/30 条均返回 5 个结果，miss 率 0；PgVector retrieve 耗时 avg 17.47ms、p50 16ms、p95 30ms、p99 33ms。
+
+分流决策分布已纳入正式 baseline。204 个 JD 决策样本中，strategy/review 决策分布为 `apply=51`、`hold=111`、`needs_review=42`；preflight 分布为 `pass=162`、`needs_review=42`；`final_overall_score` avg 0.4185、p50 0.55、p95 0.84，作为后续按匹配度分流阈值的基准。
