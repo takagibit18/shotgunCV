@@ -12,7 +12,7 @@ from shotguncv_core.storage import ensure_directory, to_plain_data
 
 
 LOG_PATH = Path("logs") / "run_events.jsonl"
-LogStageName = StageName | Literal["review"]
+LogStageName = StageName | Literal["index", "retrieve", "review"]
 _LOG_WRITE_LOCK = Lock()
 
 
@@ -403,6 +403,29 @@ def log_retrieval_query(
             "hit_count": hit_count,
             "miss": hit_count == 0,
             "duration_ms": _duration_ms(started),
+        },
+    )
+
+
+def log_index_batch(
+    run_dir: Path,
+    *,
+    run_id: str,
+    artifact_count: int,
+    chunk_count: int,
+    started: float,
+    skip_chunks: bool,
+) -> None:
+    append_event(
+        run_dir,
+        {
+            "event": "index_batch",
+            "stage": "index",
+            "run_id": run_id,
+            "artifact_count": artifact_count,
+            "chunk_count": chunk_count,
+            "duration_ms": _duration_ms(started),
+            "skip_chunks": skip_chunks,
         },
     )
 

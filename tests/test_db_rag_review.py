@@ -64,6 +64,44 @@ def test_index_runs_against_postgres_when_database_url_is_configured(tmp_path: P
     assert first["chunks"] == second["chunks"]
 
 
+def test_index_runs_logs_per_run_batch_without_changing_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shotguncv_core.db.indexer as indexer
+    import shotguncv_core.db.session as session
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def commit(self) -> None:
+            return None
+
+    run_dir = _prepare_completed_run(tmp_path)
+    upserted: list[str] = []
+
+    monkeypatch.setattr(session, "connect", lambda database_url: FakeConnection())
+    monkeypatch.setattr(indexer, "_ensure_schema", lambda conn: None)
+    monkeypatch.setattr(indexer, "_upsert_batch", lambda conn, batch, *, skip_chunks: upserted.append(batch.run.run_id))
+
+    first = indexer.index_runs(tmp_path, "postgresql://example/test")
+    second = indexer.index_runs(tmp_path, "postgresql://example/test")
+
+    assert first["runs"] == second["runs"] == 1
+    assert first["chunks"] == second["chunks"]
+    assert upserted == [run_dir.name, run_dir.name]
+    events = _read_events(run_dir)
+    index_batches = [event for event in events if event["event"] == "index_batch"]
+    assert len(index_batches) == 2
+    assert index_batches[0]["run_id"] == run_dir.name
+    assert index_batches[0]["artifact_count"] > 0
+    assert index_batches[0]["chunk_count"] == first["chunks"]
+    assert index_batches[0]["skip_chunks"] is False
+    assert any(event["event"] == "stage_started" and event["stage"] == "index" for event in events)
+    assert any(event["event"] == "stage_finished" and event["stage"] == "index" for event in events)
+
+
 def test_deterministic_retriever_preserves_metadata(tmp_path: Path) -> None:
     from shotguncv_core.db.indexer import build_projection_batch
     from shotguncv_core.rag.retrieval import InMemoryVectorRetriever
@@ -95,6 +133,14 @@ def test_review_command_writes_artifacts_with_citations_and_validation(tmp_path:
     assert "unsupported_hard_fact_tasks_removed" in review["validation"]
     assert "面试准备" in prep
     assert "证据" in prep
+
+
+def _read_events(run_dir: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _prepare_completed_run(tmp_path: Path) -> Path:
