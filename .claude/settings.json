@@ -18,7 +18,8 @@
       "Bash(Get-ChildItem -Path \"e:\\\\PycharmProjects\\\\jobPilot\\\\apps\\\\web\" -Depth 2)",
       "Bash(Select-Object Name, FullName)",
       "Bash(npm run *)",
-      "Bash(git -C \"e:/PycharmProjects/jobPilot\" log --oneline --all -- \"apps/web/**\")"
+      "Bash(git -C \"e:/PycharmProjects/jobPilot\" log --oneline --all -- \"apps/web/**\")",
+      "Bash(git diff *)"
     ]
   }
 }

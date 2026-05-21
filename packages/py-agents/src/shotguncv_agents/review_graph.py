@@ -8,6 +8,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Annotated, Any, TypedDict
 
+from shotguncv_core.rag.retrieval import PgVectorRetriever, RetrievalResult
 from shotguncv_core.run_logs import (
     log_fallback_used,
     log_graph_node_finished,
@@ -30,6 +31,7 @@ REVIEW_SKIPPED_NODES = [
 class _ReviewGraphState(TypedDict, total=False):
     run_dir: Path
     requested_jd_id: str | None
+    database_url: str | None
     evidence_threshold: int
     graph_runtime: str
     run_id: str
@@ -61,11 +63,13 @@ def run_post_run_review(
     run_dir: Path,
     *,
     jd_id: str | None = None,
+    database_url: str | None = None,
     evidence_threshold: int = EVIDENCE_THRESHOLD,
 ) -> dict[str, Any]:
     initial_state: _ReviewGraphState = {
         "run_dir": run_dir.resolve(),
         "requested_jd_id": jd_id,
+        "database_url": database_url,
         "evidence_threshold": evidence_threshold,
         "retrieval_results": [],
         "retrieval_misses": [],
@@ -224,6 +228,7 @@ def _shared_branch_context(state: _ReviewGraphState) -> dict[str, Any]:
     return {
         "run_dir": state["run_dir"],
         "requested_jd_id": state.get("requested_jd_id"),
+        "database_url": state.get("database_url"),
         "evidence_threshold": state["evidence_threshold"],
         "graph_runtime": state["graph_runtime"],
         "run_id": state["run_id"],
@@ -322,30 +327,49 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
     query = _query_for_jd(state, jd_id)
     chunks = state["retrieval_chunks"]
     started = perf_counter()
-    jd_results = _search_chunks(chunks, query, limit=8, jd_id=jd_id)
+    if state.get("database_url"):
+        retriever = PgVectorRetriever(str(state["database_url"]))
+        retriever_type = "PgVectorRetriever"
+        jd_results = _retrieval_results_to_dicts(
+            retriever.search(query, limit=8, candidate_id=state["candidate_id"], jd_id=jd_id)
+        )
+    else:
+        retriever = None
+        retriever_type = "ArtifactTokenRetriever"
+        jd_results = _search_chunks(chunks, query, limit=8, jd_id=jd_id)
     log_retrieval_query(
         state["run_dir"],
         stage="review",
         query=query,
-        retriever_type="ArtifactTokenRetriever",
-        filters={"jd_id": jd_id},
+        retriever_type=retriever_type,
+        filters={"candidate_id": state["candidate_id"], "jd_id": jd_id} if retriever else {"jd_id": jd_id},
         limit=8,
         hit_count=len(jd_results),
         started=started,
     )
     started = perf_counter()
-    candidate_results = _search_chunks(
-        chunks,
-        query,
-        limit=8,
-        candidate_id=state["candidate_id"],
-        source_type="candidate_evidence",
-    )
+    if retriever:
+        candidate_results = _retrieval_results_to_dicts(
+            retriever.search(
+                query,
+                limit=8,
+                candidate_id=state["candidate_id"],
+                source_type="candidate_evidence",
+            )
+        )
+    else:
+        candidate_results = _search_chunks(
+            chunks,
+            query,
+            limit=8,
+            candidate_id=state["candidate_id"],
+            source_type="candidate_evidence",
+        )
     log_retrieval_query(
         state["run_dir"],
         stage="review",
         query=query,
-        retriever_type="ArtifactTokenRetriever",
+        retriever_type=retriever_type,
         filters={"candidate_id": state["candidate_id"], "source_type": "candidate_evidence"},
         limit=8,
         hit_count=len(candidate_results),
@@ -690,6 +714,10 @@ def _search_chunks(
         score = len(overlap) / math.sqrt(max(1, len(query_tokens)) * max(1, len(text_tokens)))
         results.append({"text": chunk["text"], "metadata": metadata, "score": round(score, 6)})
     return sorted(results, key=lambda item: (-item["score"], str(item["metadata"].get("source_id"))))[:limit]
+
+
+def _retrieval_results_to_dicts(results: list[RetrievalResult]) -> list[dict[str, Any]]:
+    return [{"text": item.text, "metadata": item.metadata, "score": item.score} for item in results]
 
 
 def _tokens(text: str) -> set[str]:
