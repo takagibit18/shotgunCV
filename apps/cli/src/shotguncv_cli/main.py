@@ -391,7 +391,13 @@ def _run_review(args: argparse.Namespace) -> str:
     from shotguncv_agents.review_graph import run_post_run_review
 
     database_url = os.environ.get(args.database_url_env, "").strip() or None
-    review = run_post_run_review(args.run_dir, jd_id=args.jd_id, database_url=database_url)
+    stage_started = log_stage_started(args.run_dir, "review")
+    try:
+        review = run_post_run_review(args.run_dir, jd_id=args.jd_id, database_url=database_url)
+    except Exception as exc:
+        log_stage_failed(args.run_dir, "review", stage_started, exc)
+        raise
+    log_stage_finished(args.run_dir, "review", stage_started)
     return f"Review completed: `{args.run_dir / 'review' / 'post_run_review.json'}`, jd_count={len(review['jd_ids'])}"
 
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
 
 from shotguncv_core.run_config import default_run_config, load_run_config
@@ -11,6 +12,13 @@ from shotguncv_core.storage import ensure_directory, to_plain_data
 
 
 LOG_PATH = Path("logs") / "run_events.jsonl"
+LogStageName = StageName | Literal["review"]
+_LOG_WRITE_LOCK = Lock()
+
+
+class GraphNodeTimer(TypedDict):
+    started: float
+    start_log_write_ms: int
 
 
 def append_event(run_dir: Path, event: dict[str, Any]) -> Path:
@@ -19,9 +27,17 @@ def append_event(run_dir: Path, event: dict[str, Any]) -> Path:
     import json
 
     payload = {"timestamp": now_iso(), **event}
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(to_plain_data(payload), ensure_ascii=False, separators=(",", ":")) + "\n")
+    line = json.dumps(to_plain_data(payload), ensure_ascii=False, separators=(",", ":")) + "\n"
+    with _LOG_WRITE_LOCK:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
     return path
+
+
+def _append_event_with_duration(run_dir: Path, event: dict[str, Any]) -> tuple[Path, int]:
+    started = perf_counter()
+    path = append_event(run_dir, event)
+    return path, _duration_ms(started)
 
 
 def log_run_started(
@@ -294,16 +310,113 @@ def log_agent_reasoning_summary(
     )
 
 
-def log_stage_started(run_dir: Path, stage: StageName) -> float:
+def log_graph_node_started(
+    run_dir: Path,
+    *,
+    graph: str,
+    graph_runtime: str,
+    node: str,
+    run_id: str,
+    jd_count: int,
+    input_summary: dict[str, Any],
+    jd_id: str | None = None,
+) -> GraphNodeTimer:
+    _, log_write_ms = _append_event_with_duration(
+        run_dir,
+        {
+            "event": "graph_node_started",
+            "stage": "review",
+            "graph": graph,
+            "graph_runtime": graph_runtime,
+            "node": node,
+            "run_id": run_id,
+            "jd_id": jd_id,
+            "jd_count": jd_count,
+            "input_summary": input_summary,
+        },
+    )
+    return {"started": perf_counter(), "start_log_write_ms": log_write_ms}
+
+
+def log_graph_node_finished(
+    run_dir: Path,
+    *,
+    graph: str,
+    graph_runtime: str,
+    node: str,
+    run_id: str,
+    jd_count: int,
+    started: float | GraphNodeTimer,
+    status: str,
+    input_summary: dict[str, Any],
+    output_summary: dict[str, Any],
+    jd_id: str | None = None,
+) -> None:
+    started_at = started["started"] if isinstance(started, dict) else started
+    business_duration_ms = _duration_ms(started_at)
+    start_log_write_ms = started.get("start_log_write_ms") if isinstance(started, dict) else None
+    append_event(
+        run_dir,
+        {
+            "event": "graph_node_finished",
+            "stage": "review",
+            "graph": graph,
+            "graph_runtime": graph_runtime,
+            "node": node,
+            "run_id": run_id,
+            "jd_id": jd_id,
+            "jd_count": jd_count,
+            "duration_ms": business_duration_ms,
+            "timing_ms": {
+                "total": business_duration_ms,
+                "business": business_duration_ms,
+                "log_write": start_log_write_ms,
+            },
+            "status": status,
+            "input_summary": input_summary,
+            "output_summary": output_summary,
+        },
+    )
+
+
+def log_retrieval_query(
+    run_dir: Path,
+    *,
+    stage: LogStageName,
+    query: str,
+    retriever_type: str,
+    filters: dict[str, Any],
+    limit: int,
+    hit_count: int,
+    started: float,
+) -> None:
+    append_event(
+        run_dir,
+        {
+            "event": "retrieval_query",
+            "stage": stage,
+            "query_preview": query[:160],
+            "query_chars": len(query),
+            "retriever_type": retriever_type,
+            "filters": filters,
+            "limit": limit,
+            "hit_count": hit_count,
+            "miss": hit_count == 0,
+            "duration_ms": _duration_ms(started),
+        },
+    )
+
+
+def log_stage_started(run_dir: Path, stage: LogStageName) -> float:
     append_event(run_dir, {"event": "stage_started", "stage": stage})
     return perf_counter()
 
 
-def log_stage_finished(run_dir: Path, stage: StageName, started: float) -> None:
+def log_stage_finished(run_dir: Path, stage: LogStageName, started: float) -> None:
     append_event(run_dir, {"event": "stage_finished", "stage": stage, "duration_ms": _duration_ms(started)})
 
 
-def log_stage_failed(run_dir: Path, stage: StageName, started: float, error: Exception) -> None:
+def log_stage_failed(run_dir: Path, stage: LogStageName, started: float, error: Exception) -> None:
     summary = str(error).strip() or error.__class__.__name__
     append_event(
         run_dir,
