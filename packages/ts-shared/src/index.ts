@@ -195,6 +195,7 @@ export type EvalSummaryItem = {
 export type RunDraftStatus = "draft" | "queued" | "running" | "done" | "failed" | "ingest-ready";
 
 export type StageName = "ingest" | "analyze" | "generate" | "evaluate" | "plan" | "report";
+export type TimelineStageName = StageName | "review";
 
 export type StageStatus = {
   stage: StageName;
@@ -232,8 +233,11 @@ export type RunTimelineEvent = {
     | "tool_call_failed"
     | "agent_reasoning_summary"
     | "quality_gate_checked"
-    | "fallback_used";
-  stage?: StageName;
+    | "fallback_used"
+    | "graph_node_started"
+    | "graph_node_finished"
+    | "retrieval_query";
+  stage?: TimelineStageName;
   status?: string;
   duration_ms?: number;
   error_code?: string;
@@ -264,6 +268,20 @@ export type RunTimelineEvent = {
   reason?: string;
   summary?: string;
   decision_inputs?: string[];
+  graph?: string;
+  graph_runtime?: string;
+  node?: string;
+  run_id?: string;
+  jd_id?: string | null;
+  jd_count?: number;
+  input_summary?: Record<string, unknown>;
+  query_preview?: string;
+  query_chars?: number;
+  retriever_type?: string;
+  filters?: Record<string, unknown>;
+  limit?: number;
+  hit_count?: number;
+  miss?: boolean;
   cli_cv_sources?: number;
   cli_jd_sources?: number;
   resolved_cv_files?: number;

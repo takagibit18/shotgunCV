@@ -47,6 +47,7 @@ COMMAND_DESCRIPTIONS = {
     "evaluate": "Run rules and judge-oriented evaluation passes.",
     "plan": "Produce ranked application strategy recommendations.",
     "report": "Render run artifacts into readable summaries.",
+    "review": "Generate post-run review and interview-prep artifacts from an existing run.",
 }
 
 
@@ -61,6 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command, help=description, description=description)
         subparser.set_defaults(command_name=command)
         subparser.add_argument("--run-dir", type=Path, required=True, help="Workspace directory for staged artifacts.")
+        if command == "review":
+            subparser.add_argument("--jd-id", required=False, help="Optional JD id to review.")
+            continue
         if command == "run":
             subparser.add_argument(
                 "--resume",
@@ -163,6 +167,7 @@ def _execute_command(command_name: str, args: argparse.Namespace, argv: list[str
         "evaluate": _run_evaluate,
         "plan": _run_plan,
         "report": _run_report,
+        "review": _run_review,
     }
     print(handlers[command_name](args) if command_name != "run" else _run_full_pipeline(args, argv))
 
@@ -298,6 +303,19 @@ def _run_plan(args: argparse.Namespace) -> str:
 def _run_report(args: argparse.Namespace) -> str:
     report_path = _execute_single_stage(args.run_dir, "report", lambda: report_run(args.run_dir))
     return f"Report completed: `{report_path}`"
+
+
+def _run_review(args: argparse.Namespace) -> str:
+    from shotguncv_agents.review_graph import run_post_run_review
+
+    stage_started = log_stage_started(args.run_dir, "review")
+    try:
+        review = run_post_run_review(args.run_dir, jd_id=getattr(args, "jd_id", None))
+    except Exception as exc:
+        log_stage_failed(args.run_dir, "review", stage_started, exc)
+        raise
+    log_stage_finished(args.run_dir, "review", stage_started)
+    return f"Review completed: `{args.run_dir / 'review' / 'post_run_review.json'}`, jd_count={len(review['jd_ids'])}"
 
 
 def _resolve_start_stage(args: argparse.Namespace) -> StageName:
