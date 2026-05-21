@@ -62,3 +62,11 @@ Web 从只读查看器扩展为本机运行管理入口，但执行边界仍保�
 `/resume` 被定义为简历优化工作台，但它只编排和展示既有 run artifacts：简历版本、证据约束、preflight gate、策略建议和状态摘要。它不成为第二套生成器，不写入 `resume_variants.json`，也不把完整 CV/JD 原文展示到页面中。
 
 首页运行队列和评估列表的数据密度增强限定为 Web 展示层：轻量趋势摘要、客户端分页、长文本可读性和移动端降级。原因是 v0.6.5 的目标是让本地工作台可承载更多 run/JD，而不是改变评分、排序或 pipeline 合约。
+
+## Indeed MCP 岗位导入暂缓到基础 RAG/Agent 能力之后
+
+Indeed MCP 岗位导入与预期产品方向一致：它可以作为 JD 信息输入阶段的外部岗位来源，把搜索到的 Indeed Job Detail 标准化为当前 run draft 已支持的文本 JD，再交给 Python pipeline 处理。
+
+该能力暂不进入当前优先级。原因是当前项目更需要先稳定 RAG、数据库投影、LangGraph 复盘 Agent、检索观测事件和质量基线；同时 Indeed 官方 MCP 仍标注 beta，且当前文档约束为 only available for Claude Connector。后续若要实现，应先做只读技术 spike 验证直接 MCP client 是否可达；若不可达，再评估 Claude MCP connector bridge 或 Indeed 官方 API/Partner 路线。
+
+边界：不做自动投递、不做招聘网站抓取、不做浏览器自动化登录；Indeed 只作为可选 JD 导入源，不能改变 `run_dir` 与 Python pipeline 的业务真源地位。
