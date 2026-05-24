@@ -33,6 +33,22 @@ def test_review_command_fans_out_retrieve_and_inspect_per_jd(tmp_path: Path) -> 
     retrieval_queries = [event for event in events if event["event"] == "retrieval_query" and event["stage"] == "review"]
     assert {event["filters"].get("jd_id") for event in retrieval_queries if event["filters"].get("jd_id")} >= {"jd-high", "jd-low"}
     assert all("query_preview" in event and "query" not in event for event in retrieval_queries)
+    scopes_by_jd: dict[str, set[str]] = {}
+    for event in retrieval_queries:
+        jd_id = event["filters"].get("jd_id")
+        if isinstance(jd_id, str):
+            scopes_by_jd.setdefault(jd_id, set()).add(str(event["retrieval_scope"]))
+        assert isinstance(event["raw_hit_count"], int)
+        assert isinstance(event["unique_hit_count"], int)
+        assert isinstance(event["supporting_hit_count"], int)
+        assert isinstance(event["source_type_available_counts"], dict)
+        assert event["precision"] is None
+        assert "query" not in event
+    assert scopes_by_jd["jd-high"] == {"jd_filtered", "combined_deduped"}
+    assert scopes_by_jd["jd-low"] == {"jd_filtered", "combined_deduped"}
+    combined_events = [event for event in retrieval_queries if event["retrieval_scope"] == "combined_deduped"]
+    assert {event["filters"]["jd_id"] for event in combined_events} == {"jd-high", "jd-low"}
+    assert all(event["unique_hit_count"] == event["hit_count"] for event in combined_events)
 
 
 def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> None:
