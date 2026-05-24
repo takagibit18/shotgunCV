@@ -337,15 +337,20 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
         retriever = None
         retriever_type = "ArtifactTokenRetriever"
         jd_results = _search_chunks(chunks, query, limit=8, jd_id=jd_id)
+    jd_supporting = sum(1 for r in jd_results if _is_supporting_evidence(r))
     log_retrieval_query(
         state["run_dir"],
         stage="review",
+        retrieval_scope="jd_filtered",
         query=query,
         retriever_type=retriever_type,
         filters={"candidate_id": state["candidate_id"], "jd_id": jd_id} if retriever else {"jd_id": jd_id},
         limit=8,
         hit_count=len(jd_results),
         started=started,
+        results=jd_results,
+        supporting_count=jd_supporting,
+        source_type_available_counts=_source_type_available_counts(chunks, jd_id=jd_id),
     )
     started = perf_counter()
     if retriever:
@@ -365,20 +370,50 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
             candidate_id=state["candidate_id"],
             source_type="candidate_evidence",
         )
+    candidate_supporting = sum(1 for r in candidate_results if _is_supporting_evidence(r))
     log_retrieval_query(
         state["run_dir"],
         stage="review",
+        retrieval_scope="candidate_evidence",
         query=query,
         retriever_type=retriever_type,
         filters={"candidate_id": state["candidate_id"], "source_type": "candidate_evidence"},
         limit=8,
         hit_count=len(candidate_results),
         started=started,
+        results=candidate_results,
+        supporting_count=candidate_supporting,
+        source_type_available_counts=_source_type_available_counts(
+            chunks,
+            candidate_id=state["candidate_id"],
+            source_type="candidate_evidence",
+        ),
     )
+    merge_started = perf_counter()
     results = _dedupe_results([*candidate_results, *jd_results])
     supporting = [result for result in results if _is_supporting_evidence(result)]
     evidence_count = len(supporting)
     threshold = int(state.get("evidence_threshold") or EVIDENCE_THRESHOLD)
+    log_retrieval_query(
+        state["run_dir"],
+        stage="review",
+        retrieval_scope="combined_deduped",
+        query=query,
+        retriever_type=retriever_type,
+        filters={"candidate_id": state["candidate_id"], "jd_id": jd_id, "combined": True},
+        limit=8,
+        hit_count=len(results),
+        started=merge_started,
+        results=results,
+        supporting_count=evidence_count,
+        source_type_available_counts=_combined_source_type_available_counts(
+            chunks,
+            candidate_id=state["candidate_id"],
+            jd_id=jd_id,
+        ),
+        raw_hit_count=len(candidate_results) + len(jd_results),
+        unique_hit_count=len(results),
+    )
     record = {
         "jd_id": jd_id,
         "evidence_count": evidence_count,
@@ -714,6 +749,52 @@ def _search_chunks(
         score = len(overlap) / math.sqrt(max(1, len(query_tokens)) * max(1, len(text_tokens)))
         results.append({"text": chunk["text"], "metadata": metadata, "score": round(score, 6)})
     return sorted(results, key=lambda item: (-item["score"], str(item["metadata"].get("source_id"))))[:limit]
+
+
+def _source_type_available_counts(
+    chunks: list[dict[str, Any]],
+    *,
+    candidate_id: str | None = None,
+    jd_id: str | None = None,
+    source_type: str | None = None,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for chunk in chunks:
+        metadata = chunk["metadata"]
+        if candidate_id and metadata.get("candidate_id") != candidate_id:
+            continue
+        if jd_id and metadata.get("jd_id") != jd_id:
+            continue
+        if source_type and metadata.get("source_type") != source_type:
+            continue
+        chunk_source_type = str(metadata.get("source_type") or "unknown")
+        counts[chunk_source_type] = counts.get(chunk_source_type, 0) + 1
+    return counts
+
+
+def _combined_source_type_available_counts(
+    chunks: list[dict[str, Any]],
+    *,
+    candidate_id: str,
+    jd_id: str,
+) -> dict[str, int]:
+    seen: set[tuple[str, str, str | None]] = set()
+    counts: dict[str, int] = {}
+    for chunk in chunks:
+        metadata = chunk["metadata"]
+        is_candidate_evidence = (
+            metadata.get("candidate_id") == candidate_id and metadata.get("source_type") == "candidate_evidence"
+        )
+        is_jd_scoped = metadata.get("jd_id") == jd_id
+        if not is_candidate_evidence and not is_jd_scoped:
+            continue
+        key = (str(metadata.get("source_type")), str(metadata.get("source_id")), metadata.get("jd_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        chunk_source_type = str(metadata.get("source_type") or "unknown")
+        counts[chunk_source_type] = counts.get(chunk_source_type, 0) + 1
+    return counts
 
 
 def _retrieval_results_to_dicts(results: list[RetrievalResult]) -> list[dict[str, Any]]:

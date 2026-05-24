@@ -278,10 +278,28 @@ export type RunTimelineEvent = {
   query_preview?: string;
   query_chars?: number;
   retriever_type?: string;
+  retrieval_scope?: string;
   filters?: Record<string, unknown>;
   limit?: number;
   hit_count?: number;
+  raw_hit_count?: number;
+  unique_hit_count?: number;
   miss?: boolean;
+  score_distribution?: {
+    min: number;
+    max: number;
+    mean: number;
+    median: number;
+  } | null;
+  hit_source_refs?: Array<{
+    source_type: string | null;
+    source_id: string | null;
+    score: number;
+  }> | null;
+  source_type_hit_counts?: Record<string, number> | null;
+  source_type_available_counts?: Record<string, number>;
+  supporting_hit_count?: number | null;
+  precision?: number | null;
   cli_cv_sources?: number;
   cli_jd_sources?: number;
   resolved_cv_files?: number;

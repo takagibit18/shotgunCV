@@ -379,32 +379,83 @@ def log_graph_node_finished(
     )
 
 
+def _score_distribution(results: list[dict[str, Any]]) -> dict[str, float] | None:
+    scores = [float(r.get("score") or 0.0) for r in results]
+    if not scores:
+        return None
+    sorted_scores = sorted(scores)
+    n = len(sorted_scores)
+    if n % 2 == 1:
+        median = sorted_scores[n // 2]
+    else:
+        median = (sorted_scores[n // 2 - 1] + sorted_scores[n // 2]) / 2.0
+    return {
+        "min": round(min(scores), 4),
+        "max": round(max(scores), 4),
+        "mean": round(sum(scores) / n, 4),
+        "median": round(median, 4),
+    }
+
+
+def _hit_source_refs(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for r in results:
+        meta = r.get("metadata") or {}
+        refs.append({
+            "source_type": meta.get("source_type"),
+            "source_id": meta.get("source_id"),
+            "score": round(float(r.get("score") or 0.0), 4),
+        })
+    return refs
+
+
+def _source_type_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for r in results:
+        st = (r.get("metadata") or {}).get("source_type") or "unknown"
+        counts[st] = counts.get(st, 0) + 1
+    return counts
+
+
 def log_retrieval_query(
     run_dir: Path,
     *,
     stage: LogStageName,
+    retrieval_scope: str,
     query: str,
     retriever_type: str,
     filters: dict[str, Any],
     limit: int,
     hit_count: int,
     started: float,
+    results: list[dict[str, Any]] | None = None,
+    supporting_count: int | None = None,
+    source_type_available_counts: dict[str, int] | None = None,
+    raw_hit_count: int | None = None,
+    unique_hit_count: int | None = None,
 ) -> None:
-    append_event(
-        run_dir,
-        {
-            "event": "retrieval_query",
-            "stage": stage,
-            "query_preview": query[:160],
-            "query_chars": len(query),
-            "retriever_type": retriever_type,
-            "filters": filters,
-            "limit": limit,
-            "hit_count": hit_count,
-            "miss": hit_count == 0,
-            "duration_ms": _duration_ms(started),
-        },
-    )
+    payload: dict[str, Any] = {
+        "event": "retrieval_query",
+        "stage": stage,
+        "retrieval_scope": retrieval_scope,
+        "query_preview": query[:160],
+        "query_chars": len(query),
+        "retriever_type": retriever_type,
+        "filters": filters,
+        "limit": limit,
+        "hit_count": hit_count,
+        "raw_hit_count": raw_hit_count if raw_hit_count is not None else hit_count,
+        "unique_hit_count": unique_hit_count if unique_hit_count is not None else hit_count,
+        "miss": hit_count == 0,
+        "duration_ms": _duration_ms(started),
+        "score_distribution": _score_distribution(results) if results else None,
+        "hit_source_refs": _hit_source_refs(results) if results else None,
+        "source_type_hit_counts": _source_type_counts(results) if results else None,
+        "source_type_available_counts": source_type_available_counts or {},
+        "supporting_hit_count": supporting_count,
+        "precision": None,
+    }
+    append_event(run_dir, payload)
 
 
 def log_index_batch(

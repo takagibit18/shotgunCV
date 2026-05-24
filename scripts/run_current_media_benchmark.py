@@ -73,6 +73,22 @@ def _duration_ms(event: dict[str, Any]) -> float | None:
     return None
 
 
+def _numeric_event_values(events: list[dict[str, Any]], key: str) -> list[float]:
+    return [float(event[key]) for event in events if isinstance(event.get(key), int | float)]
+
+
+def _counter_from_event_maps(events: list[dict[str, Any]], key: str) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    for event in events:
+        values = event.get(key)
+        if not isinstance(values, dict):
+            continue
+        for item_key, value in values.items():
+            if isinstance(value, int | float):
+                counter[str(item_key)] += int(value)
+    return counter
+
+
 def _event_duration_by_stage(events: list[dict[str, Any]], stage: str) -> float | None:
     durations = [
         float(event["duration_ms"])
@@ -108,6 +124,25 @@ def _collect_run_metrics(run_dir: Path, spec: dict[str, Any], repeat_round: int)
     ]
     retrieval_durations = [value for event in retrieval_events if (value := _duration_ms(event)) is not None]
     graph_durations = [value for event in graph_finished if (value := _duration_ms(event)) is not None]
+    retrieval_scopes = Counter(str(event.get("retrieval_scope") or "unknown") for event in retrieval_events)
+    retrieval_misses_by_scope = Counter(
+        str(event.get("retrieval_scope") or "unknown")
+        for event in retrieval_events
+        if int(event.get("hit_count") or 0) == 0
+    )
+    retrieval_supporting_zero_by_scope = Counter(
+        str(event.get("retrieval_scope") or "unknown")
+        for event in retrieval_events
+        if isinstance(event.get("supporting_hit_count"), int | float) and event.get("supporting_hit_count") == 0
+    )
+    for scope in retrieval_scopes:
+        retrieval_misses_by_scope.setdefault(scope, 0)
+        retrieval_supporting_zero_by_scope.setdefault(scope, 0)
+    retrieval_raw_hits = _numeric_event_values(retrieval_events, "raw_hit_count")
+    retrieval_unique_hits = _numeric_event_values(retrieval_events, "unique_hit_count")
+    retrieval_supporting_hits = _numeric_event_values(retrieval_events, "supporting_hit_count")
+    retrieval_source_type_hits = _counter_from_event_maps(retrieval_events, "source_type_hit_counts")
+    retrieval_source_type_available = _counter_from_event_maps(retrieval_events, "source_type_available_counts")
 
     return {
         "run_id": run_dir.name,
@@ -135,6 +170,18 @@ def _collect_run_metrics(run_dir: Path, spec: dict[str, Any], repeat_round: int)
         "retrieval_query_count": len(retrieval_events),
         "retrieval_miss_count": sum(1 for event in retrieval_events if int(event.get("hit_count") or 0) == 0),
         "retrieval_duration_ms": _summary(retrieval_durations),
+        "retrieval_scope_distribution": dict(retrieval_scopes),
+        "retrieval_miss_count_by_scope": dict(retrieval_misses_by_scope),
+        "retrieval_combined_query_count": retrieval_scopes.get("combined_deduped", 0),
+        "retrieval_raw_hit_count": _summary(retrieval_raw_hits),
+        "retrieval_unique_hit_count": _summary(retrieval_unique_hits),
+        "retrieval_supporting_hit_count": _summary(retrieval_supporting_hits),
+        "retrieval_supporting_zero_count": sum(
+            1 for event in retrieval_events if isinstance(event.get("supporting_hit_count"), int | float) and event.get("supporting_hit_count") == 0
+        ),
+        "retrieval_supporting_zero_count_by_scope": dict(retrieval_supporting_zero_by_scope),
+        "retrieval_source_type_hit_counts": dict(retrieval_source_type_hits),
+        "retrieval_source_type_available_counts": dict(retrieval_source_type_available),
         "graph_node_finished_count": len(graph_finished),
         "graph_node_duration_ms": _summary(graph_durations),
         "review_apply_decision_distribution": dict(Counter(str(item.get("apply_decision", "unknown")) for item in review_decisions)),
@@ -157,6 +204,14 @@ def _aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     media = Counter()
     decisions = Counter()
     gates = Counter()
+    retrieval_scopes = Counter()
+    retrieval_misses_by_scope = Counter()
+    retrieval_supporting_zero_by_scope = Counter()
+    retrieval_source_type_hits = Counter()
+    retrieval_source_type_available = Counter()
+    retrieval_raw_hit_avgs: list[float] = []
+    retrieval_unique_hit_avgs: list[float] = []
+    retrieval_supporting_hit_avgs: list[float] = []
 
     for item in runs:
         by_bucket[item["bucket"]].append(item)
@@ -166,10 +221,21 @@ def _aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
         media.update(item.get("extraction_media_type_distribution", {}))
         decisions.update(item.get("review_apply_decision_distribution", {}))
         gates.update(item.get("review_gate_status_distribution", {}))
+        retrieval_scopes.update(item.get("retrieval_scope_distribution", {}))
+        retrieval_misses_by_scope.update(item.get("retrieval_miss_count_by_scope", {}))
+        retrieval_supporting_zero_by_scope.update(item.get("retrieval_supporting_zero_count_by_scope", {}))
+        retrieval_source_type_hits.update(item.get("retrieval_source_type_hit_counts", {}))
+        retrieval_source_type_available.update(item.get("retrieval_source_type_available_counts", {}))
         if isinstance(item.get("extracted_text_length", {}).get("avg"), int | float):
             text_length_counts.append(float(item["extracted_text_length"]["avg"]))
         if isinstance(item.get("retrieval_duration_ms", {}).get("avg"), int | float):
             retrieval_durations.append(float(item["retrieval_duration_ms"]["avg"]))
+        if isinstance(item.get("retrieval_raw_hit_count", {}).get("avg"), int | float):
+            retrieval_raw_hit_avgs.append(float(item["retrieval_raw_hit_count"]["avg"]))
+        if isinstance(item.get("retrieval_unique_hit_count", {}).get("avg"), int | float):
+            retrieval_unique_hit_avgs.append(float(item["retrieval_unique_hit_count"]["avg"]))
+        if isinstance(item.get("retrieval_supporting_hit_count", {}).get("avg"), int | float):
+            retrieval_supporting_hit_avgs.append(float(item["retrieval_supporting_hit_count"]["avg"]))
         if isinstance(item.get("graph_node_duration_ms", {}).get("avg"), int | float):
             graph_durations.append(float(item["graph_node_duration_ms"]["avg"]))
 
@@ -192,6 +258,16 @@ def _aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "retrieval_query_count": sum(int(item["retrieval_query_count"]) for item in runs),
         "retrieval_miss_count": sum(int(item["retrieval_miss_count"]) for item in runs),
         "retrieval_duration_ms_avg_by_run": _summary(retrieval_durations),
+        "retrieval_scope_distribution": dict(retrieval_scopes),
+        "retrieval_miss_count_by_scope": dict(retrieval_misses_by_scope),
+        "retrieval_combined_query_count": sum(int(item.get("retrieval_combined_query_count", 0)) for item in runs),
+        "retrieval_supporting_zero_count": sum(int(item.get("retrieval_supporting_zero_count", 0)) for item in runs),
+        "retrieval_supporting_zero_count_by_scope": dict(retrieval_supporting_zero_by_scope),
+        "retrieval_raw_hit_count_avg_by_run": _summary(retrieval_raw_hit_avgs),
+        "retrieval_unique_hit_count_avg_by_run": _summary(retrieval_unique_hit_avgs),
+        "retrieval_supporting_hit_count_avg_by_run": _summary(retrieval_supporting_hit_avgs),
+        "retrieval_source_type_hit_counts": dict(retrieval_source_type_hits),
+        "retrieval_source_type_available_counts": dict(retrieval_source_type_available),
         "graph_node_finished_count": sum(int(item["graph_node_finished_count"]) for item in runs),
         "graph_node_duration_ms_avg_by_run": _summary(graph_durations),
         "review_apply_decision_distribution": dict(decisions),
