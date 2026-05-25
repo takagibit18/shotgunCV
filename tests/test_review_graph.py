@@ -6,7 +6,7 @@ from pathlib import Path
 from shotguncv_cli.main import run
 
 
-def test_review_command_fans_out_retrieve_and_inspect_per_jd(tmp_path: Path) -> None:
+def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_path: Path) -> None:
     run_dir = _write_review_ready_artifacts(tmp_path)
 
     exit_code, output = run(["review", "--run-dir", str(run_dir)])
@@ -14,8 +14,10 @@ def test_review_command_fans_out_retrieve_and_inspect_per_jd(tmp_path: Path) -> 
     assert exit_code == 0, output
     review = _read_json(run_dir / "review" / "post_run_review.json")
     assert review["schema_version"] == "post-run-review-v2"
-    assert review["parallel_topology"]["retrieve"] == "fanout_by_jd"
-    assert review["parallel_topology"]["inspect"] == "fanout_by_jd"
+    assert review["graph_runtime"] == "small-batch-serial"
+    assert review["parallel_topology"]["retrieve"] == "serial_by_jd"
+    assert review["parallel_topology"]["inspect"] == "serial_by_jd"
+    assert review["parallel_topology"]["small_batch_bypass_max_jds"] == 3
     assert review["parallel_topology"]["evidence_threshold"] == 3
     assert review["jd_ids"] == ["jd-high", "jd-low"]
 
@@ -27,7 +29,7 @@ def test_review_command_fans_out_retrieve_and_inspect_per_jd(tmp_path: Path) -> 
     assert {event["jd_id"] for event in retrieve_events} == {"jd-high", "jd-low"}
     assert {event["jd_id"] for event in inspect_events} == {"jd-high"}
     assert {event["jd_id"] for event in gap_events} == {"jd-low"}
-    assert all(event["graph_runtime"].startswith("langgraph") for event in retrieve_events)
+    assert all(event["graph_runtime"] == "small-batch-serial" for event in retrieve_events)
     assert all(isinstance(event["duration_ms"], int) for event in retrieve_events)
 
     retrieval_queries = [event for event in events if event["event"] == "retrieval_query" and event["stage"] == "review"]
@@ -49,6 +51,43 @@ def test_review_command_fans_out_retrieve_and_inspect_per_jd(tmp_path: Path) -> 
     combined_events = [event for event in retrieval_queries if event["retrieval_scope"] == "combined_deduped"]
     assert {event["filters"]["jd_id"] for event in combined_events} == {"jd-high", "jd-low"}
     assert all(event["unique_hit_count"] == event["hit_count"] for event in combined_events)
+
+
+def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
+    run_dir = _write_review_ready_artifacts(tmp_path)
+    jd_profiles = _read_json(run_dir / "analyze" / "jd_profiles.json")
+    jd_profiles.extend(
+        [
+            {
+                "jd_id": "jd-extra-1",
+                "title": "Finance Operations Analyst",
+                "company": "Finance Co",
+                "requirements": ["reconciliation", "budgeting"],
+                "keywords": ["finance", "budgeting"],
+                "must_have_requirements": ["Finance operations"],
+                "interview_focus_areas": ["budget controls"],
+            },
+            {
+                "jd_id": "jd-extra-2",
+                "title": "Sales Operations Analyst",
+                "company": "Sales Co",
+                "requirements": ["CRM", "pipeline reporting"],
+                "keywords": ["sales", "CRM"],
+                "must_have_requirements": ["Sales operations"],
+                "interview_focus_areas": ["pipeline operations"],
+            },
+        ]
+    )
+    _write_json(run_dir / "analyze" / "jd_profiles.json", jd_profiles)
+
+    exit_code, output = run(["review", "--run-dir", str(run_dir)])
+
+    assert exit_code == 0, output
+    review = _read_json(run_dir / "review" / "post_run_review.json")
+    assert review["graph_runtime"].startswith("langgraph")
+    assert review["parallel_topology"]["retrieve"] == "fanout_by_jd"
+    assert review["parallel_topology"]["inspect"] == "fanout_by_jd"
+    assert review["jd_ids"] == ["jd-high", "jd-low", "jd-extra-1", "jd-extra-2"]
 
 
 def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> None:
