@@ -12,7 +12,7 @@ from shotguncv_core.storage import ensure_directory, to_plain_data
 
 
 LOG_PATH = Path("logs") / "run_events.jsonl"
-LogStageName = StageName | Literal["index", "retrieve", "review"]
+LogStageName = StageName | Literal["index", "retrieve", "review", "interview"]
 _LOG_WRITE_LOCK = Lock()
 
 
@@ -147,10 +147,12 @@ def log_model_resolved(
 def log_llm_call_started(
     run_dir: Path,
     *,
-    stage: StageName,
+    stage: LogStageName,
     operation: str,
     provider: str,
     model: str,
+    prompt_tokens: int | None = None,
+    max_completion_tokens: int | None = None,
 ) -> float:
     append_event(
         run_dir,
@@ -160,6 +162,8 @@ def log_llm_call_started(
             "operation": operation,
             "provider": provider,
             "model": model,
+            "prompt_tokens": prompt_tokens,
+            "max_completion_tokens": max_completion_tokens,
         },
     )
     return perf_counter()
@@ -168,7 +172,7 @@ def log_llm_call_started(
 def log_llm_call_finished(
     run_dir: Path,
     *,
-    stage: StageName,
+    stage: LogStageName,
     operation: str,
     provider: str,
     model: str,
@@ -177,6 +181,9 @@ def log_llm_call_finished(
     completion_tokens: int | None,
     total_tokens: int | None,
     output_parse_status: str,
+    max_completion_tokens: int | None = None,
+    status: str = "ok",
+    fallback_used: bool = False,
 ) -> None:
     append_event(
         run_dir,
@@ -187,10 +194,13 @@ def log_llm_call_finished(
             "provider": provider,
             "model": model,
             "duration_ms": _duration_ms(started),
+            "status": status,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
+            "max_completion_tokens": max_completion_tokens,
             "output_parse_status": output_parse_status,
+            "fallback_used": fallback_used,
         },
     )
 
@@ -198,7 +208,7 @@ def log_llm_call_finished(
 def log_llm_call_failed(
     run_dir: Path,
     *,
-    stage: StageName,
+    stage: LogStageName,
     operation: str,
     provider: str,
     model: str,
@@ -220,6 +230,78 @@ def log_llm_call_failed(
             "fallback_used": fallback_used,
         },
     )
+
+
+def log_interview_question_modified(
+    run_dir: Path,
+    *,
+    session_id: str,
+    question_id: str,
+    jd_id: str,
+) -> None:
+    _log_interview_event(
+        run_dir,
+        event="interview_question_modified",
+        session_id=session_id,
+        question_id=question_id,
+        jd_id=jd_id,
+    )
+
+
+def log_interview_question_deleted(
+    run_dir: Path,
+    *,
+    session_id: str,
+    question_id: str,
+    jd_id: str,
+) -> None:
+    _log_interview_event(
+        run_dir,
+        event="interview_question_deleted",
+        session_id=session_id,
+        question_id=question_id,
+        jd_id=jd_id,
+    )
+
+
+def log_interview_answer_submitted(
+    run_dir: Path,
+    *,
+    session_id: str,
+    question_id: str,
+    jd_id: str,
+    answer_chars: int,
+) -> None:
+    _log_interview_event(
+        run_dir,
+        event="interview_answer_submitted",
+        session_id=session_id,
+        question_id=question_id,
+        jd_id=jd_id,
+        answer_chars=answer_chars,
+    )
+
+
+def log_interview_evaluation_generated(
+    run_dir: Path,
+    *,
+    session_id: str,
+    question_id: str,
+    jd_id: str,
+    score: float,
+) -> None:
+    _log_interview_event(
+        run_dir,
+        event="interview_evaluation_generated",
+        session_id=session_id,
+        question_id=question_id,
+        jd_id=jd_id,
+        score=score,
+    )
+
+
+def _log_interview_event(run_dir: Path, *, event: str, **payload: Any) -> None:
+    append_event(run_dir, {"event": event, "stage": "interview", **payload})
 
 
 def log_tool_call_finished(

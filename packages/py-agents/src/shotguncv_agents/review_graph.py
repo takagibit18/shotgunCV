@@ -8,6 +8,10 @@ from pathlib import Path
 from time import perf_counter
 from typing import Annotated, Any, TypedDict
 
+from shotguncv_agents.interview_llm import (
+    generate_interview_questions as generate_llm_interview_questions,
+    generate_reference_answers as generate_llm_reference_answers,
+)
 from shotguncv_core.rag.retrieval import PgVectorRetriever, RetrievalResult
 from shotguncv_core.run_logs import (
     log_fallback_used,
@@ -173,7 +177,8 @@ def _run_langgraph(state: _ReviewGraphState) -> _ReviewGraphState | None:
 
 
 def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
-    state = _apply_update(state, _logged_node("load_run_context", _load_run_context)({**state, "graph_runtime": "threadpool-fallback"}))
+    state = {**state, "graph_runtime": "threadpool-fallback"}
+    state = _apply_update(state, _logged_node("load_run_context", _load_run_context)(state))
     shared_context = _shared_branch_context(state)
     retrieval_states: list[_ReviewGraphState] = []
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(state["jd_ids"])))) as executor:
@@ -230,7 +235,7 @@ def _shared_branch_context(state: _ReviewGraphState) -> dict[str, Any]:
         "requested_jd_id": state.get("requested_jd_id"),
         "database_url": state.get("database_url"),
         "evidence_threshold": state["evidence_threshold"],
-        "graph_runtime": state["graph_runtime"],
+        "graph_runtime": state.get("graph_runtime", "unknown"),
         "run_id": state["run_id"],
         "candidate_id": state["candidate_id"],
         "candidate_profile": state["candidate_profile"],
@@ -497,31 +502,33 @@ def _generate_interview_questions(state: _ReviewGraphState) -> _ReviewGraphState
     questions: list[dict[str, Any]] = []
     for jd_id in sufficient_jd_ids:
         jd = _first_match(state["jd_profiles"], jd_id=jd_id) or {}
-        focus_items = jd.get("interview_focus_areas") or jd.get("keywords") or ["项目证据"]
-        for focus in focus_items[:3]:
-            questions.append(
-                {
-                    "jd_id": jd_id,
-                    "question": f"请说明你在 {focus} 相关项目中的具体职责、证据和结果。",
-                    "evidence_citations": _citations_for_jd(state, jd_id)[:2],
-                }
+        questions.extend(
+            generate_llm_interview_questions(
+                run_dir=state["run_dir"],
+                jd_id=jd_id,
+                jd_profile=jd,
+                evidence_citations=_citations_for_jd(state, jd_id),
             )
+        )
     return {"interview_questions": questions}
 
 
 def _generate_reference_answers(state: _ReviewGraphState) -> _ReviewGraphState:
     jd_id = _node_jd_id(state)
     answers: list[dict[str, Any]] = []
+    questions_by_jd: dict[str, list[dict[str, Any]]] = {}
     for question in state.get("interview_questions", []):
-        if jd_id and question.get("jd_id") != jd_id:
+        question_jd_id = str(question.get("jd_id") or "")
+        if jd_id and question_jd_id != jd_id:
             continue
-        answers.append(
-            {
-                "jd_id": question["jd_id"],
-                "question": question["question"],
-                "answer": "围绕已验证经历回答，先说任务背景，再说个人动作，最后说明可复核结果；不要补充没有证据的硬事实。",
-                "evidence_citations": question.get("evidence_citations", []),
-            }
+        questions_by_jd.setdefault(question_jd_id, []).append(question)
+    for question_jd_id, questions in questions_by_jd.items():
+        answers.extend(
+            generate_llm_reference_answers(
+                run_dir=state["run_dir"],
+                questions=questions,
+                evidence_citations=_citations_for_jd(state, question_jd_id),
+            )
         )
     return {"reference_answers": answers}
 
