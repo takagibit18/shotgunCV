@@ -53,6 +53,7 @@ DB_COMMAND_DESCRIPTIONS = {
     "index": "Index existing run artifacts into the optional PostgreSQL projection.",
     "retrieve": "Run a metadata-preserving retrieval smoke query against the optional projection.",
     "review": "Generate post-run review and interview-prep artifacts from an existing run.",
+    "interview": "Run a resumable HITL interview session from review artifacts.",
 }
 
 
@@ -173,6 +174,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional environment variable for PostgreSQL retrieval during review.",
     )
 
+    interview_parser = subparsers.add_parser(
+        "interview",
+        help=DB_COMMAND_DESCRIPTIONS["interview"],
+        description=DB_COMMAND_DESCRIPTIONS["interview"],
+    )
+    interview_parser.set_defaults(command_name="interview")
+    interview_parser.add_argument("--run-dir", type=Path, required=True, help="Workspace directory for staged artifacts.")
+    interview_parser.add_argument("--jd-id", required=False, help="Optional JD id to interview.")
+    interview_parser.add_argument("--auto-approve", action="store_true", help="Accept generated questions and complete the simulated loop.")
+    interview_parser.add_argument("--answers-json", type=Path, required=False, help="Optional JSON object mapping question ids to answers.")
+    interview_parser.add_argument(
+        "--reviewed-questions-json",
+        type=Path,
+        required=False,
+        help="Optional reviewed questions JSON for modified/deleted question simulation.",
+    )
+
     return parser
 
 
@@ -217,6 +235,7 @@ def _execute_command(command_name: str, args: argparse.Namespace, argv: list[str
         "index": _run_index,
         "retrieve": _run_retrieve,
         "review": _run_review,
+        "interview": _run_interview,
     }
     print(handlers[command_name](args) if command_name != "run" else _run_full_pipeline(args, argv))
 
@@ -399,6 +418,28 @@ def _run_review(args: argparse.Namespace) -> str:
         raise
     log_stage_finished(args.run_dir, "review", stage_started)
     return f"Review completed: `{args.run_dir / 'review' / 'post_run_review.json'}`, jd_count={len(review['jd_ids'])}"
+
+
+def _run_interview(args: argparse.Namespace) -> str:
+    from shotguncv_agents.interview_graph import run_interview_session
+
+    stage_started = log_stage_started(args.run_dir, "interview")
+    try:
+        session = run_interview_session(
+            args.run_dir,
+            jd_id=args.jd_id,
+            auto_approve=args.auto_approve,
+            answers_json=args.answers_json,
+            reviewed_questions_json=args.reviewed_questions_json,
+        )
+    except Exception as exc:
+        log_stage_failed(args.run_dir, "interview", stage_started, exc)
+        raise
+    log_stage_finished(args.run_dir, "interview", stage_started)
+    return (
+        f"Interview session {session['status']}: `{args.run_dir / 'interview' / 'session.json'}`, "
+        f"questions={session.get('question_count', 0)}, evaluations={session.get('evaluation_count', 0)}"
+    )
 
 
 def _resolve_start_stage(args: argparse.Namespace) -> StageName:

@@ -112,6 +112,31 @@ def test_review_graph_generates_only_for_sufficient_evidence_jds_with_timing_bre
     assert {item["jd_id"] for item in review["revision_tasks"]} == {"jd-high"}
 
 
+def test_review_graph_uses_rag_llm_generation_and_logs_llm_budget(tmp_path: Path) -> None:
+    run_dir = _write_review_ready_artifacts(tmp_path)
+
+    exit_code, output = run(["review", "--run-dir", str(run_dir)])
+
+    assert exit_code == 0, output
+    review = _read_json(run_dir / "review" / "post_run_review.json")
+    question = review["interview_questions"][0]
+    answer = review["reference_answers"][0]
+    assert question["generation"]["provider"] == "deterministic"
+    assert question["generation"]["mode"] == "rag_context"
+    assert question["evidence_citations"]
+    assert "LangGraph" in question["question"]
+    assert answer["provenance_citation_count"] >= 1
+
+    events = _read_events(run_dir)
+    llm_finished = [event for event in events if event["event"] == "llm_call_finished" and event["stage"] == "review"]
+    assert {event["operation"] for event in llm_finished} >= {
+        "generate_interview_questions",
+        "generate_reference_answers",
+    }
+    assert all(event["prompt_tokens"] <= 3000 for event in llm_finished)
+    assert all(event["max_completion_tokens"] <= 1000 for event in llm_finished)
+
+
 def _write_review_ready_artifacts(tmp_path: Path) -> Path:
     run_dir = tmp_path / "review-run"
     for stage in ["analyze", "evaluate", "plan"]:

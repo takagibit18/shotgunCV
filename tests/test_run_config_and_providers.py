@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from threading import Lock
 from urllib.error import HTTPError
 
 import pytest
@@ -590,7 +591,8 @@ def _write_run_config(run_dir: Path, payload: dict[str, object]) -> None:
 
 
 def _fake_openai_urlopen(messages: list[str]):
-    responses = iter(messages)
+    responses = list(messages)
+    lock = Lock()
 
     class _Response:
         def __init__(self, content: str) -> None:
@@ -608,9 +610,40 @@ def _fake_openai_urlopen(messages: list[str]):
     def _urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
         if timeout == 0:
             raise HTTPError("https://api.openai.com/v1/chat/completions", 500, "missing timeout", None, None)
-        return _Response(next(responses))
+        wants_json = _request_wants_json(req)
+        with lock:
+            if not responses:
+                raise StopIteration
+            for index, message in enumerate(responses):
+                if _looks_json(message) == wants_json:
+                    return _Response(responses.pop(index))
+            return _Response(responses.pop(0))
 
     return _urlopen
+
+
+def _request_wants_json(req: object) -> bool:
+    data = getattr(req, "data", b"")
+    if isinstance(data, bytes):
+        text = data.decode("utf-8", errors="ignore")
+    else:
+        text = str(data)
+    return any(
+        token in text
+        for token in [
+            "candidate_profile",
+            "jd_profiles",
+            "resume_variants",
+            "role_fit",
+            "evidence_quality",
+            "application_worthiness",
+        ]
+    )
+
+
+def _looks_json(message: str) -> bool:
+    text = message.strip()
+    return text.startswith("{") or text.startswith("[")
 
 
 def _fake_openai_urlopen_capture(messages: list[str], capture: dict[str, str]):

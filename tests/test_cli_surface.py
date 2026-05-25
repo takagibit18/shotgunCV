@@ -19,6 +19,7 @@ def test_cli_exposes_v1_command_family() -> None:
         "index",
         "retrieve",
         "review",
+        "interview",
     }
 
 
@@ -33,6 +34,7 @@ def test_cli_run_lists_commands() -> None:
     assert "index" in output
     assert "retrieve" in output
     assert "review" in output
+    assert "interview" in output
 
 
 def test_cli_run_help_lists_image_extraction_options() -> None:
