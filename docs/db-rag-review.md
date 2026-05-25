@@ -146,3 +146,60 @@ Indeed MCP 岗位导入属于 RAG、数据库投影、LangGraph 复盘 Agent 等
 PgVector retrieve 采样已扩展到 30 条代表查询，覆盖高相关 AI/Agent/RAG、中相关产品/数据/客户成功、低相关 HR/法务/销售/财务/市场、图片 OCR、PDF 和无关边界 query；30/30 条均返回 5 个结果，miss 率 0；PgVector retrieve 耗时 avg 17.47ms、p50 16ms、p95 30ms、p99 33ms。
 
 分流决策分布已纳入正式 baseline。204 个 JD 决策样本中，strategy/review 决策分布为 `apply=51`、`hold=111`、`needs_review=42`；preflight 分布为 `pass=162`、`needs_review=42`；`final_overall_score` avg 0.4185、p50 0.55、p95 0.84，作为后续按匹配度分流阈值的基准。
+
+## 2026-05-25 埋点与 retriever NLP 评估补齐
+
+本轮补齐了 post-run review 与 retriever 质量评估的可观测闭环，目标是把“能检索到结果”拆成可复核的事件、标签覆盖和排序质量指标。
+
+埋点补齐包括：
+- `retrieval_query` 事件继续作为检索主事件，记录 `query_preview`、`query_chars`、`retriever_type`、`retrieval_scope`、`filters`、`limit`、`hit_count`、`miss`、`duration_ms`。
+- `retrieval_query` 扩展了检索质量观测字段：`raw_hit_count`、`unique_hit_count`、`supporting_hit_count`、`score_distribution`、`hit_source_refs`、`source_type_hit_counts`、`source_type_available_counts`、`precision`。
+- `graph_node_finished` 记录 review 节点耗时与输出摘要，并带有 `timing_ms.business`、`timing_ms.log_write`，用于区分节点业务耗时和 JSONL 日志写入成本。
+- interview/review LLM 生成链路记录 `prompt_tokens`、`completion_tokens`、`total_tokens`、`max_completion_tokens`、`fallback_used` 和 `status`，用于确认后续 RAG 生成是否引入额外 token 成本。
+
+retriever NLP/IR 评估补齐包括：
+- 新增 retriever golden schema `retriever-golden-v1`，支持 `queries`、`query_id`、`expected_chunks`、`metrics` 与 `default_k_values`。
+- 评估脚本输出 `retriever-metrics-v1` 报告，包含 `label_coverage`、`label_inventory`、逐 query `hits`、`ranked_ids`、`ranked_relevance` 和聚合指标。
+- 当前支持的排序质量指标为 `precision_at_k`、`recall_at_k`、`mrr`、`ndcg_at_k`。
+- golden questions 与评估输出属于本地评估资产，已通过 `.gitignore` 忽略 `fixtures/golden_*.json` 与 `baseline/` 下的输出，不进入仓库提交。
+
+本地评估使用 `baseline/runs-formal-20260520` 中 3 个 full-raw repeat：
+- `baseline-formal-r1-full-raw-library-20260520`
+- `baseline-formal-r2-full-raw-library-20260520`
+- `baseline-formal-r3-full-raw-library-20260520`
+
+评估结果写入本地 `baseline/retriever-quality-20260525-full-raw/aggregate.json`。本轮聚合结果：
+- `run_count=3`
+- `query_evaluations=30`
+- `chunk_count_total=1926`
+- `missing_expected_chunk_refs=0`
+- `mrr_avg_by_run=0.8`
+- `precision_at_k`: `@1=0.7`, `@3=0.5667`, `@5=0.36`, `@10=0.2`
+- `recall_at_k`: `@1=0.35`, `@3=0.85`, `@5=0.9`, `@10=1.0`
+- `ndcg_at_k`: `@1=0.7`, `@3=0.8`, `@5=0.8264`, `@10=0.8667`
+
+结论：retriever 评估链路已经从“只看是否返回结果”推进到可复核的 label 覆盖与排序质量评估。full-raw baseline 上 `missing_expected_chunk_refs=0`，说明 golden target 已经对齐真实 `retrieval_chunks`；`MRR=0.8`、`precision@1=0.7`、`recall@10=1.0` 表明当前 InMemory retriever 在该样本上可作为 baseline sanity check 与回归保护使用。该结果不作为全 21-run 的全局质量结论。
+
+## 2026-05-25 接下来改进顺序安排
+
+在 retriever 细粒度埋点和 full-raw 本地 NLP/IR 评估链路补齐后，下一轮改进按以下顺序推进：
+
+1. Evidence gate 阈值 A/B 验证
+
+   优先验证 `result_count < threshold` 这条证据门槛，而不是先改图结构。当前阈值固定为 3，并且已有 30 个 JD 进入 low-evidence / gap report 路径；新补齐的 `retrieval_query` 细粒度字段、`source_type` 命中分布和 `graph_node_finished.timing_ms` 已经足够支撑 `2/3/4/5` 四组阈值对比。该步骤的目标是确认不同阈值下 gap report 数量、review 决策分布、retrieval supporting hit 分布和节点耗时是否合理。
+
+2. 小批量 bypass
+
+   在阈值口径确认后，再处理小 JD 数 bucket 的固定成本问题。3-4 JD 样本下 fan-out 收益很弱，graph 编译、state 序列化和调度成本占比过高；因此可在 `JD <= 3` 时绕过 fan-out，使用串行路径，目标是降低小批量 review 耗时，同时保持 run artifact 和日志语义不变。
+
+3. 保守节点合并
+
+   节点合并放在 bypass 之后，只合并确认没有外部副作用的纯数据段。当前 `generate_interview_questions` 和 `generate_reference_answers` 已调用 `interview_llm`，并记录 token、fallback 和 status，不应按旧判断当作纯数据变换直接合并。任何合并都必须保留现有事件、LLM 调用边界和 artifact 输出。
+
+4. Graph 编译缓存
+
+   graph 结构稳定后，再考虑模块级缓存 `StateGraph.compile()` 结果。该项属于工程优化，优先级低于阈值验证、小批量 bypass 和保守节点合并。
+
+5. 检索 hit rate 修复
+
+   检索 hit rate 修复放在真实 embedding / pgvector 路径进入实现期之后。当前 deterministic SHA-256 embedding 无法表达语义相似性，过早做 query rewrite 或 fallback 调整容易优化到临时向量实现上；该方向不作为当前近端性能闭环的第一步。
