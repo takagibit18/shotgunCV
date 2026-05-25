@@ -23,6 +23,7 @@ from shotguncv_core.storage import dump_json, load_json, stage_dir
 
 
 EVIDENCE_THRESHOLD = 3
+SMALL_BATCH_BYPASS_MAX_JDS = 3
 GRAPH_NAME = "post_run_review"
 REVIEW_SKIPPED_NODES = [
     "inspect_score_and_gates",
@@ -81,10 +82,20 @@ def run_post_run_review(
         "decision_review": [],
         "evidence_gap_reports": [],
     }
+    if 0 < len(_preview_jd_ids(run_dir, jd_id=jd_id)) <= SMALL_BATCH_BYPASS_MAX_JDS:
+        return _run_small_batch_serial(initial_state)["review"]
     graph_result = _run_langgraph(initial_state)
     if graph_result is not None:
         return graph_result["review"]
     return _run_threadpool_fallback(initial_state)["review"]
+
+
+def _preview_jd_ids(run_dir: Path, *, jd_id: str | None) -> list[str]:
+    jd_profiles = _read_json(run_dir / "analyze" / "jd_profiles.json", [])
+    jd_ids = [str(item.get("jd_id")) for item in jd_profiles if item.get("jd_id")]
+    if jd_id:
+        return [item for item in jd_ids if item == jd_id]
+    return jd_ids
 
 
 def _run_langgraph(state: _ReviewGraphState) -> _ReviewGraphState | None:
@@ -217,6 +228,40 @@ def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
         state["decision_review"].extend(item.get("decision_review", []))
         state["evidence_gap_reports"].extend(item.get("evidence_gap_reports", []))
     state = _apply_update(state, _logged_node("merge_review_paths", _merge_review_paths)(state))
+    if _sufficient_jd_ids(state):
+        state = _apply_update(state, _logged_node("generate_interview_questions", _generate_interview_questions)(state))
+        state = _apply_update(state, _logged_node("generate_reference_answers", _generate_reference_answers)(state))
+        state = _apply_update(state, _logged_node("generate_revision_tasks", _generate_revision_tasks)(state))
+    state = _apply_update(state, _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy)(state))
+    return _apply_update(state, _logged_node("write_review_artifact", _write_review_artifact)(state))
+
+
+def _run_small_batch_serial(state: _ReviewGraphState) -> _ReviewGraphState:
+    state = {**state, "graph_runtime": "small-batch-serial"}
+    state = _apply_update(state, _logged_node("load_run_context", _load_run_context)(state))
+    shared_context = _shared_branch_context(state)
+
+    for jd_id in state["jd_ids"]:
+        retrieval_state = _logged_node("retrieve_relevant_evidence", _retrieve_relevant_evidence)(
+            {**shared_context, "jd_id": jd_id}
+        )
+        state["retrieval_results"].extend(retrieval_state.get("retrieval_results", []))
+        state["retrieval_misses"].extend(retrieval_state.get("retrieval_misses", []))
+        state["evidence_records"].extend(retrieval_state.get("evidence_records", []))
+    state = _apply_update(state, _logged_node("merge_retrieval_results", _merge_retrieval_results)(state))
+
+    records = _evidence_records_by_jd(state)
+    for jd_id in state["jd_ids"]:
+        record = records[jd_id]
+        node = _inspect_score_and_gates if record["evidence_status"] == "sufficient" else _generate_evidence_gap_report
+        name = "inspect_score_and_gates" if record["evidence_status"] == "sufficient" else "generate_evidence_gap_report"
+        branch_state = _logged_node(name, node)(
+            {**_shared_branch_context(state), "jd_id": jd_id, "evidence_record": record}
+        )
+        state["decision_review"].extend(branch_state.get("decision_review", []))
+        state["evidence_gap_reports"].extend(branch_state.get("evidence_gap_reports", []))
+    state = _apply_update(state, _logged_node("merge_review_paths", _merge_review_paths)(state))
+
     if _sufficient_jd_ids(state):
         state = _apply_update(state, _logged_node("generate_interview_questions", _generate_interview_questions)(state))
         state = _apply_update(state, _logged_node("generate_reference_answers", _generate_reference_answers)(state))
@@ -583,13 +628,7 @@ def _write_review_artifact(state: _ReviewGraphState) -> _ReviewGraphState:
         "jd_ids": state["jd_ids"],
         "provider": {"provider": "deterministic-review-agent", "model": "artifact-rag-v2"},
         "graph_runtime": state.get("graph_runtime", "unknown"),
-        "parallel_topology": {
-            "retrieve": "fanout_by_jd",
-            "inspect": "fanout_by_jd",
-            "generation": "run_level_evidence_sufficient_only",
-            "evidence_threshold": state["evidence_threshold"],
-            "fan_in_nodes": ["merge_retrieval_results", "merge_review_paths"],
-        },
+        "parallel_topology": _parallel_topology(state),
         "decision_review": decisions,
         "retrieval": {
             "result_count": len(state.get("retrieval_results", [])),
@@ -607,6 +646,25 @@ def _write_review_artifact(state: _ReviewGraphState) -> _ReviewGraphState:
     dump_json(review_dir / "post_run_review.json", review)
     (review_dir / "interview_prep.md").write_text(_render_interview_prep(review), encoding="utf-8")
     return {"review": review}
+
+
+def _parallel_topology(state: _ReviewGraphState) -> dict[str, Any]:
+    if state.get("graph_runtime") == "small-batch-serial":
+        return {
+            "retrieve": "serial_by_jd",
+            "inspect": "serial_by_jd",
+            "generation": "run_level_evidence_sufficient_only",
+            "evidence_threshold": state["evidence_threshold"],
+            "small_batch_bypass_max_jds": SMALL_BATCH_BYPASS_MAX_JDS,
+            "fan_in_nodes": ["merge_retrieval_results", "merge_review_paths"],
+        }
+    return {
+        "retrieve": "fanout_by_jd",
+        "inspect": "fanout_by_jd",
+        "generation": "run_level_evidence_sufficient_only",
+        "evidence_threshold": state["evidence_threshold"],
+        "fan_in_nodes": ["merge_retrieval_results", "merge_review_paths"],
+    }
 
 
 def _build_retrieval_chunks(

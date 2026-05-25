@@ -250,6 +250,15 @@ retriever NLP/IR 评估补齐包括：
 
    在阈值口径确认后，再处理小 JD 数 bucket 的固定成本问题。3-4 JD 样本下 fan-out 收益很弱，graph 编译、state 序列化和调度成本占比过高；因此可在 `JD <= 3` 时绕过 fan-out，使用串行路径，目标是降低小批量 review 耗时，同时保持 run artifact 和日志语义不变。
 
+   本轮已实现保守 bypass：`JD <= 3` 的 post-run review 直接走 `small-batch-serial`，`parallel_topology.retrieve/inspect` 记录为 `serial_by_jd`；`JD >= 4` 继续走原 `langgraph-send` fan-out。串行路径仍执行同一批 review 节点，继续写入 `graph_node_started`、`graph_node_finished`、`retrieval_query`、LLM token/fallback 日志和相同的 review artifact。
+
+   本地验证使用 `baseline/runs-formal-20260520` 中 9 个 small bucket run 重新执行 threshold=3 review，输出写入忽略目录 `baseline/small-batch-bypass-20260525/`，`failure_count=0`。其中只有 `small_image_only` bucket 为 3 JD，实际触发 bypass；两个 4 JD bucket 按保守阈值继续作为 fan-out 对照。与 `baseline/baseline_metrics_formal_20260520.json` 中旧基线对比：
+   - `small_image_only`：旧 fan-out review avg `94.33ms`、p50 `95ms`；新 `small-batch-serial` review avg `76.0ms`、p50 `75ms`，平均耗时下降 `18.33ms`，约 `19.4%`。
+   - `small_high_image_pdf`：4 JD，未触发 bypass，仍为 `langgraph-send`；本轮 review avg `451.67ms`，旧基线 avg `560.0ms`，该差异不计入 bypass 收益。
+   - `small_low_plus_image`：4 JD，未触发 bypass，仍为 `langgraph-send`；本轮 review avg `113.33ms`，旧基线 avg `124.0ms`，该差异不计入 bypass 收益。
+
+   结论：当前保守口径下，实际优化收益只对 `JD <= 3` 生效；已观察到 3-JD bucket 约 `19.4%` review stage 耗时下降，并且 4-JD bucket 没有被误切到串行路径。若后续希望覆盖 4-JD bucket，应单独把阈值从 `<=3` 扩到 `<=4` 后再做一轮对照。
+
 3. 保守节点合并
 
    节点合并放在 bypass 之后，只合并确认没有外部副作用的纯数据段。当前 `generate_interview_questions` 和 `generate_reference_answers` 已调用 `interview_llm`，并记录 token、fallback 和 status，不应按旧判断当作纯数据变换直接合并。任何合并都必须保留现有事件、LLM 调用边界和 artifact 输出。
