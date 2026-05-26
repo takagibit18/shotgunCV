@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from langgraph.graph import StateGraph
+
 from shotguncv_cli.main import run
+import shotguncv_agents.review_graph as review_graph
 
 
 def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_path: Path) -> None:
@@ -17,6 +20,7 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
     assert review["graph_runtime"] == "small-batch-serial"
     assert review["parallel_topology"]["retrieve"] == "serial_by_jd"
     assert review["parallel_topology"]["inspect"] == "serial_by_jd"
+    assert review["parallel_topology"]["fan_in_nodes"] == []
     assert review["parallel_topology"]["small_batch_bypass_max_jds"] == 3
     assert review["parallel_topology"]["evidence_threshold"] == 3
     assert review["jd_ids"] == ["jd-high", "jd-low"]
@@ -25,10 +29,14 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
     retrieve_events = _finished_node_events(events, "retrieve_relevant_evidence")
     inspect_events = _finished_node_events(events, "inspect_score_and_gates")
     gap_events = _finished_node_events(events, "generate_evidence_gap_report")
+    merge_retrieval_events = _finished_node_events(events, "merge_retrieval_results")
+    merge_review_events = _finished_node_events(events, "merge_review_paths")
 
     assert {event["jd_id"] for event in retrieve_events} == {"jd-high", "jd-low"}
     assert {event["jd_id"] for event in inspect_events} == {"jd-high"}
     assert {event["jd_id"] for event in gap_events} == {"jd-low"}
+    assert merge_retrieval_events == []
+    assert merge_review_events == []
     assert all(event["graph_runtime"] == "small-batch-serial" for event in retrieve_events)
     assert all(isinstance(event["duration_ms"], int) for event in retrieve_events)
 
@@ -44,7 +52,13 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
         assert isinstance(event["unique_hit_count"], int)
         assert isinstance(event["supporting_hit_count"], int)
         assert isinstance(event["source_type_available_counts"], dict)
-        assert event["precision"] is None
+        assert "hit_rate" in event
+        if int(event["hit_count"]) > 0:
+            assert event["precision"] == event["supporting_hit_count"] / event["hit_count"]
+            assert event["hit_rate"] == event["hit_count"] / event["limit"]
+        else:
+            assert event["precision"] is None
+            assert event["hit_rate"] == 0.0
         assert "query" not in event
     assert scopes_by_jd["jd-high"] == {"jd_filtered", "combined_deduped"}
     assert scopes_by_jd["jd-low"] == {"jd_filtered", "combined_deduped"}
@@ -55,30 +69,7 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
 
 def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
     run_dir = _write_review_ready_artifacts(tmp_path)
-    jd_profiles = _read_json(run_dir / "analyze" / "jd_profiles.json")
-    jd_profiles.extend(
-        [
-            {
-                "jd_id": "jd-extra-1",
-                "title": "Finance Operations Analyst",
-                "company": "Finance Co",
-                "requirements": ["reconciliation", "budgeting"],
-                "keywords": ["finance", "budgeting"],
-                "must_have_requirements": ["Finance operations"],
-                "interview_focus_areas": ["budget controls"],
-            },
-            {
-                "jd_id": "jd-extra-2",
-                "title": "Sales Operations Analyst",
-                "company": "Sales Co",
-                "requirements": ["CRM", "pipeline reporting"],
-                "keywords": ["sales", "CRM"],
-                "must_have_requirements": ["Sales operations"],
-                "interview_focus_areas": ["pipeline operations"],
-            },
-        ]
-    )
-    _write_json(run_dir / "analyze" / "jd_profiles.json", jd_profiles)
+    _add_two_extra_jds(run_dir)
 
     exit_code, output = run(["review", "--run-dir", str(run_dir)])
 
@@ -88,6 +79,34 @@ def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
     assert review["parallel_topology"]["retrieve"] == "fanout_by_jd"
     assert review["parallel_topology"]["inspect"] == "fanout_by_jd"
     assert review["jd_ids"] == ["jd-high", "jd-low", "jd-extra-1", "jd-extra-2"]
+
+
+def test_review_graph_reuses_compiled_langgraph_between_runs(monkeypatch, tmp_path: Path) -> None:
+    clear_cache = getattr(review_graph, "_clear_compiled_review_graph_cache", lambda: None)
+    clear_cache()
+    compile_calls = 0
+    original_compile = StateGraph.compile
+
+    def _counting_compile(self: StateGraph, *args: object, **kwargs: object) -> object:
+        nonlocal compile_calls
+        compile_calls += 1
+        return original_compile(self, *args, **kwargs)
+
+    monkeypatch.setattr(StateGraph, "compile", _counting_compile)
+    try:
+        first_run_dir = _write_review_ready_artifacts(tmp_path / "first")
+        _add_two_extra_jds(first_run_dir)
+        second_run_dir = _write_review_ready_artifacts(tmp_path / "second")
+        _add_two_extra_jds(second_run_dir)
+
+        first_exit_code, first_output = run(["review", "--run-dir", str(first_run_dir)])
+        second_exit_code, second_output = run(["review", "--run-dir", str(second_run_dir)])
+
+        assert first_exit_code == 0, first_output
+        assert second_exit_code == 0, second_output
+        assert compile_calls == 1
+    finally:
+        clear_cache()
 
 
 def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> None:
@@ -399,6 +418,33 @@ def _write_review_ready_artifacts(tmp_path: Path) -> Path:
         ],
     )
     return run_dir
+
+
+def _add_two_extra_jds(run_dir: Path) -> None:
+    jd_profiles = _read_json(run_dir / "analyze" / "jd_profiles.json")
+    jd_profiles.extend(
+        [
+            {
+                "jd_id": "jd-extra-1",
+                "title": "Finance Operations Analyst",
+                "company": "Finance Co",
+                "requirements": ["reconciliation", "budgeting"],
+                "keywords": ["finance", "budgeting"],
+                "must_have_requirements": ["Finance operations"],
+                "interview_focus_areas": ["budget controls"],
+            },
+            {
+                "jd_id": "jd-extra-2",
+                "title": "Sales Operations Analyst",
+                "company": "Sales Co",
+                "requirements": ["CRM", "pipeline reporting"],
+                "keywords": ["sales", "CRM"],
+                "must_have_requirements": ["Sales operations"],
+                "interview_focus_areas": ["pipeline operations"],
+            },
+        ]
+    )
+    _write_json(run_dir / "analyze" / "jd_profiles.json", jd_profiles)
 
 
 def _write_json(path: Path, payload: object) -> None:

@@ -499,6 +499,18 @@ def _source_type_counts(results: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def _precision(supporting_count: int | None, hit_count: int) -> float | None:
+    if supporting_count is None or hit_count <= 0:
+        return None
+    return supporting_count / hit_count
+
+
+def _hit_rate(hit_count: int, limit: int) -> float | None:
+    if limit <= 0:
+        return None
+    return hit_count / limit
+
+
 def log_retrieval_query(
     run_dir: Path,
     *,
@@ -535,7 +547,8 @@ def log_retrieval_query(
         "source_type_hit_counts": _source_type_counts(results) if results else None,
         "source_type_available_counts": source_type_available_counts or {},
         "supporting_hit_count": supporting_count,
-        "precision": None,
+        "precision": _precision(supporting_count, hit_count),
+        "hit_rate": _hit_rate(hit_count, limit),
     }
     append_event(run_dir, payload)
 
