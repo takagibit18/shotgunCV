@@ -45,4 +45,43 @@ Run:
 
 The validator checks the version, sample count, required fields, case-type coverage, document label structure, no-answer semantics, duplicate IDs, and retriever label count.
 
+## Layered Evaluation
+
+Retriever layer:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py `
+  --layer retriever `
+  --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 `
+  --golden-file fixtures\golden_rag_questions.json `
+  --output baseline\rag-layered-20260526\retriever.json `
+  --k 1 --k 3 --k 5 --k 10
+```
+
+Generator layer uses perfect documents from the golden set and evaluates an answer file. The answer file schema is:
+
+```json
+{
+  "schema_version": "rag-generator-answers-v1",
+  "answers": [
+    {
+      "question_id": "rag-golden-001",
+      "answer": "...",
+      "citations": [{"source_id": "jd-001-req-014"}]
+    }
+  ]
+}
+```
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py `
+  --layer generator `
+  --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 `
+  --golden-file fixtures\golden_rag_questions.json `
+  --answers-file baseline\rag-layered-20260526\generator-answers.json `
+  --output baseline\rag-layered-20260526\generator.json
+```
+
 The concrete golden JSON remains local and ignored by Git under `/fixtures/golden_*.json`; only this guide and the validator are intended to be committed.

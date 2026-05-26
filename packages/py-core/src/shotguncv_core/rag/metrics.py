@@ -88,14 +88,20 @@ def _mean_reciprocal_rank(ranked: Sequence[str], relevant: set[str]) -> float:
 def _ndcg_at_k(ranked: Sequence[str], relevant: set[str], k: int) -> float:
     if not relevant or k <= 0:
         return 0.0
-    dcg = sum(1.0 / math.log2(index + 1) for index, item in enumerate(ranked[:k], start=1) if item in relevant)
+    seen: set[str] = set()
+    dcg = 0.0
+    for index, item in enumerate(ranked[:k], start=1):
+        if item not in relevant or item in seen:
+            continue
+        seen.add(item)
+        dcg += 1.0 / math.log2(index + 1)
     ideal_hits = min(len(relevant), k)
     ideal_dcg = sum(1.0 / math.log2(index + 1) for index in range(1, ideal_hits + 1))
     return dcg / ideal_dcg if ideal_dcg else 0.0
 
 
 def _hit_count_at_k(ranked: Sequence[str], relevant: set[str], k: int) -> int:
-    return sum(1 for item in ranked[:k] if item in relevant)
+    return len({item for item in ranked[:k] if item in relevant})
 
 
 def _ranked_label_for_result(result: RetrievalResult, expected: Sequence[str]) -> str:

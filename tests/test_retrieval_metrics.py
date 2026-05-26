@@ -34,6 +34,20 @@ def test_evaluate_ranked_retrieval_handles_no_relevance_labels() -> None:
     assert metrics["ndcg_at_k"] == {"1": 0.0, "5": 0.0}
 
 
+def test_evaluate_ranked_retrieval_counts_duplicate_relevant_label_once() -> None:
+    metrics = evaluate_ranked_retrieval(
+        ranked_ids=["doc-a", "doc-a", "doc-a", "doc-b"],
+        relevant_ids={"doc-a", "doc-b"},
+        k_values=[3, 4],
+    )
+
+    assert metrics["precision_at_k"] == {"3": 1 / 3, "4": 0.5}
+    assert metrics["recall_at_k"] == {"3": 0.5, "4": 1.0}
+    assert metrics["mrr"] == 1.0
+    assert round(metrics["ndcg_at_k"]["3"], 6) == round(1.0 / (1.0 + 1 / 1.584962500721156), 6)
+    assert round(metrics["ndcg_at_k"]["4"], 6) == round((1.0 + 1 / 2.321928094887362) / (1.0 + 1 / 1.584962500721156), 6)
+
+
 def test_evaluate_labeled_retrieval_queries_aggregates_query_metrics() -> None:
     retriever = _FakeRetriever(
         {

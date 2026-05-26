@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import math
 import operator
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from time import perf_counter
@@ -12,7 +10,8 @@ from shotguncv_agents.interview_llm import (
     generate_interview_questions as generate_llm_interview_questions,
     generate_reference_answers as generate_llm_reference_answers,
 )
-from shotguncv_core.rag.retrieval import PgVectorRetriever, RetrievalResult
+from shotguncv_core.rag.embeddings import EmbeddingModel
+from shotguncv_core.rag.retrieval import InMemoryVectorRetriever, PgVectorRetriever, RetrievalResult, Retriever
 from shotguncv_core.run_logs import (
     log_fallback_used,
     log_graph_node_finished,
@@ -32,6 +31,7 @@ REVIEW_SKIPPED_NODES = [
     "generate_revision_tasks",
 ]
 _COMPILED_REVIEW_GRAPH: Any | None = None
+_REVIEW_EMBEDDING_MODEL: EmbeddingModel | None = None
 
 
 class _ReviewGraphState(TypedDict, total=False):
@@ -52,6 +52,8 @@ class _ReviewGraphState(TypedDict, total=False):
     strategies: list[dict[str, Any]]
     requirement_matrix: list[dict[str, Any]]
     retrieval_chunks: list[dict[str, Any]]
+    review_retriever: Retriever
+    review_retriever_type: str
     retrieval_results: Annotated[list[dict[str, Any]], operator.add]
     retrieval_misses: Annotated[list[str], operator.add]
     evidence_records: Annotated[list[dict[str, Any]], operator.add]
@@ -312,6 +314,8 @@ def _shared_branch_context(state: _ReviewGraphState) -> dict[str, Any]:
         "strategies": state["strategies"],
         "requirement_matrix": state["requirement_matrix"],
         "retrieval_chunks": state["retrieval_chunks"],
+        "review_retriever": state["review_retriever"],
+        "review_retriever_type": state["review_retriever_type"],
     }
 
 
@@ -377,6 +381,8 @@ def _load_run_context(state: _ReviewGraphState) -> _ReviewGraphState:
         jd_ids = [jd_id for jd_id in jd_ids if jd_id == requested_jd_id]
     if not jd_ids:
         raise ValueError("No JD profiles are available for review.")
+    chunks = _build_retrieval_chunks(run_dir, candidate, jd_profiles)
+    retriever, retriever_type = _build_review_retriever(state, chunks)
     return {
         "run_id": run_dir.name,
         "candidate_id": str(candidate.get("candidate_id") or "unknown"),
@@ -388,7 +394,9 @@ def _load_run_context(state: _ReviewGraphState) -> _ReviewGraphState:
         "strategies": _read_json(run_dir / "plan" / "application_strategies.json", []),
         "requirement_matrix": _read_json(run_dir / "analyze" / "requirement_matrix.json", []),
         "jd_ids": jd_ids,
-        "retrieval_chunks": _build_retrieval_chunks(run_dir, candidate, jd_profiles),
+        "retrieval_chunks": chunks,
+        "review_retriever": retriever,
+        "review_retriever_type": retriever_type,
     }
 
 
@@ -396,17 +404,12 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
     jd_id = state["jd_id"]
     query = _query_for_jd(state, jd_id)
     chunks = state["retrieval_chunks"]
+    retriever = state["review_retriever"]
+    retriever_type = state["review_retriever_type"]
     started = perf_counter()
-    if state.get("database_url"):
-        retriever = PgVectorRetriever(str(state["database_url"]))
-        retriever_type = "PgVectorRetriever"
-        jd_results = _retrieval_results_to_dicts(
-            retriever.search(query, limit=8, candidate_id=state["candidate_id"], jd_id=jd_id)
-        )
-    else:
-        retriever = None
-        retriever_type = "ArtifactTokenRetriever"
-        jd_results = _search_chunks(chunks, query, limit=8, jd_id=jd_id)
+    jd_results = _retrieval_results_to_dicts(
+        retriever.search(query, limit=8, candidate_id=state["candidate_id"], jd_id=jd_id)
+    )
     jd_supporting = sum(1 for r in jd_results if _is_supporting_evidence(r))
     log_retrieval_query(
         state["run_dir"],
@@ -414,7 +417,7 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
         retrieval_scope="jd_filtered",
         query=query,
         retriever_type=retriever_type,
-        filters={"candidate_id": state["candidate_id"], "jd_id": jd_id} if retriever else {"jd_id": jd_id},
+        filters={"candidate_id": state["candidate_id"], "jd_id": jd_id},
         limit=8,
         hit_count=len(jd_results),
         started=started,
@@ -423,23 +426,14 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
         source_type_available_counts=_source_type_available_counts(chunks, jd_id=jd_id),
     )
     started = perf_counter()
-    if retriever:
-        candidate_results = _retrieval_results_to_dicts(
-            retriever.search(
-                query,
-                limit=8,
-                candidate_id=state["candidate_id"],
-                source_type="candidate_evidence",
-            )
-        )
-    else:
-        candidate_results = _search_chunks(
-            chunks,
+    candidate_results = _retrieval_results_to_dicts(
+        retriever.search(
             query,
             limit=8,
             candidate_id=state["candidate_id"],
             source_type="candidate_evidence",
         )
+    )
     candidate_supporting = sum(1 for r in candidate_results if _is_supporting_evidence(r))
     log_retrieval_query(
         state["run_dir"],
@@ -496,6 +490,14 @@ def _retrieve_relevant_evidence(state: _ReviewGraphState) -> _ReviewGraphState:
         "retrieval_misses": [] if results else [jd_id],
         "evidence_records": [record],
     }
+
+
+def _build_review_retriever(state: _ReviewGraphState, chunks: list[dict[str, Any]]) -> tuple[Retriever, str]:
+    if state.get("database_url"):
+        return PgVectorRetriever(str(state["database_url"]), embedding_model=_REVIEW_EMBEDDING_MODEL), "PgVectorRetriever"
+    retriever = InMemoryVectorRetriever.from_chunks(chunks, embedding_model=_REVIEW_EMBEDDING_MODEL)
+    retriever.search("", limit=0)
+    return retriever, "InMemoryVectorRetriever"
 
 
 def _merge_retrieval_results(state: _ReviewGraphState) -> _ReviewGraphState:
@@ -816,34 +818,6 @@ def _chunk(
     }
 
 
-def _search_chunks(
-    chunks: list[dict[str, Any]],
-    query: str,
-    *,
-    limit: int,
-    candidate_id: str | None = None,
-    jd_id: str | None = None,
-    source_type: str | None = None,
-) -> list[dict[str, Any]]:
-    query_tokens = _tokens(query)
-    results: list[dict[str, Any]] = []
-    for chunk in chunks:
-        metadata = chunk["metadata"]
-        if candidate_id and metadata.get("candidate_id") != candidate_id:
-            continue
-        if jd_id and metadata.get("jd_id") != jd_id:
-            continue
-        if source_type and metadata.get("source_type") != source_type:
-            continue
-        text_tokens = _tokens(chunk["text"])
-        overlap = query_tokens & text_tokens
-        if not overlap:
-            continue
-        score = len(overlap) / math.sqrt(max(1, len(query_tokens)) * max(1, len(text_tokens)))
-        results.append({"text": chunk["text"], "metadata": metadata, "score": round(score, 6)})
-    return sorted(results, key=lambda item: (-item["score"], str(item["metadata"].get("source_id"))))[:limit]
-
-
 def _source_type_available_counts(
     chunks: list[dict[str, Any]],
     *,
@@ -892,14 +866,6 @@ def _combined_source_type_available_counts(
 
 def _retrieval_results_to_dicts(results: list[RetrievalResult]) -> list[dict[str, Any]]:
     return [{"text": item.text, "metadata": item.metadata, "score": item.score} for item in results]
-
-
-def _tokens(text: str) -> set[str]:
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", text.lower())
-        if token not in {"and", "or", "the", "with", "for", "to", "of", "in", "a", "an"}
-    }
 
 
 def _is_supporting_evidence(result: dict[str, Any]) -> bool:

@@ -152,3 +152,24 @@ E2E 报告应同时输出 retriever 指标、generator 指标和最终业务 rub
 - 标注指南：`docs/golden-rag-annotation-guide.md`。
 - 本地样本 JSON：`fixtures/golden_rag_questions.json`，首版 30 条，覆盖 common_question、multi_document、no_answer、stale_or_conflicting 四类样本。
 - 提交边界：真实 golden JSON 继续匹配 `.gitignore` 中 `/fixtures/golden_*.json`，只在本地作为评估真值使用；仓库提交 validator、测试和标注指南。
+
+### P0-2/P0-3/P0-4 当前落地产物
+
+- 真实业务 RAG 路径统一：`shotguncv review` 在未设置 `SHOTGUNCV_DATABASE_URL` 时默认使用 `InMemoryVectorRetriever`，基于当前 `run_dir` artifacts 构建 BGE-M3 本地向量索引；PgVector 保留为显式可选后端。
+- Retriever 分层评估入口：`scripts/evaluate_rag_layers.py --layer retriever` 可直接读取 `rag-golden-v1`，输出 precision@k、recall@k、MRR、NDCG、label_coverage、case_type 拆分和 no_answer 行为观测。
+- Retriever 指标口径修正：重复命中同一个 expected label 时只计一次，避免 recall@k 或 NDCG 因重复 label 超过合理上限。
+- Generator 分层评估入口：`scripts/evaluate_rag_layers.py --layer generator` 读取同一份 `rag-golden-v1` 和 generator answer file，在跳过 retriever 的条件下评估 faithfulness、answer_relevance、must_cover_coverage、forbidden_claim_violation 和 citation_accuracy。
+
+### RAG 后续优化优先级
+
+当前真实业务 RAG 已经具备 BGE-M3 本地向量检索、人工 golden set、retriever 分层评估和 generator 分层评估入口。下一轮优化按以下顺序推进：
+
+| 优先级 | 工作 | 为什么 |
+|--------|------|--------|
+| P1-1 | no-answer 阈值和 abstention gate | 先降低乱答风险，避免知识库无答案时仍把弱相关 top-k 交给 generator。 |
+| P1-2 | BM25 + BGE hybrid | 解决 full-raw 大库下纯 dense retrieval 召回差、精确 label/技能/source_id 命中弱的问题。 |
+| P1-3 | source_type-aware routing | 防止 `candidate_evidence` 淹没 `gap_map` / `requirement_evidence`，让不同问题类型优先检索正确证据层。 |
+| P1-4 | gap_map chunk text 重构 | 让缺口、风险、missing evidence、hard gate 等负向证据更容易被 query 搜到。 |
+| P1-5 | dense / BM25 / hybrid 对照评估 | 用同一份 `rag-golden-v1` 量化 hybrid 是否真的提升 recall@k、MRR、NDCG、no-answer 行为和 latency。 |
+| P2-1 | rerank | 在 hybrid candidate 集合质量变好后再做二次排序，避免只是在错误候选中重排。 |
+| P2-2 | generator/e2e judge | 在 retriever 和 generator 分层指标稳定后，再评估 faithfulness、answer relevance、最终答案质量和失败归因。 |
