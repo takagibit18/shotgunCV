@@ -1,12 +1,39 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import re
 from pathlib import Path
 
+import pytest
 from langgraph.graph import StateGraph
 
 from shotguncv_cli.main import run
 import shotguncv_agents.review_graph as review_graph
+
+
+@pytest.fixture(autouse=True)
+def _use_test_review_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(review_graph, "_REVIEW_EMBEDDING_MODEL", _KeywordEmbeddingModel())
+
+
+class _KeywordEmbeddingModel:
+    def embed(self, text: str) -> list[float]:
+        dimensions = 64
+        vector = [0.0] * dimensions
+        for token in _tokens(text):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            vector[int.from_bytes(digest[:2], "big") % dimensions] += 1.0
+        magnitude = math.sqrt(sum(value * value for value in vector)) or 1.0
+        return [value / magnitude for value in vector]
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", text.lower())
 
 
 def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_path: Path) -> None:
@@ -41,6 +68,7 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
     assert all(isinstance(event["duration_ms"], int) for event in retrieve_events)
 
     retrieval_queries = [event for event in events if event["event"] == "retrieval_query" and event["stage"] == "review"]
+    assert {event["retriever_type"] for event in retrieval_queries} == {"InMemoryVectorRetriever"}
     assert {event["filters"].get("jd_id") for event in retrieval_queries if event["filters"].get("jd_id")} >= {"jd-high", "jd-low"}
     assert all("query_preview" in event and "query" not in event for event in retrieval_queries)
     scopes_by_jd: dict[str, set[str]] = {}
@@ -127,17 +155,14 @@ def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> N
         "generate_revision_tasks",
     ]
     assert review["retrieval"]["low_evidence_jd_count"] == 1
-    assert review["evidence_gap_reports"] == [
-        {
-            "jd_id": "jd-low",
-            "evidence_count": 0,
-            "minimum_required": 3,
-            "recommended_evidence": [
-                "补充与 Contracts / Legal Operations 直接相关的项目、职责或成果证据。",
-                "标注可复核来源，例如原简历条目、项目材料或过往申请反馈。",
-                "证据不足前不要生成模板化面试题、参考答案或简历改写任务。",
-            ],
-        }
+    assert len(review["evidence_gap_reports"]) == 1
+    gap_report = review["evidence_gap_reports"][0]
+    assert gap_report["jd_id"] == "jd-low"
+    assert gap_report["evidence_count"] < gap_report["minimum_required"] == 3
+    assert gap_report["recommended_evidence"] == [
+        "补充与 Contracts / Legal Operations 直接相关的项目、职责或成果证据。",
+        "标注可复核来源，例如原简历条目、项目材料或过往申请反馈。",
+        "证据不足前不要生成模板化面试题、参考答案或简历改写任务。",
     ]
     assert {item["jd_id"] for item in review["interview_questions"]} == {"jd-high"}
     assert {item["jd_id"] for item in review["reference_answers"]} == {"jd-high"}

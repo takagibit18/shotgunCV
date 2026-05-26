@@ -269,6 +269,35 @@ source type 级结果：
 
 解读：BGE-M3 已经比 SHA-256 临时 embedding 更适合做正式质量基线，但当前 21-run 结果还不能视为高质量 retriever。小/中 bucket 的可评估标签较少，precision@1 与 MRR 尚可；full-raw bucket 在 642 chunks 的规模下明显退化，尤其是 `gap_map`、`resume_variant` 和部分 `requirement_evidence` 召回很弱。下一轮优化应优先处理 source_type-aware query、chunk text 构造和低相关阈值/重排，而不是只看整体 hit count。
 
+## 2026-05-26 真实业务 RAG 路径统一
+
+本轮将 post-run review 的默认无数据库检索路径从 `ArtifactTokenRetriever` 替换为 `InMemoryVectorRetriever`，并继续使用 `BAAI/bge-m3` 作为默认 embedding。这样正式 retriever baseline 与真实业务 review 默认路径使用同一类向量检索语义，避免评估脚本测 BGE、真实流程却走 token overlap 的错位。
+
+当前后端选择规则：
+
+| 场景 | 默认 retriever | 说明 |
+|------|----------------|------|
+| `shotguncv review` 未设置 `SHOTGUNCV_DATABASE_URL` | `InMemoryVectorRetriever` | 基于当前 `run_dir` artifacts 构建本地向量索引，使用 BGE-M3 embedding。 |
+| `shotguncv review` 设置了 `SHOTGUNCV_DATABASE_URL` | `PgVectorRetriever` | 保留为显式可选数据库后端，用于跨 run / 历史索引实验。 |
+| `shotguncv retrieve` | `PgVectorRetriever` | 仍是数据库 smoke query 命令，要求数据库 URL。 |
+| `shotguncv index` | PostgreSQL projection | 仍只负责可选数据库投影和 pgvector chunk 写入。 |
+
+实现约束：
+
+- `run_dir` 继续是真实业务执行真源；默认 review 不依赖 PostgreSQL 或 pgvector。
+- 默认 review 在 `load_run_context` 阶段构建并预热一次 `InMemoryVectorRetriever`，后续每个 JD 分支复用同一个 retriever，避免每个 JD 重复 embedding 全量 chunks。
+- `retrieval_query.retriever_type` 现在可用于确认真实路径：默认无 DB 应为 `InMemoryVectorRetriever`；显式 DB 路径应为 `PgVectorRetriever`。
+- PgVector 路径暂不删除，只降级为可选后端；后续如无跨 run 检索需求，可再进一步收缩。
+
+同日补齐统一 golden set 的分层评估入口：
+
+- `scripts\validate_golden_rag_set.py` 校验 `rag-golden-v1`，当前本地 `fixtures\golden_rag_questions.json` 为 30 条样本，覆盖 common_question、multi_document、no_answer、stale_or_conflicting。
+- `scripts\evaluate_rag_layers.py --layer retriever` 从同一份 `rag-golden-v1` 生成 retriever query specs，输出 precision@k、recall@k、MRR、NDCG、label_coverage、case_type_metrics 和 no_answer 行为观测。
+- `scripts\evaluate_rag_layers.py --layer generator` 读取 generator answer file，在跳过 retriever、使用 golden expected documents 的前提下评估 faithfulness、answer_relevance、must_cover_coverage、forbidden_claim_violation 和 citation_accuracy。
+- retriever 指标口径已修正：同一个 expected label 被多个 chunk 命中时只计一次，避免 recall@k / NDCG 因重复 label 膨胀。
+
+本地 smoke 使用 `baseline-formal-r3-full-raw-library-20260520` 跑通 retriever layer，输出为 `baseline\rag-layered-20260526\retriever-full-raw-r3.json`。质量门 `label_coverage=1.0`，但指标仍偏弱：precision@10 `0.0120`、recall@10 `0.0800`、MRR `0.0168`；5 条 no_answer query 全部仍返回非空结果，说明后续必须补充低相关阈值或 abstention 逻辑，不能只依赖 top-k 向量召回。
+
 ## 2026-05-25 接下来改进顺序安排
 
 在 retriever 细粒度埋点和 full-raw 本地 NLP/IR 评估链路补齐后，下一轮改进按以下顺序推进：
