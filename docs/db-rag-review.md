@@ -267,6 +267,56 @@ retriever NLP/IR 评估补齐包括：
 
    graph 结构稳定后，再考虑模块级缓存 `StateGraph.compile()` 结果。该项属于工程优化，优先级低于阈值验证、小批量 bypass 和保守节点合并。
 
+   2026-05-26 已实现模块级 compiled graph 缓存：同一 Python 进程内首次 LangGraph review 会执行 `StateGraph.compile()`，后续 review 复用 compiled graph。单元回归验证两次 review 的 compile 调用从 2 次降为 1 次。当前 benchmark artifact 尚未记录 `compile_duration_ms` 或 cache hit 字段，因此该项的收益只能确认为“重复 compile 次数减少”，不能从聚合报告中直接换算为稳定 wall-clock ms。
+
+   同日完成保守节点合并：`small-batch-serial` 与 `threadpool-fallback` 路径不再执行 `merge_retrieval_results`、`merge_review_paths` 两个空 fan-in 节点；LangGraph fan-out 路径仍保留这两个 barrier 节点，因为并行分支需要汇合。
+
+   使用正式 baseline 同口径重跑 threshold=3 review：
+
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\run_evidence_gate_ab_test.py `
+     --source-runs-root baseline\runs-formal-20260520 `
+     --output-root baseline\graph-cache-node-merge-20260526-full-21run-rerun `
+     --threshold 3
+   ```
+
+   输出写入本地忽略目录 `baseline/graph-cache-node-merge-20260526-full-21run-rerun/`，`failure_count=0`。业务与检索口径保持不变：
+
+   | 指标 | 2026-05-25 21-run A/B threshold=3 | 2026-05-26 rerun |
+   |------|------------------------------------|------------------|
+   | run_count | 21 | 21 |
+   | JD count | 204 | 204 |
+   | review_low_evidence_jd_count | 30 | 30 |
+   | review_sufficient_evidence_jd_count | 174 | 174 |
+   | retrieval_combined_query_count | 204 | 204 |
+   | retrieval_supporting_hit_count avg | 3.3498 | 3.3498 |
+   | apply/hold/needs_review/evidence_needed | 51/87/36/30 | 51/87/36/30 |
+
+   已验证的结构性收益：
+
+   | 指标 | 2026-05-25 21-run A/B threshold=3 | 2026-05-26 rerun | 变化 |
+   |------|------------------------------------|------------------|------|
+   | graph_node_finished 总数 | 576 | 570 | -6（-1.0%） |
+   | `small_image_only` bucket graph nodes | 42 | 36 | -6（-14.3%） |
+   | `merge_retrieval_results` 事件数 | 21 | 18 | -3 |
+   | `merge_review_paths` 事件数 | 21 | 18 | -3 |
+
+   解释：21 个正式 run 中只有 3 个 `small_image_only` run 满足 `JD <= 3` 并走 `small-batch-serial`，每个 run 少两个空 merge 节点，因此全量只减少 6 个 graph node。其余 18 个 LangGraph fan-out run 继续保留 merge barrier，节点数不变。
+
+   负向性能观测也必须保留：本轮同口径 rerun 没有观察到 wall-clock 或 review stage 耗时提升，反而慢于 2026-05-25 的旧 21-run A/B 输出。
+
+   | 指标 | 2026-05-25 21-run A/B threshold=3 | 2026-05-26 rerun | 观察 |
+   |------|------------------------------------|------------------|------|
+   | review stage avg | 267.57ms | 457.14ms | 变慢 |
+   | review stage p50 | 188ms | 240ms | 变慢 |
+   | review wall avg | 360.47ms | 603.84ms | 变慢 |
+   | review wall p50 | 280.57ms | 394.99ms | 变慢 |
+   | graph node duration avg | 28.97ms | 41.35ms | 变慢 |
+
+   bucket 层面最明显的异常来自 `full-raw-library`：旧 21-run A/B 的 review stage avg 为 `622.0ms`，本轮 rerun 为 `1576.0ms`。该 bucket 仍走 `langgraph-send`，没有触发保守节点合并，因此这类耗时上升不能归因为少量空节点移除本身，更可能是本机运行时、文件 IO、进程冷启动或当次负载波动。当前结论应写为：**节点数和重复 compile 次数有结构性下降，但本轮同口径 wall-clock 性能没有提升，不能把该改动宣称为端到端耗时优化。**
+
+   后续如果要量化 Graph 编译缓存的真实性能收益，需要把 `compiled_graph_cache_hit`、`compile_duration_ms` 或类似字段写入 review 事件；否则 compile 缓存收益会被 review 节点耗时、日志写入、文件 IO 和机器波动淹没。
+
 5. 检索 hit rate 修复
 
    检索 hit rate 修复放在真实 embedding / pgvector 路径进入实现期之后。当前 deterministic SHA-256 embedding 无法表达语义相似性，过早做 query rewrite 或 fallback 调整容易优化到临时向量实现上；该方向不作为当前近端性能闭环的第一步。

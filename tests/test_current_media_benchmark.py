@@ -20,6 +20,8 @@ def test_collect_run_metrics_summarizes_retrieval_observability(tmp_path: Path) 
                 "raw_hit_count": 2,
                 "unique_hit_count": 2,
                 "supporting_hit_count": 0,
+                "precision": 0.0,
+                "hit_rate": 0.25,
                 "source_type_hit_counts": {"jd_profile": 1, "requirement_evidence": 1},
                 "source_type_available_counts": {"jd_profile": 1, "requirement_evidence": 2},
                 "duration_ms": 3,
@@ -32,6 +34,8 @@ def test_collect_run_metrics_summarizes_retrieval_observability(tmp_path: Path) 
                 "raw_hit_count": 4,
                 "unique_hit_count": 3,
                 "supporting_hit_count": 1,
+                "precision": 1 / 3,
+                "hit_rate": 0.375,
                 "source_type_hit_counts": {"candidate_evidence": 1, "jd_profile": 1, "requirement_evidence": 1},
                 "source_type_available_counts": {"candidate_evidence": 3, "jd_profile": 1, "requirement_evidence": 2},
                 "duration_ms": 1,
@@ -59,6 +63,8 @@ def test_collect_run_metrics_summarizes_retrieval_observability(tmp_path: Path) 
     assert metrics["retrieval_raw_hit_count"]["avg"] == 3
     assert metrics["retrieval_unique_hit_count"]["avg"] == 2.5
     assert metrics["retrieval_supporting_hit_count"]["avg"] == 0.5
+    assert metrics["retrieval_precision"]["avg"] == 0.1667
+    assert metrics["retrieval_hit_rate"]["avg"] == 0.3125
     assert metrics["retrieval_source_type_hit_counts"] == {
         "candidate_evidence": 1,
         "jd_profile": 2,

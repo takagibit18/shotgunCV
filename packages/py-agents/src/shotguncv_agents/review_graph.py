@@ -31,6 +31,7 @@ REVIEW_SKIPPED_NODES = [
     "generate_reference_answers",
     "generate_revision_tasks",
 ]
+_COMPILED_REVIEW_GRAPH: Any | None = None
 
 
 class _ReviewGraphState(TypedDict, total=False):
@@ -100,91 +101,114 @@ def _preview_jd_ids(run_dir: Path, *, jd_id: str | None) -> list[str]:
 
 def _run_langgraph(state: _ReviewGraphState) -> _ReviewGraphState | None:
     try:
-        from langgraph.graph import END, START, StateGraph
-        from langgraph.types import Send
-    except Exception:
+        graph = _get_compiled_review_graph()
+    except ImportError:
+        return None
+    except Exception as exc:
+        _log_langgraph_fallback(state, exc)
+        return None
+    try:
+        return graph.invoke({**state, "graph_runtime": "langgraph-send"})
+    except Exception as exc:
+        _log_langgraph_fallback(state, exc)
         return None
 
-    try:
-        send_cls = Send
-        graph = StateGraph(_ReviewGraphState)
-        graph.add_node("load_run_context", _logged_node("load_run_context", _load_run_context))
-        graph.add_node("retrieve_relevant_evidence", _logged_node("retrieve_relevant_evidence", _retrieve_relevant_evidence))
-        graph.add_node("merge_retrieval_results", _logged_node("merge_retrieval_results", _merge_retrieval_results))
-        graph.add_node("inspect_score_and_gates", _logged_node("inspect_score_and_gates", _inspect_score_and_gates))
-        graph.add_node("generate_evidence_gap_report", _logged_node("generate_evidence_gap_report", _generate_evidence_gap_report))
-        graph.add_node("merge_review_paths", _logged_node("merge_review_paths", _merge_review_paths))
-        graph.add_node("generate_interview_questions", _logged_node("generate_interview_questions", _generate_interview_questions))
-        graph.add_node("generate_reference_answers", _logged_node("generate_reference_answers", _generate_reference_answers))
-        graph.add_node("generate_revision_tasks", _logged_node("generate_revision_tasks", _generate_revision_tasks))
-        graph.add_node("validate_against_fabrication_policy", _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy))
-        graph.add_node("write_review_artifact", _logged_node("write_review_artifact", _write_review_artifact))
 
-        def _send_retrieve_jobs(state: _ReviewGraphState) -> list[Any]:
-            return [
+def _get_compiled_review_graph() -> Any:
+    global _COMPILED_REVIEW_GRAPH
+    if _COMPILED_REVIEW_GRAPH is None:
+        _COMPILED_REVIEW_GRAPH = _compile_review_graph()
+    return _COMPILED_REVIEW_GRAPH
+
+
+def _clear_compiled_review_graph_cache() -> None:
+    global _COMPILED_REVIEW_GRAPH
+    _COMPILED_REVIEW_GRAPH = None
+
+
+def _compile_review_graph() -> Any:
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import Send
+
+    send_cls = Send
+    graph = StateGraph(_ReviewGraphState)
+    graph.add_node("load_run_context", _logged_node("load_run_context", _load_run_context))
+    graph.add_node("retrieve_relevant_evidence", _logged_node("retrieve_relevant_evidence", _retrieve_relevant_evidence))
+    graph.add_node("merge_retrieval_results", _logged_node("merge_retrieval_results", _merge_retrieval_results))
+    graph.add_node("inspect_score_and_gates", _logged_node("inspect_score_and_gates", _inspect_score_and_gates))
+    graph.add_node("generate_evidence_gap_report", _logged_node("generate_evidence_gap_report", _generate_evidence_gap_report))
+    graph.add_node("merge_review_paths", _logged_node("merge_review_paths", _merge_review_paths))
+    graph.add_node("generate_interview_questions", _logged_node("generate_interview_questions", _generate_interview_questions))
+    graph.add_node("generate_reference_answers", _logged_node("generate_reference_answers", _generate_reference_answers))
+    graph.add_node("generate_revision_tasks", _logged_node("generate_revision_tasks", _generate_revision_tasks))
+    graph.add_node("validate_against_fabrication_policy", _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy))
+    graph.add_node("write_review_artifact", _logged_node("write_review_artifact", _write_review_artifact))
+
+    def _send_retrieve_jobs(state: _ReviewGraphState) -> list[Any]:
+        return [
+            send_cls(
+                "retrieve_relevant_evidence",
+                {
+                    **_shared_branch_context(state),
+                    "jd_id": jd_id,
+                },
+            )
+            for jd_id in state["jd_ids"]
+        ]
+
+    def _send_review_path_jobs(state: _ReviewGraphState) -> list[Any]:
+        records = _evidence_records_by_jd(state)
+        jobs: list[Any] = []
+        for jd_id in state["jd_ids"]:
+            record = records[jd_id]
+            node = "inspect_score_and_gates" if record["evidence_status"] == "sufficient" else "generate_evidence_gap_report"
+            jobs.append(
                 send_cls(
-                    "retrieve_relevant_evidence",
+                    node,
                     {
                         **_shared_branch_context(state),
                         "jd_id": jd_id,
+                        "evidence_record": record,
                     },
                 )
-                for jd_id in state["jd_ids"]
-            ]
+            )
+        return jobs
 
-        def _send_review_path_jobs(state: _ReviewGraphState) -> list[Any]:
-            records = _evidence_records_by_jd(state)
-            jobs: list[Any] = []
-            for jd_id in state["jd_ids"]:
-                record = records[jd_id]
-                node = "inspect_score_and_gates" if record["evidence_status"] == "sufficient" else "generate_evidence_gap_report"
-                jobs.append(
-                    send_cls(
-                        node,
-                        {
-                            **_shared_branch_context(state),
-                            "jd_id": jd_id,
-                            "evidence_record": record,
-                        },
-                    )
-                )
-            return jobs
+    def _route_after_review_paths(state: _ReviewGraphState) -> str:
+        return "generate" if _sufficient_jd_ids(state) else "validate"
 
-        def _route_after_review_paths(state: _ReviewGraphState) -> str:
-            return "generate" if _sufficient_jd_ids(state) else "validate"
+    graph.add_edge(START, "load_run_context")
+    graph.add_conditional_edges("load_run_context", _send_retrieve_jobs, ["retrieve_relevant_evidence"])
+    graph.add_edge("retrieve_relevant_evidence", "merge_retrieval_results")
+    graph.add_conditional_edges(
+        "merge_retrieval_results",
+        _send_review_path_jobs,
+        ["inspect_score_and_gates", "generate_evidence_gap_report"],
+    )
+    graph.add_edge("inspect_score_and_gates", "merge_review_paths")
+    graph.add_edge("generate_evidence_gap_report", "merge_review_paths")
+    graph.add_conditional_edges(
+        "merge_review_paths",
+        _route_after_review_paths,
+        {"generate": "generate_interview_questions", "validate": "validate_against_fabrication_policy"},
+    )
+    graph.add_edge("generate_interview_questions", "generate_reference_answers")
+    graph.add_edge("generate_reference_answers", "generate_revision_tasks")
+    graph.add_edge("generate_revision_tasks", "validate_against_fabrication_policy")
+    graph.add_edge("validate_against_fabrication_policy", "write_review_artifact")
+    graph.add_edge("write_review_artifact", END)
+    return graph.compile()
 
-        graph.add_edge(START, "load_run_context")
-        graph.add_conditional_edges("load_run_context", _send_retrieve_jobs, ["retrieve_relevant_evidence"])
-        graph.add_edge("retrieve_relevant_evidence", "merge_retrieval_results")
-        graph.add_conditional_edges(
-            "merge_retrieval_results",
-            _send_review_path_jobs,
-            ["inspect_score_and_gates", "generate_evidence_gap_report"],
-        )
-        graph.add_edge("inspect_score_and_gates", "merge_review_paths")
-        graph.add_edge("generate_evidence_gap_report", "merge_review_paths")
-        graph.add_conditional_edges(
-            "merge_review_paths",
-            _route_after_review_paths,
-            {"generate": "generate_interview_questions", "validate": "validate_against_fabrication_policy"},
-        )
-        graph.add_edge("generate_interview_questions", "generate_reference_answers")
-        graph.add_edge("generate_reference_answers", "generate_revision_tasks")
-        graph.add_edge("generate_revision_tasks", "validate_against_fabrication_policy")
-        graph.add_edge("validate_against_fabrication_policy", "write_review_artifact")
-        graph.add_edge("write_review_artifact", END)
-        return graph.compile().invoke({**state, "graph_runtime": "langgraph-send"})
-    except Exception as exc:
-        run_dir = state["run_dir"]
-        log_fallback_used(
-            run_dir,
-            stage="review",
-            operation="post_run_review_graph",
-            from_provider="langgraph-send",
-            to_provider="threadpool-fallback",
-            reason=f"{exc.__class__.__name__}: {str(exc)[:300]}",
-        )
-        return None
+
+def _log_langgraph_fallback(state: _ReviewGraphState, exc: Exception) -> None:
+    log_fallback_used(
+        state["run_dir"],
+        stage="review",
+        operation="post_run_review_graph",
+        from_provider="langgraph-send",
+        to_provider="threadpool-fallback",
+        reason=f"{exc.__class__.__name__}: {str(exc)[:300]}",
+    )
 
 
 def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
@@ -206,7 +230,6 @@ def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
         state["retrieval_results"].extend(item.get("retrieval_results", []))
         state["retrieval_misses"].extend(item.get("retrieval_misses", []))
         state["evidence_records"].extend(item.get("evidence_records", []))
-    state = _apply_update(state, _logged_node("merge_retrieval_results", _merge_retrieval_results)(state))
 
     branch_states: list[_ReviewGraphState] = []
     records = _evidence_records_by_jd(state)
@@ -227,7 +250,6 @@ def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
     for item in branch_states:
         state["decision_review"].extend(item.get("decision_review", []))
         state["evidence_gap_reports"].extend(item.get("evidence_gap_reports", []))
-    state = _apply_update(state, _logged_node("merge_review_paths", _merge_review_paths)(state))
     if _sufficient_jd_ids(state):
         state = _apply_update(state, _logged_node("generate_interview_questions", _generate_interview_questions)(state))
         state = _apply_update(state, _logged_node("generate_reference_answers", _generate_reference_answers)(state))
@@ -248,7 +270,6 @@ def _run_small_batch_serial(state: _ReviewGraphState) -> _ReviewGraphState:
         state["retrieval_results"].extend(retrieval_state.get("retrieval_results", []))
         state["retrieval_misses"].extend(retrieval_state.get("retrieval_misses", []))
         state["evidence_records"].extend(retrieval_state.get("evidence_records", []))
-    state = _apply_update(state, _logged_node("merge_retrieval_results", _merge_retrieval_results)(state))
 
     records = _evidence_records_by_jd(state)
     for jd_id in state["jd_ids"]:
@@ -260,7 +281,6 @@ def _run_small_batch_serial(state: _ReviewGraphState) -> _ReviewGraphState:
         )
         state["decision_review"].extend(branch_state.get("decision_review", []))
         state["evidence_gap_reports"].extend(branch_state.get("evidence_gap_reports", []))
-    state = _apply_update(state, _logged_node("merge_review_paths", _merge_review_paths)(state))
 
     if _sufficient_jd_ids(state):
         state = _apply_update(state, _logged_node("generate_interview_questions", _generate_interview_questions)(state))
@@ -656,7 +676,15 @@ def _parallel_topology(state: _ReviewGraphState) -> dict[str, Any]:
             "generation": "run_level_evidence_sufficient_only",
             "evidence_threshold": state["evidence_threshold"],
             "small_batch_bypass_max_jds": SMALL_BATCH_BYPASS_MAX_JDS,
-            "fan_in_nodes": ["merge_retrieval_results", "merge_review_paths"],
+            "fan_in_nodes": [],
+        }
+    if state.get("graph_runtime") == "threadpool-fallback":
+        return {
+            "retrieve": "threadpool_by_jd",
+            "inspect": "threadpool_by_jd",
+            "generation": "run_level_evidence_sufficient_only",
+            "evidence_threshold": state["evidence_threshold"],
+            "fan_in_nodes": [],
         }
     return {
         "retrieve": "fanout_by_jd",
