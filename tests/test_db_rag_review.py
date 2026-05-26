@@ -102,13 +102,18 @@ def test_index_runs_logs_per_run_batch_without_changing_counts(tmp_path: Path, m
     assert any(event["event"] == "stage_finished" and event["stage"] == "index" for event in events)
 
 
-def test_deterministic_retriever_preserves_metadata(tmp_path: Path) -> None:
+def test_retriever_preserves_metadata_with_injected_embedding(tmp_path: Path) -> None:
     from shotguncv_core.db.indexer import build_projection_batch
+    from shotguncv_core.rag.embeddings import deterministic_embedding
     from shotguncv_core.rag.retrieval import InMemoryVectorRetriever
+
+    class DeterministicEmbeddingModel:
+        def embed(self, text: str) -> list[float]:
+            return deterministic_embedding(text)
 
     run_dir = _prepare_completed_run(tmp_path)
     chunks = build_projection_batch(run_dir).retrieval_chunks
-    retriever = InMemoryVectorRetriever.from_chunks(chunks)
+    retriever = InMemoryVectorRetriever.from_chunks(chunks, embedding_model=DeterministicEmbeddingModel())
 
     results = retriever.search("Python automation evidence", limit=3, source_type="candidate_evidence")
 
@@ -116,6 +121,53 @@ def test_deterministic_retriever_preserves_metadata(tmp_path: Path) -> None:
     assert results[0].metadata["source_type"] == "candidate_evidence"
     assert results[0].metadata["candidate_id"] == "cand-001"
     assert "provenance_summary" in results[0].metadata
+
+
+def test_embedding_defaults_to_bge_m3_dimension() -> None:
+    from shotguncv_core.db.schema import EMBEDDING_DIMENSIONS
+    from shotguncv_core.rag.embeddings import DEFAULT_EMBEDDING_MODEL
+
+    assert DEFAULT_EMBEDDING_MODEL == "BAAI/bge-m3"
+    assert EMBEDDING_DIMENSIONS == 1024
+
+
+def test_in_memory_retriever_uses_injected_embedding_model() -> None:
+    from shotguncv_core.rag.retrieval import InMemoryVectorRetriever
+
+    class KeywordEmbeddingModel:
+        def embed(self, text: str) -> list[float]:
+            normalized = text.lower()
+            if "python" in normalized:
+                return [1.0, 0.0, 0.0]
+            if "sales" in normalized:
+                return [0.0, 1.0, 0.0]
+            return [0.0, 0.0, 1.0]
+
+    chunks = [
+        {
+            "text": "Sales pipeline ownership",
+            "metadata": {
+                "source_type": "candidate_evidence",
+                "source_id": "sales",
+                "candidate_id": "cand-001",
+                "provenance_summary": "sales",
+            },
+        },
+        {
+            "text": "Python automation evidence",
+            "metadata": {
+                "source_type": "candidate_evidence",
+                "source_id": "python",
+                "candidate_id": "cand-001",
+                "provenance_summary": "python",
+            },
+        },
+    ]
+    retriever = InMemoryVectorRetriever.from_chunks(chunks, embedding_model=KeywordEmbeddingModel())
+
+    results = retriever.search("Python role", limit=2)
+
+    assert [result.metadata["source_id"] for result in results] == ["python", "sales"]
 
 
 def test_review_command_writes_artifacts_with_citations_and_validation(tmp_path: Path) -> None:

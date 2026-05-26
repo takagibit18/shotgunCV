@@ -180,6 +180,95 @@ retriever NLP/IR 评估补齐包括：
 
 结论：retriever 评估链路已经从“只看是否返回结果”推进到可复核的 label 覆盖与排序质量评估。full-raw baseline 上 `missing_expected_chunk_refs=0`，说明 golden target 已经对齐真实 `retrieval_chunks`；`MRR=0.8`、`precision@1=0.7`、`recall@10=1.0` 表明当前 InMemory retriever 在该样本上可作为 baseline sanity check 与回归保护使用。该结果不作为全 21-run 的全局质量结论。
 
+## 2026-05-26 BGE-M3 retriever 21-run 正式质量门
+
+本轮把 retriever 评估从 3 个 full-raw repeat 扩展为正式 21-run baseline，并将 `label_coverage` 提升为先验质量门。评估脚本现在支持：
+- 单 run 报告 `retriever-metrics-v1`，包含 `quality_gate`、`label_coverage.coverage_ratio`、`source_type_metrics`。
+- 21-run 聚合报告 `retriever-baseline-metrics-v1`，按 `bucket` 输出独立指标，并汇总 `candidate_evidence`、`requirement_evidence`、`jd_description`、`gap_map`、`resume_variant` 等 source type 召回质量。
+- golden schema 继续固定为 `retriever-golden-v1`，不再接受 legacy list；bucket-specific query 通过 `applicable_buckets` 限定，避免不同 bucket 中重复的 `jd-001` / `variant-jd-jd-001` 被误当成同一个语义标签。
+- 当适用 query 的 `label_coverage < 1.0` 时，脚本直接失败，不允许解释 precision / recall / MRR / NDCG。
+
+版本记录：
+- 日期：`2026-05-26`
+- 分支：`codex/embedding_provider`
+- HEAD：`8695b5a`
+- embedding：`BAAI/bge-m3`
+- 维度：`1024`
+- 输出：`baseline/retriever-quality-bge-m3-20260526-21run/aggregate.json`
+
+正式评估命令：
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_retriever_metrics.py `
+  --runs-root baseline\runs-formal-20260520 `
+  --baseline-runs-file baseline\baseline_runs_formal_20260520.json `
+  --golden-file fixtures\golden_retrieval_questions.json `
+  --output baseline\retriever-quality-bge-m3-20260526-21run `
+  --k 1 --k 3 --k 5 --k 10
+```
+
+输出写入本地忽略目录 `baseline/retriever-quality-bge-m3-20260526-21run/`。本轮质量门结果：
+- `run_count=21`
+- `bucket_count=7`
+- `quality_gate.status=passed`
+- `failed_run_ids=[]`
+- 每个 bucket 的适用 query label coverage 均为 `1.0`
+
+全局聚合结果：
+| 指标 | @1 | @3 | @5 | @10 |
+|------|----|----|----|-----|
+| precision | 0.2174 | 0.1739 | 0.1304 | 0.0826 |
+| recall | 0.1087 | 0.3696 | 0.4565 | 0.5217 |
+| NDCG | 0.2174 | 0.2965 | 0.3358 | 0.3662 |
+
+`MRR=0.3732`。
+
+完整全局指标：
+| scope | precision@1 | precision@3 | precision@5 | precision@10 | recall@1 | recall@3 | recall@5 | recall@10 | NDCG@1 | NDCG@3 | NDCG@5 | NDCG@10 | MRR |
+|-------|-------------|-------------|-------------|--------------|----------|----------|----------|-----------|--------|--------|--------|---------|-----|
+| `overall` | 0.2174 | 0.1739 | 0.1304 | 0.0826 | 0.1087 | 0.3696 | 0.4565 | 0.5217 | 0.2174 | 0.2965 | 0.3358 | 0.3662 | 0.3732 |
+
+bucket 级结果：
+| bucket | queries | precision@1 | recall@5 | MRR |
+|--------|---------|-------------|----------|-----|
+| `small_high_image_pdf` | 6 | 0.5000 | 0.6667 | 0.7500 |
+| `small_image_only` | 6 | 0.5000 | 0.6667 | 0.7500 |
+| `small_low_plus_image` | 6 | 0.5000 | 0.6667 | 0.7500 |
+| `mixed_balanced_media` | 6 | 0.5000 | 1.0000 | 0.7500 |
+| `many_high_priority_media` | 6 | 0.0000 | 0.7500 | 0.5000 |
+| `many_low_medium_media` | 6 | 0.5000 | 1.0000 | 0.6667 |
+| `full_raw_library_text_pdf_image` | 33 | 0.0000 | 0.0909 | 0.0227 |
+
+完整 bucket 指标：
+| bucket | precision@1 | precision@3 | precision@5 | precision@10 | recall@1 | recall@3 | recall@5 | recall@10 | NDCG@1 | NDCG@3 | NDCG@5 | NDCG@10 | MRR |
+|--------|-------------|-------------|-------------|--------------|----------|----------|----------|-----------|--------|--------|--------|---------|-----|
+| `full_raw_library_text_pdf_image` | 0.0000 | 0.0000 | 0.0182 | 0.0091 | 0.0000 | 0.0000 | 0.0909 | 0.0909 | 0.0000 | 0.0000 | 0.0392 | 0.0392 | 0.0227 |
+| `many_high_priority_media` | 0.0000 | 0.3333 | 0.2000 | 0.1000 | 0.0000 | 0.7500 | 0.7500 | 0.7500 | 0.0000 | 0.5089 | 0.5089 | 0.5089 | 0.5000 |
+| `many_low_medium_media` | 0.5000 | 0.3333 | 0.3000 | 0.1500 | 0.2500 | 0.7500 | 1.0000 | 1.0000 | 0.5000 | 0.5566 | 0.6752 | 0.6752 | 0.6667 |
+| `mixed_balanced_media` | 0.5000 | 0.3333 | 0.3000 | 0.2000 | 0.5000 | 0.7500 | 1.0000 | 1.2500 | 0.5000 | 0.6934 | 0.8120 | 0.9212 | 0.7500 |
+| `small_high_image_pdf` | 0.5000 | 0.3333 | 0.2000 | 0.1000 | 0.1667 | 0.6667 | 0.6667 | 0.6667 | 0.5000 | 0.5501 | 0.5501 | 0.5501 | 0.7500 |
+| `small_image_only` | 0.5000 | 0.3333 | 0.2000 | 0.1500 | 0.1667 | 0.6667 | 0.6667 | 0.8333 | 0.5000 | 0.5501 | 0.5501 | 0.6283 | 0.7500 |
+| `small_low_plus_image` | 0.5000 | 0.3333 | 0.2000 | 0.2000 | 0.1667 | 0.6667 | 0.6667 | 1.0000 | 0.5000 | 0.5501 | 0.5501 | 0.7119 | 0.7500 |
+
+source type 级结果：
+| source_type | queries | labels | precision@1 | recall@5 | MRR |
+|-------------|---------|--------|-------------|----------|-----|
+| `candidate_evidence` | 21 | 21 | 0.1429 | 1.0000 | 0.5119 |
+| `jd_description` | 18 | 18 | 0.3333 | 0.8333 | 0.5278 |
+| `requirement_evidence` | 36 | 60 | 0.1667 | 0.1667 | 0.1786 |
+| `gap_map` | 21 | 24 | 0.0000 | 0.1429 | 0.0286 |
+| `resume_variant` | 3 | 3 | 0.0000 | 0.0000 | 0.0000 |
+
+完整 source type 指标：
+| source_type | precision@1 | precision@3 | precision@5 | precision@10 | recall@1 | recall@3 | recall@5 | recall@10 | NDCG@1 | NDCG@3 | NDCG@5 | NDCG@10 | MRR |
+|-------------|-------------|-------------|-------------|--------------|----------|----------|----------|-----------|--------|--------|--------|---------|-----|
+| `candidate_evidence` | 0.1429 | 0.2857 | 0.2000 | 0.1000 | 0.1429 | 0.8571 | 1.0000 | 1.0000 | 0.1429 | 0.5748 | 0.6363 | 0.6363 | 0.5119 |
+| `gap_map` | 0.0000 | 0.0000 | 0.0286 | 0.0143 | 0.0000 | 0.0000 | 0.1429 | 0.1429 | 0.0000 | 0.0000 | 0.0553 | 0.0553 | 0.0286 |
+| `jd_description` | 0.3333 | 0.2222 | 0.1667 | 0.1333 | 0.3333 | 0.6667 | 0.8333 | 1.3333 | 0.3333 | 0.5436 | 0.6081 | 0.7824 | 0.5278 |
+| `requirement_evidence` | 0.1667 | 0.0556 | 0.0333 | 0.0250 | 0.1667 | 0.1667 | 0.1667 | 0.2500 | 0.1667 | 0.1667 | 0.1667 | 0.1944 | 0.1786 |
+| `resume_variant` | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+
+解读：BGE-M3 已经比 SHA-256 临时 embedding 更适合做正式质量基线，但当前 21-run 结果还不能视为高质量 retriever。小/中 bucket 的可评估标签较少，precision@1 与 MRR 尚可；full-raw bucket 在 642 chunks 的规模下明显退化，尤其是 `gap_map`、`resume_variant` 和部分 `requirement_evidence` 召回很弱。下一轮优化应优先处理 source_type-aware query、chunk text 构造和低相关阈值/重排，而不是只看整体 hit count。
+
 ## 2026-05-25 接下来改进顺序安排
 
 在 retriever 细粒度埋点和 full-raw 本地 NLP/IR 评估链路补齐后，下一轮改进按以下顺序推进：
@@ -319,4 +408,4 @@ retriever NLP/IR 评估补齐包括：
 
 5. 检索 hit rate 修复
 
-   检索 hit rate 修复放在真实 embedding / pgvector 路径进入实现期之后。当前 deterministic SHA-256 embedding 无法表达语义相似性，过早做 query rewrite 或 fallback 调整容易优化到临时向量实现上；该方向不作为当前近端性能闭环的第一步。
+   检索 hit rate 修复现在可以基于真实 embedding / pgvector 路径继续推进。当前默认 embedding 已切换为 `BAAI/bge-m3`，向量维度为 1024；后续 query rewrite 或 fallback 调整应基于重新索引后的 BGE 结果评估，而不是旧的 deterministic SHA-256 baseline。
