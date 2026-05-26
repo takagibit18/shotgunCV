@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from shotguncv_core.rag.embeddings import cosine_similarity, deterministic_embedding
+from shotguncv_core.rag.embeddings import EmbeddingModel, cosine_similarity, embed_many, embed_text
 
 
 @dataclass(frozen=True)
@@ -28,12 +28,16 @@ class Retriever(Protocol):
 
 
 class InMemoryVectorRetriever:
-    def __init__(self, chunks: list[dict[str, Any]]) -> None:
+    def __init__(self, chunks: list[dict[str, Any]], *, embedding_model: EmbeddingModel | None = None) -> None:
         self._chunks = chunks
+        self._embedding_model = embedding_model
+        self._chunk_embeddings: list[list[float]] | None = None
 
     @classmethod
-    def from_chunks(cls, chunks: list[dict[str, Any]]) -> "InMemoryVectorRetriever":
-        return cls(chunks)
+    def from_chunks(
+        cls, chunks: list[dict[str, Any]], *, embedding_model: EmbeddingModel | None = None
+    ) -> "InMemoryVectorRetriever":
+        return cls(chunks, embedding_model=embedding_model)
 
     def search(
         self,
@@ -45,9 +49,10 @@ class InMemoryVectorRetriever:
         run_id: str | None = None,
         source_type: str | None = None,
     ) -> list[RetrievalResult]:
-        query_embedding = deterministic_embedding(query)
+        query_embedding = embed_text(query, self._embedding_model)
+        chunk_embeddings = self._get_chunk_embeddings()
         results: list[RetrievalResult] = []
-        for chunk in self._chunks:
+        for chunk, chunk_embedding in zip(self._chunks, chunk_embeddings):
             metadata = chunk["metadata"]
             if candidate_id and metadata.get("candidate_id") != candidate_id:
                 continue
@@ -57,14 +62,20 @@ class InMemoryVectorRetriever:
                 continue
             if source_type and metadata.get("source_type") != source_type:
                 continue
-            score = cosine_similarity(query_embedding, deterministic_embedding(chunk["text"]))
+            score = cosine_similarity(query_embedding, chunk_embedding)
             results.append(RetrievalResult(text=chunk["text"], metadata=metadata, score=round(score, 6)))
         return sorted(results, key=lambda item: item.score, reverse=True)[:limit]
 
+    def _get_chunk_embeddings(self) -> list[list[float]]:
+        if self._chunk_embeddings is None:
+            self._chunk_embeddings = embed_many([str(chunk.get("text") or "") for chunk in self._chunks], self._embedding_model)
+        return self._chunk_embeddings
+
 
 class PgVectorRetriever:
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, embedding_model: EmbeddingModel | None = None) -> None:
         self.database_url = database_url
+        self._embedding_model = embedding_model
 
     def search(
         self,
@@ -80,7 +91,7 @@ class PgVectorRetriever:
             import psycopg
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("Install ShotgunCV with the `rag` extra to use PostgreSQL retrieval.") from exc
-        embedding = deterministic_embedding(query)
+        embedding = embed_text(query, self._embedding_model)
         filters = []
         params: list[Any] = [embedding]
         if candidate_id:

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from shotguncv_core.db.schema import all_schema_sql
-from shotguncv_core.rag.embeddings import deterministic_embedding
+from shotguncv_core.rag.embeddings import embed_text
 from shotguncv_core.rag.documents import build_retrieval_chunks
 from shotguncv_core.run_logs import log_index_batch, log_stage_failed, log_stage_finished, log_stage_started
 from shotguncv_core.storage import load_json
@@ -239,7 +239,7 @@ def _upsert_batch(conn: object, batch: ProjectionBatch, *, skip_chunks: bool) ->
                         metadata["provenance_summary"],
                         chunk["text"],
                         Json(metadata),
-                        deterministic_embedding(chunk["text"]),
+                        embed_text(chunk["text"]),
                     ),
                 )
 
