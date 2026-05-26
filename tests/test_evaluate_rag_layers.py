@@ -28,7 +28,34 @@ def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None
     assert report["sample_count"] == 30
     assert report["answerable_sample_count"] == 25
     assert report["no_answer_behavior"]["query_count"] == 5
+    assert report["no_answer_behavior"]["quality_gate"]["status"] == "passed"
+    assert report["no_answer_behavior"]["score_threshold"] == 0.8
+    assert report["no_answer_behavior"]["abstention_rate"] == 1.0
+    assert all(item["abstained"] for item in report["no_answer_behavior"]["queries"])
+    assert all(item["effective_result_count"] == 0 for item in report["no_answer_behavior"]["queries"])
     assert set(report["case_type_metrics"]) == {"common_question", "multi_document", "stale_or_conflicting"}
+
+
+def test_evaluate_retriever_layer_fails_no_answer_gate_when_score_crosses_threshold(tmp_path: Path) -> None:
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    _write_json(golden_path, payload)
+    run_dir = _write_run_with_expected_documents(tmp_path / "run", payload)
+
+    report = evaluate_retriever_layer(
+        run_dir=run_dir,
+        golden_file=golden_path,
+        output_path=tmp_path / "retriever.json",
+        k_values=[1, 3],
+        embedding_model=_KeywordEmbeddingModel(),
+        no_answer_score_threshold=0.1,
+    )
+
+    gate = report["no_answer_behavior"]["quality_gate"]
+    assert gate["status"] == "failed"
+    assert gate["blocks_generator"] is True
+    assert report["no_answer_behavior"]["abstention_rate"] == 0.0
+    assert all(not item["abstained"] for item in report["no_answer_behavior"]["queries"])
 
 
 def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Path) -> None:
@@ -52,6 +79,51 @@ def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Pa
     assert report["aggregate"]["forbidden_claim_violation_count"] == 0
     assert report["aggregate"]["faithfulness"] > 0.9
     assert set(report["case_type_metrics"]) == {"common_question", "multi_document", "no_answer", "stale_or_conflicting"}
+
+
+def test_evaluate_generator_layer_blocks_no_answer_when_retriever_abstained(tmp_path: Path) -> None:
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    _write_json(golden_path, payload)
+    answers_path = tmp_path / "answers.json"
+    answers = _answers_payload(payload)
+    for answer in answers["answers"]:  # type: ignore[index]
+        if answer["question_id"] == "rag-golden-021":
+            answer["answer"] = "Invented production SLA with confident unsupported details."
+            answer["citations"] = [{"source_id": "unrelated"}]
+    _write_json(answers_path, answers)
+    retriever_report_path = tmp_path / "retriever.json"
+    _write_json(
+        retriever_report_path,
+        {
+            "schema_version": "rag-retriever-layer-metrics-v1",
+            "no_answer_behavior": {
+                "quality_gate": {"status": "passed", "non_abstained_count": 0},
+                "queries": [
+                    {
+                        "question_id": "rag-golden-021",
+                        "abstained": True,
+                        "effective_result_count": 0,
+                        "gate_status": "abstained",
+                    }
+                ],
+            },
+        },
+    )
+
+    report = evaluate_generator_layer(
+        golden_file=golden_path,
+        answers_file=answers_path,
+        output_path=tmp_path / "generator.json",
+        retriever_report_file=retriever_report_path,
+    )
+
+    blocked = next(item for item in report["samples"] if item["question_id"] == "rag-golden-021")
+    assert blocked["blocked_by_retriever_gate"] is True
+    assert blocked["answer_chars"] == 0
+    assert blocked["faithfulness"] == 1.0
+    assert blocked["answer_relevance"] == 1.0
+    assert report["retriever_gate"]["blocked_no_answer_count"] == 1
 
 
 class _KeywordEmbeddingModel:
