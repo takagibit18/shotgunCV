@@ -438,3 +438,40 @@ source type 级结果：
 5. 检索 hit rate 修复
 
    检索 hit rate 修复现在可以基于真实 embedding / pgvector 路径继续推进。当前默认 embedding 已切换为 `BAAI/bge-m3`，向量维度为 1024；后续 query rewrite 或 fallback 调整应基于重新索引后的 BGE 结果评估，而不是旧的 deterministic SHA-256 baseline。
+
+## 2026-05-26 no-answer threshold + abstention gate results
+
+Local real-run check used `baseline/runs-formal-20260520/baseline-formal-r3-full-raw-library-20260520` with `fixtures/golden_rag_questions.json` and wrote the ignored report `baseline/tmp-codex-no-answer-abstention-rerun.json`.
+
+| Metric | Previous retriever report | threshold + abstention gate |
+|------|----------------------------|-----------------------------|
+| sample_count | 30 | 30 |
+| answerable_sample_count | 25 | 25 |
+| no_answer_sample_count | 5 | 5 |
+| no_answer weak top-k passed to generator | 5/5 | 0/5 |
+| no_answer abstention_rate | 0.0 | 1.0 |
+| no_answer gate status | not present | passed |
+| no_answer non_abstained_count | not present | 0 |
+| answerable precision@10 | 0.0120 | 0.0120 |
+| answerable recall@10 | 0.0800 | 0.0800 |
+| answerable MRR | 0.0168 | 0.0168 |
+
+The five no-answer top scores were `0.594330`, `0.602601`, `0.606408`, `0.599532`, and `0.598400`. Threshold sweep on this run showed `0.55` still leaks 5/5 no-answer samples, `0.60` leaks 2/5, and `0.65+` leaks 0/5. The current default `0.8` is conservative for this sample. This result measures retriever-layer blocking of weak evidence before generator input; it does not by itself prove e2e answer text quality.
+
+### Generator-layer gate check
+
+To check whether the retriever abstention gate actually blocks generator-layer answers, a temporary malicious answers file was generated at `baseline/tmp-codex-generator-gate-answers.json`. It intentionally filled all five `no_answer` samples with unsupported confident claims. Two generator-layer reports were produced:
+
+- Without retriever gate: `baseline/tmp-codex-generator-without-gate.json`
+- With retriever gate: `baseline/tmp-codex-generator-with-gate.json`, using `--retriever-report baseline/tmp-codex-no-answer-abstention-rerun.json`
+
+| Metric | without retriever gate | with retriever gate |
+|------|-------------------------|---------------------|
+| answered_sample_count | 30 | 25 |
+| no_answer_answered_count | 5/5 | 0/5 |
+| no_answer_blocked_count | 0/5 | 5/5 |
+| no_answer answer_chars | 105 each | 0 each |
+| retriever_gate.enabled | false | true |
+| retriever_gate.blocked_question_ids | none | rag-golden-003, rag-golden-018, rag-golden-019, rag-golden-020, rag-golden-021 |
+
+Conclusion: the generator layer now consumes the retriever report and blocks all no-answer samples that were marked `abstained` by the retriever gate, even when the answers file contains fabricated text. This check validates the gate wiring; it is still an offline layered-evaluation check rather than a full production RAG endpoint test.

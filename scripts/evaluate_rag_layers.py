@@ -22,6 +22,9 @@ from shotguncv_core.rag.metrics import evaluate_labeled_retrieval_queries  # noq
 from shotguncv_core.rag.retrieval import InMemoryVectorRetriever  # noqa: E402
 
 
+NO_ANSWER_SCORE_THRESHOLD = 0.8
+
+
 def evaluate_retriever_layer(
     *,
     run_dir: Path,
@@ -29,6 +32,7 @@ def evaluate_retriever_layer(
     output_path: Path,
     k_values: list[int],
     embedding_model: EmbeddingModel | None = None,
+    no_answer_score_threshold: float = NO_ANSWER_SCORE_THRESHOLD,
 ) -> dict[str, Any]:
     payload = _load_valid_golden(golden_file)
     samples = _samples(payload)
@@ -59,7 +63,12 @@ def evaluate_retriever_layer(
         "quality_gate": quality_gate,
         "metrics": metrics,
         "case_type_metrics": _case_type_metrics(metrics["queries"], query_specs, k_values),
-        "no_answer_behavior": _no_answer_behavior(retriever, samples, k_values),
+        "no_answer_behavior": _no_answer_behavior(
+            retriever,
+            samples,
+            k_values,
+            score_threshold=no_answer_score_threshold,
+        ),
     }
     _write_json(output_path, report)
     return report
@@ -71,20 +80,32 @@ def evaluate_generator_layer(
     answers_file: Path,
     output_path: Path,
     run_dir: Path | None = None,
+    retriever_report_file: Path | None = None,
 ) -> dict[str, Any]:
     payload = _load_valid_golden(golden_file)
     samples = _samples(payload)
     answers = _load_answers(answers_file)
     chunks = build_projection_batch(run_dir).retrieval_chunks if run_dir else []
-    sample_reports = [_evaluate_generator_sample(sample, answers.get(str(sample["question_id"]), {}), chunks) for sample in samples]
+    retriever_gate = _load_retriever_gate(retriever_report_file)
+    sample_reports = [
+        _evaluate_generator_sample(
+            sample,
+            answers.get(str(sample["question_id"]), {}),
+            chunks,
+            retriever_gate.get(str(sample["question_id"])),
+        )
+        for sample in samples
+    ]
     report = {
         "schema_version": "rag-generator-layer-metrics-v1",
         "golden_file": str(golden_file),
         "answers_file": str(answers_file),
         "run_dir": str(run_dir) if run_dir else None,
+        "retriever_report_file": str(retriever_report_file) if retriever_report_file else None,
         "golden_schema_version": payload["schema_version"],
         "sample_count": len(samples),
         "answered_sample_count": sum(1 for item in sample_reports if item["answer_chars"] > 0),
+        "retriever_gate": _retriever_gate_summary(retriever_gate, sample_reports),
         "aggregate": _aggregate_generator_samples(sample_reports),
         "case_type_metrics": _generator_case_type_metrics(sample_reports),
         "samples": sample_reports,
@@ -181,26 +202,49 @@ def _aggregate_retriever_queries(query_reports: list[dict[str, Any]], k_values: 
     }
 
 
-def _no_answer_behavior(retriever: InMemoryVectorRetriever, samples: list[dict[str, Any]], k_values: list[int]) -> dict[str, Any]:
+def _no_answer_behavior(
+    retriever: InMemoryVectorRetriever,
+    samples: list[dict[str, Any]],
+    k_values: list[int],
+    *,
+    score_threshold: float,
+) -> dict[str, Any]:
     limit = max(k_values) if k_values else 10
     reports = []
     for sample in samples:
         if sample.get("case_type") != "no_answer":
             continue
         results = retriever.search(str(sample["question"]), limit=limit)
+        top_score = results[0].score if results else None
+        abstained = top_score is None or top_score < score_threshold
         reports.append(
             {
                 "question_id": sample["question_id"],
                 "retrieved_count": len(results),
-                "top_score": results[0].score if results else None,
+                "effective_result_count": 0 if abstained else len(results),
+                "top_score": top_score,
+                "score_threshold": score_threshold,
+                "abstained": abstained,
+                "gate_status": "abstained" if abstained else "needs_review",
                 "should_abstain": True,
             }
         )
     non_empty = sum(1 for item in reports if item["retrieved_count"] > 0)
+    abstained_count = sum(1 for item in reports if item["abstained"])
+    leaked_count = len(reports) - abstained_count
     return {
         "query_count": len(reports),
         "non_empty_result_count": non_empty,
         "empty_result_rate": ((len(reports) - non_empty) / len(reports)) if reports else 1.0,
+        "score_threshold": score_threshold,
+        "abstained_count": abstained_count,
+        "abstention_rate": (abstained_count / len(reports)) if reports else 1.0,
+        "quality_gate": {
+            "status": "passed" if leaked_count == 0 else "failed",
+            "max_allowed_non_abstained": 0,
+            "non_abstained_count": leaked_count,
+            "blocks_generator": leaked_count > 0,
+        },
         "queries": reports,
     }
 
@@ -221,22 +265,57 @@ def _load_answers(answers_file: Path) -> dict[str, dict[str, Any]]:
     return answers
 
 
-def _evaluate_generator_sample(sample: dict[str, Any], answer_record: dict[str, Any], chunks: list[dict[str, Any]]) -> dict[str, Any]:
+def _load_retriever_gate(retriever_report_file: Path | None) -> dict[str, dict[str, Any]]:
+    if retriever_report_file is None:
+        return {}
+    payload = json.loads(retriever_report_file.read_text(encoding="utf-8"))
+    no_answer_behavior = payload.get("no_answer_behavior") if isinstance(payload, dict) else {}
+    queries = no_answer_behavior.get("queries") if isinstance(no_answer_behavior, dict) else []
+    if not isinstance(queries, list):
+        return {}
+    return {
+        str(item["question_id"]): item
+        for item in queries
+        if isinstance(item, dict) and str(item.get("question_id") or "").strip()
+    }
+
+
+def _retriever_gate_summary(retriever_gate: dict[str, dict[str, Any]], samples: list[dict[str, Any]]) -> dict[str, Any]:
+    blocked = [sample for sample in samples if sample.get("blocked_by_retriever_gate")]
+    return {
+        "enabled": bool(retriever_gate),
+        "blocked_no_answer_count": len(blocked),
+        "blocked_question_ids": [str(sample["question_id"]) for sample in blocked],
+    }
+
+
+def _evaluate_generator_sample(
+    sample: dict[str, Any],
+    answer_record: dict[str, Any],
+    chunks: list[dict[str, Any]],
+    retriever_gate_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    blocked_by_gate = _blocked_by_retriever_gate(sample, retriever_gate_record)
     answer = str(answer_record.get("answer") or "")
     expected_labels = [_document_label(document) for document in sample.get("expected_documents", [])]
     citations = answer_record.get("citations") or answer_record.get("evidence_citations") or []
     if not isinstance(citations, list):
         citations = []
+    if blocked_by_gate:
+        answer = ""
+        citations = []
     perfect_documents = [_matched_label_summary(chunks, label) for label in expected_labels] if chunks else []
     must_cover = _coverage(answer, sample.get("must_cover_points", []))
     forbidden = _matched_forbidden_claims(answer, sample.get("forbidden_claims", []))
     citation_accuracy = _citation_accuracy(citations, expected_labels)
-    faithfulness = _faithfulness(answer, forbidden, citation_accuracy, bool(expected_labels))
-    relevance = _answer_relevance(answer, sample)
+    faithfulness = 1.0 if blocked_by_gate else _faithfulness(answer, forbidden, citation_accuracy, bool(expected_labels))
+    relevance = 1.0 if blocked_by_gate else _answer_relevance(answer, sample)
     return {
         "question_id": sample["question_id"],
         "case_type": sample.get("case_type"),
         "answer_chars": len(answer),
+        "blocked_by_retriever_gate": blocked_by_gate,
+        "retriever_gate_status": (retriever_gate_record or {}).get("gate_status"),
         "expected_labels": expected_labels,
         "perfect_document_count": len(perfect_documents),
         "faithfulness": faithfulness,
@@ -246,6 +325,14 @@ def _evaluate_generator_sample(sample: dict[str, Any], answer_record: dict[str, 
         "forbidden_claims_matched": forbidden,
         "citation_accuracy": citation_accuracy,
     }
+
+
+def _blocked_by_retriever_gate(sample: dict[str, Any], retriever_gate_record: dict[str, Any] | None) -> bool:
+    if sample.get("case_type") != "no_answer" or not retriever_gate_record:
+        return False
+    if retriever_gate_record.get("abstained") is True:
+        return True
+    return int(retriever_gate_record.get("effective_result_count") or 0) == 0
 
 
 def _aggregate_generator_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -403,8 +490,15 @@ def main() -> int:
     parser.add_argument("--golden-file", type=Path, default=ROOT / "fixtures" / "golden_rag_questions.json")
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--answers-file", type=Path)
+    parser.add_argument("--retriever-report", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--k", type=int, action="append", default=[1, 3, 5, 10])
+    parser.add_argument(
+        "--no-answer-score-threshold",
+        type=float,
+        default=NO_ANSWER_SCORE_THRESHOLD,
+        help="Minimum top retrieval score required before a no-answer sample is treated as non-abstained.",
+    )
     args = parser.parse_args()
     if args.layer == "retriever":
         if not args.run_dir:
@@ -414,6 +508,7 @@ def main() -> int:
             golden_file=args.golden_file,
             output_path=args.output,
             k_values=args.k,
+            no_answer_score_threshold=args.no_answer_score_threshold,
         )
         print(json.dumps({"output": str(args.output), "aggregate": report["metrics"]["aggregate"]}, ensure_ascii=False, indent=2))
         return 0
@@ -424,6 +519,7 @@ def main() -> int:
         answers_file=args.answers_file,
         output_path=args.output,
         run_dir=args.run_dir,
+        retriever_report_file=args.retriever_report,
     )
     print(json.dumps({"output": str(args.output), "aggregate": report["aggregate"]}, ensure_ascii=False, indent=2))
     return 0
