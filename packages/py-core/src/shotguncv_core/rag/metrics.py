@@ -20,7 +20,12 @@ def evaluate_labeled_retrieval_queries(
     for spec in query_specs:
         query = str(spec["query"])
         expected = [str(item) for item in spec.get("expected_chunks", []) if str(item).strip()]
-        results = retriever.search(query, limit=search_limit)
+        search_kwargs: dict[str, Any] = {"limit": search_limit}
+        for filter_key in ("candidate_id", "jd_id", "source_type"):
+            value = spec.get(filter_key)
+            if value:
+                search_kwargs[filter_key] = value
+        results = retriever.search(query, **search_kwargs)
         ranked_ids = [_ranked_label_for_result(result, expected) for result in results]
         metrics = evaluate_ranked_retrieval(ranked_ids=ranked_ids, relevant_ids=set(expected), k_values=ks)
         query_reports.append(

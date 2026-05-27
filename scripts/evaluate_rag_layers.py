@@ -24,6 +24,8 @@ from shotguncv_core.rag.retrieval import InMemoryBM25Retriever, InMemoryHybridRe
 
 NO_ANSWER_SCORE_THRESHOLD = 0.8
 
+_JD_ID_RE = re.compile(r"jd-\d+")
+
 
 def evaluate_retriever_layer(
     *,
@@ -138,13 +140,37 @@ def _samples(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _sample_to_query_spec(sample: dict[str, Any]) -> dict[str, Any]:
-    return {
+    expected_docs = sample.get("expected_documents", [])
+    spec: dict[str, Any] = {
         "query_id": sample["question_id"],
         "query": sample["question"],
         "case_type": sample.get("case_type"),
-        "expected_chunks": [_document_label(document) for document in sample.get("expected_documents", [])],
-        "expected_documents": sample.get("expected_documents", []),
+        "expected_chunks": [_document_label(document) for document in expected_docs],
+        "expected_documents": expected_docs,
     }
+    jd_id = _extract_jd_id(expected_docs)
+    if jd_id:
+        spec["jd_id"] = jd_id
+    source_type = _extract_source_type(expected_docs)
+    if source_type:
+        spec["source_type"] = source_type
+    return spec
+
+
+def _extract_jd_id(expected_documents: list[dict[str, Any]]) -> str | None:
+    jd_ids: set[str] = set()
+    for doc in expected_documents:
+        source_id = str(doc.get("source_id") or "")
+        m = _JD_ID_RE.search(source_id)
+        if m:
+            jd_ids.add(m.group(0))
+    return jd_ids.pop() if len(jd_ids) == 1 else None
+
+
+def _extract_source_type(expected_documents: list[dict[str, Any]]) -> str | None:
+    source_types: set[str] = {str(doc.get("source_type") or "").strip() for doc in expected_documents}
+    source_types.discard("")
+    return source_types.pop() if len(source_types) == 1 else None
 
 
 def _label_coverage(chunks: list[dict[str, Any]], query_specs: list[dict[str, Any]]) -> dict[str, Any]:
