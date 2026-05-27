@@ -58,6 +58,26 @@ def test_evaluate_retriever_layer_fails_no_answer_gate_when_score_crosses_thresh
     assert all(not item["abstained"] for item in report["no_answer_behavior"]["queries"])
 
 
+def test_evaluate_retriever_layer_can_select_hybrid_retriever(tmp_path: Path) -> None:
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    _write_json(golden_path, payload)
+    run_dir = _write_run_with_expected_documents(tmp_path / "run", payload)
+
+    report = evaluate_retriever_layer(
+        run_dir=run_dir,
+        golden_file=golden_path,
+        output_path=tmp_path / "retriever.json",
+        k_values=[1, 3],
+        embedding_model=_KeywordEmbeddingModel(),
+        retriever_mode="hybrid",
+    )
+
+    assert report["retriever_mode"] == "hybrid"
+    assert report["retriever_type"] == "InMemoryHybridRetriever"
+    assert report["metrics"]["query_count"] == 25
+
+
 def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Path) -> None:
     golden_path = tmp_path / "golden.json"
     payload = _golden_payload()

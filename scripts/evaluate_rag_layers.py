@@ -19,7 +19,7 @@ from scripts.validate_golden_rag_set import validate_golden_set  # noqa: E402
 from shotguncv_core.db.indexer import build_projection_batch  # noqa: E402
 from shotguncv_core.rag.embeddings import EmbeddingModel  # noqa: E402
 from shotguncv_core.rag.metrics import evaluate_labeled_retrieval_queries  # noqa: E402
-from shotguncv_core.rag.retrieval import InMemoryVectorRetriever  # noqa: E402
+from shotguncv_core.rag.retrieval import InMemoryBM25Retriever, InMemoryHybridRetriever, InMemoryVectorRetriever, Retriever  # noqa: E402
 
 
 NO_ANSWER_SCORE_THRESHOLD = 0.8
@@ -33,11 +33,16 @@ def evaluate_retriever_layer(
     k_values: list[int],
     embedding_model: EmbeddingModel | None = None,
     no_answer_score_threshold: float = NO_ANSWER_SCORE_THRESHOLD,
+    retriever_mode: str = "dense",
 ) -> dict[str, Any]:
     payload = _load_valid_golden(golden_file)
     samples = _samples(payload)
     batch = build_projection_batch(run_dir)
-    retriever = InMemoryVectorRetriever.from_chunks(batch.retrieval_chunks, embedding_model=embedding_model)
+    retriever, retriever_type = _build_retriever(
+        batch.retrieval_chunks,
+        retriever_mode=retriever_mode,
+        embedding_model=embedding_model,
+    )
     query_specs = [_sample_to_query_spec(sample) for sample in samples if sample.get("case_type") != "no_answer"]
     coverage = _label_coverage(batch.retrieval_chunks, query_specs)
     quality_gate = _quality_gate(coverage)
@@ -54,7 +59,8 @@ def evaluate_retriever_layer(
         "run_dir": str(run_dir),
         "golden_file": str(golden_file),
         "golden_schema_version": payload["schema_version"],
-        "retriever_type": "InMemoryVectorRetriever",
+        "retriever_mode": retriever_mode,
+        "retriever_type": retriever_type,
         "chunk_count": len(batch.retrieval_chunks),
         "sample_count": len(samples),
         "answerable_sample_count": len(query_specs),
@@ -203,7 +209,7 @@ def _aggregate_retriever_queries(query_reports: list[dict[str, Any]], k_values: 
 
 
 def _no_answer_behavior(
-    retriever: InMemoryVectorRetriever,
+    retriever: Retriever,
     samples: list[dict[str, Any]],
     k_values: list[int],
     *,
@@ -247,6 +253,21 @@ def _no_answer_behavior(
         },
         "queries": reports,
     }
+
+
+def _build_retriever(
+    chunks: list[dict[str, Any]],
+    *,
+    retriever_mode: str,
+    embedding_model: EmbeddingModel | None,
+) -> tuple[Retriever, str]:
+    if retriever_mode == "dense":
+        return InMemoryVectorRetriever.from_chunks(chunks, embedding_model=embedding_model), "InMemoryVectorRetriever"
+    if retriever_mode == "bm25":
+        return InMemoryBM25Retriever.from_chunks(chunks), "InMemoryBM25Retriever"
+    if retriever_mode == "hybrid":
+        return InMemoryHybridRetriever.from_chunks(chunks, embedding_model=embedding_model), "InMemoryHybridRetriever"
+    raise ValueError(f"Unsupported retriever mode: {retriever_mode}")
 
 
 def _load_answers(answers_file: Path) -> dict[str, dict[str, Any]]:
@@ -493,6 +514,7 @@ def main() -> int:
     parser.add_argument("--retriever-report", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--k", type=int, action="append", default=[1, 3, 5, 10])
+    parser.add_argument("--retriever-mode", choices=["dense", "bm25", "hybrid"], default="dense")
     parser.add_argument(
         "--no-answer-score-threshold",
         type=float,
@@ -509,6 +531,7 @@ def main() -> int:
             output_path=args.output,
             k_values=args.k,
             no_answer_score_threshold=args.no_answer_score_threshold,
+            retriever_mode=args.retriever_mode,
         )
         print(json.dumps({"output": str(args.output), "aggregate": report["metrics"]["aggregate"]}, ensure_ascii=False, indent=2))
         return 0
