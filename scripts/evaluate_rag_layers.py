@@ -36,6 +36,8 @@ def evaluate_retriever_layer(
     embedding_model: EmbeddingModel | None = None,
     no_answer_score_threshold: float = NO_ANSWER_SCORE_THRESHOLD,
     retriever_mode: str = "dense",
+    vector_weight: float = 0.75,
+    bm25_weight: float = 0.25,
 ) -> dict[str, Any]:
     payload = _load_valid_golden(golden_file)
     samples = _samples(payload)
@@ -44,6 +46,8 @@ def evaluate_retriever_layer(
         batch.retrieval_chunks,
         retriever_mode=retriever_mode,
         embedding_model=embedding_model,
+        vector_weight=vector_weight,
+        bm25_weight=bm25_weight,
     )
     query_specs = [_sample_to_query_spec(sample) for sample in samples if sample.get("case_type") != "no_answer"]
     coverage = _label_coverage(batch.retrieval_chunks, query_specs)
@@ -286,13 +290,23 @@ def _build_retriever(
     *,
     retriever_mode: str,
     embedding_model: EmbeddingModel | None,
+    vector_weight: float = 0.75,
+    bm25_weight: float = 0.25,
 ) -> tuple[Retriever, str]:
     if retriever_mode == "dense":
         return InMemoryVectorRetriever.from_chunks(chunks, embedding_model=embedding_model), "InMemoryVectorRetriever"
     if retriever_mode == "bm25":
         return InMemoryBM25Retriever.from_chunks(chunks), "InMemoryBM25Retriever"
     if retriever_mode == "hybrid":
-        return InMemoryHybridRetriever.from_chunks(chunks, embedding_model=embedding_model), "InMemoryHybridRetriever"
+        return (
+            InMemoryHybridRetriever.from_chunks(
+                chunks,
+                embedding_model=embedding_model,
+                vector_weight=vector_weight,
+                bm25_weight=bm25_weight,
+            ),
+            "InMemoryHybridRetriever",
+        )
     raise ValueError(f"Unsupported retriever mode: {retriever_mode}")
 
 
@@ -547,6 +561,8 @@ def main() -> int:
         default=NO_ANSWER_SCORE_THRESHOLD,
         help="Minimum top retrieval score required before a no-answer sample is treated as non-abstained.",
     )
+    parser.add_argument("--vector-weight", type=float, default=0.75, help="Hybrid retriever vector weight.")
+    parser.add_argument("--bm25-weight", type=float, default=0.25, help="Hybrid retriever BM25 weight.")
     args = parser.parse_args()
     if args.layer == "retriever":
         if not args.run_dir:
@@ -558,6 +574,8 @@ def main() -> int:
             k_values=args.k,
             no_answer_score_threshold=args.no_answer_score_threshold,
             retriever_mode=args.retriever_mode,
+            vector_weight=args.vector_weight,
+            bm25_weight=args.bm25_weight,
         )
         print(json.dumps({"output": str(args.output), "aggregate": report["metrics"]["aggregate"]}, ensure_ascii=False, indent=2))
         return 0

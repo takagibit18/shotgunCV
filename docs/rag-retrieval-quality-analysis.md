@@ -84,7 +84,7 @@ No-answer 样本没有 `expected_documents`，因此不会派生任何过滤条�
 
 - 642 个检索 chunk
 - 25 answerable + 5 no_answer 样本
-- 三种检索模式：dense（bge-m3, 1024d）、BM25（k1=1.5, b=0.75）、hybrid（vector=0.55, BM25=0.45）
+- 三种检索模式：dense（bge-m3, 1024d）、BM25（k1=1.5, b=0.75）、hybrid（vector=0.75, BM25=0.25，经 P1 网格搜索调优）
 - k 值：1, 3, 5, 10
 - **未使用任何搜索过滤** — 642 chunk 对每条 query 全局竞争
 
@@ -123,13 +123,62 @@ Query 是中文，但 requirement_evidence chunk 的核心内容（`requirement_
 
 #### 5. Hybrid 融合策略抑制了各自信号
 
-分数归一化方式与当前权重（vector=0.55, BM25=0.45）导致两个信号相互稀释。修复后 hybrid 仍低于单 BM25，说明权重调优仍是 P1 事项。
+分数归一化方式与权重导致两个信号相互稀释。修复后 hybrid 仍低于单 BM25。
+
+### P1 完成：Hybrid 权重网格搜索（2026-05-27）
+
+分支：`codex/hybrid-weight-tuning`
+
+#### 方法
+
+以 0.05 步长对 `vector_weight` 与 `bm25_weight` 在 `[0.0, 1.0]` 范围做全网格搜索（440 个组合）。通过预计算每条 query 的 vector/BM25 分数（避免重复 embedding 计算），仅遍历权重组合重新计算 MRR。
+
+#### Heatmap（MRR by vector_weight × bm25_weight）
+
+| v_w \ b_w | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+|-----------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|
+| 0.0       | –   | –   | –   | –   | –   | –   | –   | –   | –   | –   | .312|
+| 0.6       | –   | –   | –   | –   | –   | .312| –   | –   | –   | –   | –   |
+| 0.7       | –   | –   | –   | **.316** | – | – | – | – | – | – | – |
+| 0.8       | –   | –   | **.316** | – | – | – | – | – | – | – | – |
+| 0.9       | –   | .296| –   | –   | –   | –   | –   | –   | –   | –   | –   |
+| 1.0       | .278| –   | –   | –   | –   | –   | –   | –   | –   | –   | –   |
+
+> 仅显示有变化的行/列。`–` = 与邻域相同，无独立变化。
+
+#### 结论
+
+| 配置 | MRR | Δ vs BM25 |
+|------|-----|-----------|
+| **纯 BM25** | **0.333** | — |
+| Hybrid 最优 (v=0.75, b=0.25) | 0.316 | −0.017 |
+| Hybrid 默认 (v=0.55, b=0.45) | 0.312 | −0.021 |
+| 纯 Dense | 0.278 | −0.055 |
+
+**核心发现：hybrid 在任何权重下都无法超越纯 BM25。** 网格搜索仅发现一个狭窄的较优区域（v≈0.70–0.875, b≈0.125–0.30），将 MRR 从 0.312 提升至 0.316（+0.004），但仍远低于纯 BM25 的 0.333。
+
+**根因**：当前 embedding 对中英文跨语言 query-chunk 配对几乎不提供互补信号。在 `jd_id` 过滤后，BM25 的 `source_id` 精确匹配已提供最佳排序信号。vector score 在绝大多数 query 上表现为噪声——它打乱了 BM25 的正确排序，而非补充新的相关 chunk。
+
+**动作**：已将默认权重更新为最优值（v=0.75, b=0.25），但实质改进必须依赖跨语言信号增强（见下文 P1 任务）。
+
+#### 数据
+
+完整 440 组结果：`outputs/grid_search_hybrid_weights.json`
+
+Grid search 脚本：`scripts/grid_search_hybrid_weights.py`。使用方式：
+
+```bash
+python scripts/grid_search_hybrid_weights.py \
+  --run-dir baseline/runs-formal-20260520/baseline-formal-r3-full-raw-library-20260520 \
+  --step 0.05 \
+  --output outputs/grid_search_hybrid_weights.json
+```
 
 ### 剩余改进优先级
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
-| **P1** | Hybrid 权重调优 | 网格搜索 `vector_weight`/`bm25_weight`。修复后单 BM25（MRR=0.333）仍优于 hybrid（MRR=0.312） |
+| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316（+0.004），但仍低于纯 BM25（0.333）。**权重调优无法弥合差距。** |
 | **P1** | 对齐黄金 query 与 chunk 语言 | 改写 query 加入预期 chunk 中出现的英文技术术语，提升 dense 和 BM25 命中率 |
 | **P2** | 引入 cross-encoder reranker | 对第一阶段 top-50 结果做重排序，提升 top-k 精度 |
 | **P2** | 同 source_id 多 chunk 合并 | 将同一文档的多个 chunk 合并为单一检索单元，避免文档切碎后单 chunk 无法命中 |

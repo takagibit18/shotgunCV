@@ -138,8 +138,8 @@ class InMemoryHybridRetriever:
         chunks: list[dict[str, Any]],
         *,
         embedding_model: EmbeddingModel | None = None,
-        vector_weight: float = 0.55,
-        bm25_weight: float = 0.45,
+        vector_weight: float = 0.75,
+        bm25_weight: float = 0.25,
     ) -> None:
         self._chunks = chunks
         self._vector = InMemoryVectorRetriever.from_chunks(chunks, embedding_model=embedding_model)
@@ -153,8 +153,8 @@ class InMemoryHybridRetriever:
         chunks: list[dict[str, Any]],
         *,
         embedding_model: EmbeddingModel | None = None,
-        vector_weight: float = 0.55,
-        bm25_weight: float = 0.45,
+        vector_weight: float = 0.75,
+        bm25_weight: float = 0.25,
     ) -> "InMemoryHybridRetriever":
         return cls(chunks, embedding_model=embedding_model, vector_weight=vector_weight, bm25_weight=bm25_weight)
 
