@@ -17,6 +17,8 @@ from shotguncv_core.run_logs import (
 
 PROMPT_TOKEN_BUDGET = 3000
 COMPLETION_TOKEN_BUDGET = 1000
+STRUCTURED_PROMPT_BUDGET = 4000   # Module instructions + evidence, Chinese ~2 chars/token
+STRUCTURED_COMPLETION_BUDGET = 3000  # Multi-layer answers: points + ref + follow-ups + mistakes + rubric
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT_SEC = 30
 
@@ -155,6 +157,7 @@ def _run_json_generation(
     operation: str,
     prompt: str,
     fallback: Any,
+    completion_budget: int = COMPLETION_TOKEN_BUDGET,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     configured = _llm_config()
     prompt_tokens = _estimate_tokens(prompt)
@@ -166,7 +169,7 @@ def _run_json_generation(
             provider="deterministic",
             model="artifact-rag",
             prompt_tokens=prompt_tokens,
-            max_completion_tokens=COMPLETION_TOKEN_BUDGET,
+            max_completion_tokens=completion_budget,
         )
         payload = fallback()
         completion_tokens = _estimate_tokens(json.dumps(payload, ensure_ascii=False))
@@ -180,7 +183,7 @@ def _run_json_generation(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
-            max_completion_tokens=COMPLETION_TOKEN_BUDGET,
+            max_completion_tokens=completion_budget,
             output_parse_status="success",
             fallback_used=False,
         )
@@ -193,10 +196,10 @@ def _run_json_generation(
         provider=configured["provider"],
         model=configured["model"],
         prompt_tokens=prompt_tokens,
-        max_completion_tokens=COMPLETION_TOKEN_BUDGET,
+        max_completion_tokens=completion_budget,
     )
     try:
-        body = _openai_json_call(configured, prompt)
+        body = _openai_json_call(configured, prompt, max_tokens=completion_budget)
         content = body["choices"][0]["message"]["content"]
         payload = _parse_json(content)
         usage = body.get("usage", {}) if isinstance(body, dict) else {}
@@ -213,7 +216,7 @@ def _run_json_generation(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            max_completion_tokens=COMPLETION_TOKEN_BUDGET,
+            max_completion_tokens=completion_budget,
             output_parse_status="success",
             fallback_used=False,
         )
@@ -244,7 +247,7 @@ def _run_json_generation(
             provider="deterministic",
             model="artifact-rag",
             prompt_tokens=prompt_tokens,
-            max_completion_tokens=COMPLETION_TOKEN_BUDGET,
+            max_completion_tokens=completion_budget,
         )
         payload = fallback()
         completion_tokens = _estimate_tokens(json.dumps(payload, ensure_ascii=False))
@@ -258,7 +261,7 @@ def _run_json_generation(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
-            max_completion_tokens=COMPLETION_TOKEN_BUDGET,
+            max_completion_tokens=completion_budget,
             output_parse_status="fallback_success",
             fallback_used=True,
         )
@@ -280,19 +283,19 @@ def _llm_config() -> dict[str, str]:
     return {"provider": "deterministic", "model": "artifact-rag", "base_url": "", "api_key": ""}
 
 
-def _openai_json_call(config: dict[str, str], prompt: str) -> dict[str, Any]:
+def _openai_json_call(config: dict[str, str], prompt: str, max_tokens: int = COMPLETION_TOKEN_BUDGET) -> dict[str, Any]:
     payload = json.dumps(
         {
             "model": config["model"],
             "messages": [
                 {
                     "role": "system",
-                    "content": "Return strict JSON only. Use only the supplied evidence. Do not fabricate facts.",
+                    "content": "Return strict JSON only. Use only the supplied evidence. Do not fabricate facts. All content must be in Chinese.",
                 },
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": COMPLETION_TOKEN_BUDGET,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
     ).encode("utf-8")
@@ -371,10 +374,16 @@ def _evaluation_prompt(*, question: dict[str, Any], answer: str, evidence_citati
     )
 
 
-def _bounded_prompt(prompt: str) -> str:
-    if _estimate_tokens(prompt) <= PROMPT_TOKEN_BUDGET:
+def _bounded_prompt(prompt: str, budget: int = PROMPT_TOKEN_BUDGET) -> str:
+    """Truncate prompt to fit within token budget.
+
+    Uses budget * 2 for character limit (Chinese ~2 chars/token, English ~4).
+    This is a conservative estimate that works for mixed Chinese/English text.
+    """
+    estimated = _estimate_tokens(prompt)
+    if estimated <= budget:
         return prompt
-    return prompt[: PROMPT_TOKEN_BUDGET * 4]
+    return prompt[: budget * 2]
 
 
 def _context_block(citations: list[dict[str, Any]]) -> str:
@@ -575,3 +584,190 @@ def _string_list(value: object) -> list[str]:
         return []
     text = str(value).strip()
     return [text] if text else []
+
+
+# ── Structured question generation (module-aware, multi-layer answers) ──
+
+def generate_module_questions(
+    *,
+    run_dir: Path,
+    jd_id: str,
+    jd_profile: dict[str, Any],
+    module_key: str,
+    module_name_cn: str,
+    evidence_citations: list[dict[str, Any]],
+    target_count: int = 3,
+) -> list[dict[str, Any]]:
+    """Generate interview questions for a specific module with full answer structure.
+
+    Each question includes: question, answer_points, reference_answer,
+    follow_up_questions, common_mistakes, and evaluation_rubric.
+    """
+    prompt = _bounded_prompt(
+        _structured_question_prompt(
+            jd_id=jd_id,
+            jd_profile=jd_profile,
+            module_key=module_key,
+            module_name_cn=module_name_cn,
+            evidence_citations=evidence_citations,
+            target_count=target_count,
+        ),
+        budget=STRUCTURED_PROMPT_BUDGET,
+    )
+    payload, generation = _run_json_generation(
+        run_dir=run_dir,
+        stage="review",
+        operation=f"generate_{module_key}_questions",
+        prompt=prompt,
+        fallback=lambda: _deterministic_structured_questions(
+            jd_id, jd_profile, module_key, module_name_cn, evidence_citations, target_count, {}
+        ),
+        completion_budget=STRUCTURED_COMPLETION_BUDGET,
+    )
+    questions = payload.get("questions") if isinstance(payload, dict) else []
+    if not isinstance(questions, list):
+        questions = []
+    normalized: list[dict[str, Any]] = []
+    for item in questions[:target_count]:
+        if not isinstance(item, dict):
+            continue
+        question_text = str(item.get("question") or "").strip()
+        if not question_text:
+            continue
+        normalized.append(
+            {
+                "question_id": str(item.get("question_id") or f"{jd_id}-{module_key}-{len(normalized) + 1:03d}"),
+                "jd_id": jd_id,
+                "module": module_key,
+                "module_name": module_name_cn,
+                "question": question_text,
+                "answer_points": _string_list(item.get("answer_points")),
+                "reference_answer": str(item.get("reference_answer") or "").strip(),
+                "follow_up_questions": _string_list(item.get("follow_up_questions")),
+                "common_mistakes": _string_list(item.get("common_mistakes")),
+                "evaluation_rubric": item.get("evaluation_rubric") if isinstance(item.get("evaluation_rubric"), dict) else {},
+                "evidence_citations": _select_citations(item.get("evidence_citations"), evidence_citations),
+                "provenance_citation_count": len(_select_citations(item.get("evidence_citations"), evidence_citations)),
+                "generation": generation,
+            }
+        )
+    if not normalized:
+        return _deterministic_structured_questions(
+            jd_id, jd_profile, module_key, module_name_cn, evidence_citations, target_count, generation,
+        )
+    return normalized
+
+
+def _structured_question_prompt(
+    *,
+    jd_id: str,
+    jd_profile: dict[str, Any],
+    module_key: str,
+    module_name_cn: str,
+    evidence_citations: list[dict[str, Any]],
+    target_count: int,
+) -> str:
+    role = f"{jd_profile.get('title', '')} @ {jd_profile.get('company', '')}"
+    requirements = "\n".join(_string_list(jd_profile.get("requirements", []))[:10])
+    keywords = ", ".join(_string_list(jd_profile.get("keywords", []))[:15])
+
+    module_instructions = _MODULE_INSTRUCTIONS.get(module_key, "")
+    prompts = [
+        f"你是一位资深面试官。请为以下岗位生成 {target_count} 道「{module_name_cn}」模块的中文面试题。",
+        f"JD: {jd_id} | {role}",
+        f"关键词: {keywords}",
+        f"岗位要求:\n{requirements}",
+        "",
+        f"--- 本模块出题要求 ---",
+        module_instructions,
+        "",
+        "--- 证据上下文 ---",
+        _context_block(evidence_citations),
+        "",
+        "--- 输出格式 ---",
+        "返回JSON，每道题必须包含以下完整字段：",
+        "{",
+        '  "questions": [{',
+        '    "question_id": "' + f'{jd_id}-{module_key}-001' + '",',
+        '    "question": "中文面试问题",',
+        '    "answer_points": ["回答要点1", "回答要点2", "回答要点3"],',
+        '    "reference_answer": "中文参考回答（200-500字，包含项目背景、技术方案、核心难点、效果指标、复盘改进）",',
+        '    "follow_up_questions": ["追问1", "追问2"],',
+        '    "common_mistakes": ["常见错误1", "常见错误2"],',
+        '    "evaluation_rubric": {"优秀": "标准...", "合格": "标准...", "不合格": "标准..."},',
+        '    "evidence_citations": [{"source_id": "证据ID"}]',
+        "  }]",
+        "}",
+        "",
+        "要求：问题必须结合候选人的真实项目经历和岗位要求，参考回答必须有具体技术细节。禁止编造不存在的经历。使用中文。",
+    ]
+    return _bounded_prompt("\n".join(prompts))
+
+
+def _deterministic_structured_questions(
+    jd_id: str,
+    jd_profile: dict[str, Any],
+    module_key: str,
+    module_name_cn: str,
+    evidence_citations: list[dict[str, Any]],
+    target_count: int,
+    generation: dict[str, Any],
+) -> list[dict[str, Any]]:
+    citations = _select_citations(None, evidence_citations)
+    evidence = _evidence_phrase(citations)
+    title = jd_profile.get("title", "该岗位")
+    questions: list[dict[str, Any]] = []
+    for i in range(target_count):
+        questions.append(
+            {
+                "question_id": f"{jd_id}-{module_key}-{i + 1:03d}",
+                "jd_id": jd_id,
+                "module": module_key,
+                "module_name": module_name_cn,
+                "question": f"请结合实际项目经历，回答关于{title}的{module_name_cn}问题（{i + 1}/{target_count}）。",
+                "answer_points": ["项目背景与个人职责", "技术方案与核心难点", "效果指标与复盘改进"],
+                "reference_answer": f"回答应基于 {evidence} 中的证据。先描述问题背景，再说明技术方案，最后阐述效果与改进方向。避免编造硬事实。",
+                "follow_up_questions": ["为什么选择这个技术方案？", "如果重做会怎么改进？"],
+                "common_mistakes": ["回答过于笼统缺乏具体技术细节", "将团队成果包装为个人贡献"],
+                "evaluation_rubric": {"优秀": "有具体数据和技术细节", "合格": "基本覆盖要点但缺乏深度", "不合格": "无法回答或明显虚构"},
+                "evidence_citations": citations,
+                "provenance_citation_count": len(citations),
+                "generation": generation,
+            }
+        )
+    return questions
+
+
+# ── Per-module instruction templates ──────────────────────────────────
+
+_MODULE_INSTRUCTIONS: dict[str, str] = {
+    "self_intro_match": """生成定制化自我介绍与岗位匹配问题。
+从JD中抽取核心能力要求，从CV中找对应证据。
+问题应强制要求候选人完成：岗位需求 → 自身经历 → 技术证据 → 项目结果。
+示例：你的简历里有几个项目，哪个项目和这个岗位最相关？为什么？""",
+
+    "jd_core_calibration": """考察候选人是否真正理解JD为什么需要这些能力。
+不是问"会不会"，而是问"你怎么理解这个岗位为什么需要它"。
+根据JD中的技术栈和业务场景，生成针对性理解题。
+示例：这个岗位提到RAG和Agent，你怎么理解二者在工程实践上的区别？""",
+
+    "fundamentals": """根据JD和CV技术栈动态生成基础概念题。后端：HTTP/HTTPS、RESTful、进程线程协程、Redis、MySQL索引、事务ACID、消息队列。Python/Agent：async/await、asyncio、Pydantic、FastAPI、LLM超时重试。LLM应用：embedding、向量vs关键词检索、RAG流程、rerank、prompt engineering、tool calling、Agent vs workflow。""",
+
+    "tech_stack_deep_dive": """根据CV中写过的具体技术栈生成深度追问。追问到框架选择理由、具体配置、参数调优、工程实践。如CV写了FastAPI+Qdrant+Redis就追问为什么选FastAPI、Qdrant的collection/point/payload、Redis职责、限流日志。核心原则：简历写了什么就必须问到可以判断真假。""",
+
+    "project_interrogation": """最核心模块。按顺序拷打项目经历：项目背景→个人职责→技术方案→核心难点→关键取舍→失败案例→性能效果→可维护性。每道题追问1-2个方向，结合候选人真实项目生成具体问题。禁止泛泛而问。""",
+
+    "system_design": """考察架构能力和工程取舍。根据岗位级别生成相应难度的系统设计题。
+示例：设计一个支持1000 QPS的RAG服务，你会怎么设计系统架构？包括API网关、检索层、生成层、缓存策略、监控告警。
+追问：为什么这样分模块？单点故障怎么处理？如何灰度发布？""",
+
+    "behavioral": """考察协作、沟通、抗压、冲突处理能力。
+示例：请描述一次你和产品经理就技术方案产生分歧的经历，你是怎么处理的？最终结果如何？
+如果项目排期很紧，你会如何平衡技术质量与交付时间？""",
+
+    "counter_question": """模拟真实面试中的反问环节。生成候选人应该在面试结束时反问面试官的问题。
+这些问题应体现候选人对岗位、团队、技术方向的深入思考。
+示例：团队目前在LLM应用开发中最大的技术挑战是什么？团队对Agent的自主程度是怎么考虑的？""",
+
+    "llm_agent_specialized": """LLM/Agent岗专项，三个方向：1.RAG：chunk/embedding/rerank/评估。2.Agent：tool calling/memory/planner/多Agent。3.工程可控性：trace/fallback/权限/injection防护/HITL。每方向1-3题。""",
+}
