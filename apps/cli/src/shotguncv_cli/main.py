@@ -184,10 +184,10 @@ def build_parser() -> argparse.ArgumentParser:
     interview_prep_parser.add_argument("--run-dir", type=Path, required=True, help="Workspace directory for staged artifacts.")
     interview_prep_parser.add_argument("--jd-id", required=False, help="Optional JD id to generate questions for.")
     interview_prep_parser.add_argument(
-        "--max-questions",
+        "--total-questions",
         type=int,
-        default=3,
-        help="Max questions per JD (default: 3).",
+        default=25,
+        help="Total questions for the mock interview (default: 25).",
     )
 
     interview_parser = subparsers.add_parser(
@@ -445,7 +445,7 @@ def _run_interview_prep(args: argparse.Namespace) -> str:
         result = run_interview_prep(
             args.run_dir,
             jd_id=args.jd_id if hasattr(args, "jd_id") else None,
-            max_questions_per_jd=getattr(args, "max_questions", 3),
+            total_questions=getattr(args, "total_questions", 25),
         )
     except Exception as exc:
         log_stage_failed(args.run_dir, "interview_prep", stage_started, exc)
