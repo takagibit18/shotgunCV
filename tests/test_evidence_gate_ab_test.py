@@ -13,18 +13,18 @@ def test_collect_ab_run_metrics_summarizes_threshold_decisions_and_observability
         run_dir / "review" / "post_run_review.json",
         {
             "jd_ids": ["jd-a", "jd-b", "jd-c"],
-            "parallel_topology": {"evidence_threshold": 4},
+            "parallel_topology": {"assess": "serial_by_jd"},
             "decision_review": [
                 {"jd_id": "jd-a", "evidence_status": "sufficient", "apply_decision": "apply", "gate_status": "pass"},
                 {"jd_id": "jd-b", "evidence_status": "insufficient", "apply_decision": "needs_review", "gate_status": "needs_review"},
                 {"jd_id": "jd-c", "evidence_status": "sufficient", "apply_decision": "hold", "gate_status": "pass"},
             ],
-            "retrieval": {
+            "evidence_assessment": {
                 "low_evidence_jd_count": 1,
                 "evidence_by_jd": [
-                    {"jd_id": "jd-a", "evidence_count": 5, "minimum_required": 4, "result_count": 6},
-                    {"jd_id": "jd-b", "evidence_count": 2, "minimum_required": 4, "result_count": 4},
-                    {"jd_id": "jd-c", "evidence_count": 4, "minimum_required": 4, "result_count": 5},
+                    {"jd_id": "jd-a", "evidence_count": 5, "verified_count": 3, "inferred_count": 2, "missing_count": 1, "mismatch_count": 0, "total_requirements": 6, "gate_status": "pass", "evidence_status": "sufficient", "reason": "3 verified, 2 inferred"},
+                    {"jd_id": "jd-b", "evidence_count": 0, "verified_count": 0, "inferred_count": 0, "missing_count": 2, "mismatch_count": 1, "total_requirements": 3, "gate_status": "needs_review", "evidence_status": "insufficient", "reason": "preflight gate needs_review: hard-gate evidence missing"},
+                    {"jd_id": "jd-c", "evidence_count": 4, "verified_count": 3, "inferred_count": 1, "missing_count": 1, "mismatch_count": 0, "total_requirements": 5, "gate_status": "pass", "evidence_status": "sufficient", "reason": "3 verified, 1 inferred"},
                 ],
             },
             "evidence_gap_reports": [{"jd_id": "jd-b"}],
@@ -34,27 +34,9 @@ def test_collect_ab_run_metrics_summarizes_threshold_decisions_and_observability
         run_dir / "logs" / "run_events.jsonl",
         [
             {
-                "event": "retrieval_query",
-                "stage": "review",
-                "retrieval_scope": "combined_deduped",
-                "supporting_hit_count": 5,
-                "source_type_hit_counts": {"candidate_evidence": 2, "requirement_evidence": 3},
-                "source_type_available_counts": {"candidate_evidence": 4, "requirement_evidence": 5},
-                "duration_ms": 3,
-            },
-            {
-                "event": "retrieval_query",
-                "stage": "review",
-                "retrieval_scope": "combined_deduped",
-                "supporting_hit_count": 2,
-                "source_type_hit_counts": {"candidate_evidence": 1},
-                "source_type_available_counts": {"candidate_evidence": 4},
-                "duration_ms": 2,
-            },
-            {
                 "event": "graph_node_finished",
                 "stage": "review",
-                "node": "retrieve_relevant_evidence",
+                "node": "assess_evidence_from_artifacts",
                 "duration_ms": 8,
                 "timing_ms": {"business": 6, "log_write": 1},
             },
@@ -68,9 +50,6 @@ def test_collect_ab_run_metrics_summarizes_threshold_decisions_and_observability
     assert metrics["review_low_evidence_jd_count"] == 1
     assert metrics["evidence_gap_report_count"] == 1
     assert metrics["review_apply_decision_distribution"] == {"apply": 1, "needs_review": 1, "hold": 1}
-    assert metrics["retrieval_combined_query_count"] == 2
-    assert metrics["retrieval_supporting_hit_count"]["avg"] == 3.5
-    assert metrics["retrieval_source_type_hit_counts"] == {"candidate_evidence": 3, "requirement_evidence": 3}
     assert metrics["graph_node_business_duration_ms"]["avg"] == 6
 
 
@@ -87,22 +66,16 @@ def test_aggregate_by_threshold_keeps_ab_comparison_shape() -> None:
             "graph_node_business_duration_ms": {"avg": 3.0},
             "review_apply_decision_distribution": {"apply": 2, "hold": 1},
             "review_gate_status_distribution": {"pass": 3},
-            "retrieval_source_type_hit_counts": {"candidate_evidence": 4},
-            "retrieval_source_type_available_counts": {"candidate_evidence": 6},
         },
         {
             "threshold": 4,
             "review_decision_count": 3,
             "review_low_evidence_jd_count": 1,
             "evidence_gap_report_count": 1,
-            "retrieval_combined_query_count": 3,
-            "retrieval_supporting_hit_count": {"avg": 3.0},
             "graph_node_duration_ms": {"avg": 5.0},
             "graph_node_business_duration_ms": {"avg": 4.0},
             "review_apply_decision_distribution": {"apply": 1, "needs_review": 2},
             "review_gate_status_distribution": {"pass": 1, "needs_review": 2},
-            "retrieval_source_type_hit_counts": {"candidate_evidence": 4},
-            "retrieval_source_type_available_counts": {"candidate_evidence": 6},
         },
     ]
 
