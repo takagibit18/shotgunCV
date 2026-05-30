@@ -14,15 +14,31 @@ class Document:
     metadata: dict[str, Any]
 
 
+# source_types whose documents are short, self-contained semantic units.
+# Splitting them creates unnecessary fragments that compete with each other in rankings.
+_ATOMIC_SOURCE_TYPES: set[str] = {"requirement_evidence", "jd_description", "gap_map"}
+
+
 def build_retrieval_chunks(run_dir: Path, run_id: str, candidate_id: str) -> list[dict[str, Any]]:
     documents = build_documents_from_run(run_dir, run_id, candidate_id)
     chunks: list[dict[str, Any]] = []
     for document in documents:
-        for index, text in enumerate(_split_text(document.page_content)):
-            metadata = {**document.metadata, "chunk_index": index}
+        source_type = str(document.metadata.get("source_type") or "")
+        if source_type in _ATOMIC_SOURCE_TYPES:
+            # Short, self-contained document — use as-is, don't split.
+            text = document.page_content.strip()
+            if not text:
+                continue
+            metadata = {**document.metadata, "chunk_index": 0}
             source_id = metadata["source_id"]
-            chunk_id = _stable_id(f"{run_id}:{source_id}:{index}:{text[:64]}")
+            chunk_id = _stable_id(f"{run_id}:{source_id}:0:{text[:64]}")
             chunks.append({"chunk_id": chunk_id, "text": text, "metadata": metadata})
+        else:
+            for index, text in enumerate(_split_text(document.page_content)):
+                metadata = {**document.metadata, "chunk_index": index}
+                source_id = metadata["source_id"]
+                chunk_id = _stable_id(f"{run_id}:{source_id}:{index}:{text[:64]}")
+                chunks.append({"chunk_id": chunk_id, "text": text, "metadata": metadata})
     return chunks
 
 
