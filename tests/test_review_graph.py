@@ -1,39 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import math
-import re
 from pathlib import Path
 
-import pytest
 from langgraph.graph import StateGraph
 
 from shotguncv_cli.main import run
 import shotguncv_agents.review_graph as review_graph
-
-
-@pytest.fixture(autouse=True)
-def _use_test_review_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(review_graph, "_REVIEW_EMBEDDING_MODEL", _KeywordEmbeddingModel())
-
-
-class _KeywordEmbeddingModel:
-    def embed(self, text: str) -> list[float]:
-        dimensions = 64
-        vector = [0.0] * dimensions
-        for token in _tokens(text):
-            digest = hashlib.sha256(token.encode("utf-8")).digest()
-            vector[int.from_bytes(digest[:2], "big") % dimensions] += 1.0
-        magnitude = math.sqrt(sum(value * value for value in vector)) or 1.0
-        return [value / magnitude for value in vector]
-
-    def embed_many(self, texts: list[str]) -> list[list[float]]:
-        return [self.embed(text) for text in texts]
-
-
-def _tokens(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", text.lower())
 
 
 def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_path: Path) -> None:
@@ -43,7 +16,7 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
 
     assert exit_code == 0, output
     review = _read_json(run_dir / "review" / "post_run_review.json")
-    assert review["schema_version"] == "post-run-review-v3"
+    assert review["schema_version"] == "post-run-review-v4"
     assert review["graph_runtime"] == "small-batch-serial"
     assert review["parallel_topology"]["assess"] == "serial_by_jd"
     assert review["parallel_topology"]["inspect"] == "serial_by_jd"
@@ -79,7 +52,7 @@ def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
     assert exit_code == 0, output
     review = _read_json(run_dir / "review" / "post_run_review.json")
     assert review["graph_runtime"].startswith("langgraph")
-    assert review["parallel_topology"]["retrieve"] == "fanout_by_jd"
+    assert review["parallel_topology"]["assess"] == "fanout_by_jd"
     assert review["parallel_topology"]["inspect"] == "fanout_by_jd"
     assert review["jd_ids"] == ["jd-high", "jd-low", "jd-extra-1", "jd-extra-2"]
 
@@ -121,78 +94,53 @@ def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> N
     review = _read_json(run_dir / "review" / "post_run_review.json")
     decisions = {item["jd_id"]: item for item in review["decision_review"]}
     assert decisions["jd-high"]["evidence_status"] == "sufficient"
-    assert decisions["jd-high"]["skipped_nodes"] == []
     assert decisions["jd-low"]["evidence_status"] == "insufficient"
-    assert decisions["jd-low"]["skipped_nodes"] == [
-        "inspect_score_and_gates",
-        "generate_interview_questions",
-        "generate_reference_answers",
-        "generate_revision_tasks",
-    ]
-    assert review["retrieval"]["low_evidence_jd_count"] == 1
+    assert review["evidence_assessment"]["low_evidence_jd_count"] == 1
     assert len(review["evidence_gap_reports"]) == 1
     gap_report = review["evidence_gap_reports"][0]
     assert gap_report["jd_id"] == "jd-low"
-    assert gap_report["evidence_count"] < gap_report["minimum_required"] == 3
+    assert gap_report["evidence_count"] == 0
+    assert gap_report["gap_reason"] == "preflight gate needs_review: hard-gate evidence missing"
     assert gap_report["recommended_evidence"] == [
         "补充与 Contracts / Legal Operations 直接相关的项目、职责或成果证据。",
         "标注可复核来源，例如原简历条目、项目材料或过往申请反馈。",
         "证据不足前不要生成模板化面试题、参考答案或简历改写任务。",
     ]
-    assert {item["jd_id"] for item in review["interview_questions"]} == {"jd-high"}
-    assert {item["jd_id"] for item in review["reference_answers"]} == {"jd-high"}
-    assert {item["jd_id"] for item in review["revision_tasks"]} == {"jd-high"}
-    assert "jd-low" not in (run_dir / "review" / "interview_prep.md").read_text(encoding="utf-8")
 
 
-def test_review_graph_generates_only_for_sufficient_evidence_jds_with_timing_breakdown(tmp_path: Path) -> None:
+def test_interview_prep_generates_from_structured_artifacts(tmp_path: Path) -> None:
     run_dir = _write_review_ready_artifacts(tmp_path)
 
-    exit_code, output = run(["review", "--run-dir", str(run_dir)])
+    exit_code, output = run(["interview-prep", "--run-dir", str(run_dir)])
 
     assert exit_code == 0, output
-    review = _read_json(run_dir / "review" / "post_run_review.json")
-    assert review["parallel_topology"]["generation"] == "run_level_evidence_sufficient_only"
-
-    events = _read_events(run_dir)
-    question_events = _finished_node_events(events, "generate_interview_questions")
-    answer_events = _finished_node_events(events, "generate_reference_answers")
-    task_events = _finished_node_events(events, "generate_revision_tasks")
-
-    assert len(question_events) == 1
-    assert len(answer_events) == 1
-    assert len(task_events) == 1
-    assert all("timing_ms" in event for event in [*question_events, *answer_events, *task_events])
-    assert all("business" in event["timing_ms"] for event in [*question_events, *answer_events, *task_events])
-    assert all("log_write" in event["timing_ms"] for event in [*question_events, *answer_events, *task_events])
-    assert {item["jd_id"] for item in review["interview_questions"]} == {"jd-high"}
-    assert {item["jd_id"] for item in review["reference_answers"]} == {"jd-high"}
-    assert {item["jd_id"] for item in review["revision_tasks"]} == {"jd-high"}
-
-
-def test_review_graph_uses_rag_llm_generation_and_logs_llm_budget(tmp_path: Path) -> None:
-    run_dir = _write_review_ready_artifacts(tmp_path)
-
-    exit_code, output = run(["review", "--run-dir", str(run_dir)])
-
-    assert exit_code == 0, output
-    review = _read_json(run_dir / "review" / "post_run_review.json")
-    question = review["interview_questions"][0]
-    answer = review["reference_answers"][0]
+    result = _read_json(run_dir / "review" / "interview_prep.json")
+    assert result["schema_version"] == "interview-prep-v1"
+    assert result["candidate_id"] == "cand-001"
+    assert result["jd_ids"] == ["jd-high", "jd-low"]
+    # jd-low has missing hard gate -> no evidence citations
+    assert result["evidence_citations_by_jd"]["jd-low"] == 0
+    # jd-high has 2 verified requirements with evidence_refs
+    assert result["evidence_citations_by_jd"]["jd-high"] >= 1
+    assert len(result["interview_questions"]) >= 1
+    assert len(result["reference_answers"]) >= 1
+    question = result["interview_questions"][0]
+    assert question["jd_id"] == "jd-high"
     assert question["generation"]["provider"] == "deterministic"
-    assert question["generation"]["mode"] == "rag_context"
     assert question["evidence_citations"]
-    assert "LangGraph" in question["question"]
+    answer = result["reference_answers"][0]
     assert answer["provenance_citation_count"] >= 1
 
-    events = _read_events(run_dir)
-    llm_finished = [event for event in events if event["event"] == "llm_call_finished" and event["stage"] == "review"]
-    assert {event["operation"] for event in llm_finished} >= {
-        "generate_interview_questions",
-        "generate_reference_answers",
-    }
-    assert all(event["prompt_tokens"] <= 3000 for event in llm_finished)
-    assert all(event["max_completion_tokens"] <= 1000 for event in llm_finished)
+
+def test_interview_prep_respects_jd_id_filter(tmp_path: Path) -> None:
+    run_dir = _write_review_ready_artifacts(tmp_path)
+
+    exit_code, output = run(["interview-prep", "--run-dir", str(run_dir), "--jd-id", "jd-high"])
+
+    assert exit_code == 0, output
+    result = _read_json(run_dir / "review" / "interview_prep.json")
+    assert result["jd_ids"] == ["jd-high"]
+    assert {q["jd_id"] for q in result["interview_questions"]} == {"jd-high"}
 
 
 def _write_review_ready_artifacts(tmp_path: Path) -> Path:

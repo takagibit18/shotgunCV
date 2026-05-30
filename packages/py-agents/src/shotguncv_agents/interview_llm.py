@@ -315,17 +315,17 @@ def _question_prompt(
 ) -> str:
     return "\n".join(
         [
-            "Generate interview questions from RAG evidence.",
+            "根据以下证据生成中文面试问题。所有问题和预期方向必须使用中文。",
             f"JD ID: {jd_id}",
-            f"Role: {jd_profile.get('title', '')} @ {jd_profile.get('company', '')}",
-            f"Focus items: {json.dumps(focus_items, ensure_ascii=False)}",
-            "Evidence context:",
+            f"岗位: {jd_profile.get('title', '')} @ {jd_profile.get('company', '')}",
+            f"考察方向: {json.dumps(focus_items, ensure_ascii=False)}",
+            "证据上下文:",
             _context_block(evidence_citations),
             (
-                "Return JSON: {\"questions\":[{\"question_id\":\"...\",\"question\":\"...\","
-                "\"expected_direction\":\"...\",\"evidence_citations\":[{\"source_id\":\"...\"}]}]}"
+                "返回JSON: {\"questions\":[{\"question_id\":\"...\",\"question\":\"中文问题\","
+                "\"expected_direction\":\"中文预期答题方向\",\"evidence_citations\":[{\"source_id\":\"...\"}]}]}"
             ),
-            "Every question must cite at least one evidence source_id from the context.",
+            "每个问题必须引用至少一个证据source_id。问题和方向必须为中文。",
         ]
     )
 
@@ -342,15 +342,15 @@ def _answer_prompt(*, questions: list[dict[str, Any]], evidence_citations: list[
     ]
     return "\n".join(
         [
-            "Generate reference answers from RAG evidence.",
-            f"Questions: {json.dumps(compact_questions, ensure_ascii=False)}",
-            "Evidence context:",
+            "根据以下证据生成中文参考回答。所有回答必须使用中文。",
+            f"问题列表: {json.dumps(compact_questions, ensure_ascii=False)}",
+            "证据上下文:",
             _context_block(evidence_citations),
             (
-                "Return JSON: {\"answers\":[{\"question_id\":\"...\",\"jd_id\":\"...\","
-                "\"answer\":\"...\",\"evidence_citations\":[{\"source_id\":\"...\"}]}]}"
+                "返回JSON: {\"answers\":[{\"question_id\":\"...\",\"jd_id\":\"...\","
+                "\"answer\":\"中文参考回答\",\"evidence_citations\":[{\"source_id\":\"...\"}]}]}"
             ),
-            "Answers must mention concrete evidence and must not add unsupported employers, dates, degrees, awards, or metrics.",
+            "回答必须引用具体证据，不得编造不存在的雇主、日期、学位、奖项或数据。回答必须为中文。",
         ]
     )
 
@@ -358,14 +358,14 @@ def _answer_prompt(*, questions: list[dict[str, Any]], evidence_citations: list[
 def _evaluation_prompt(*, question: dict[str, Any], answer: str, evidence_citations: list[dict[str, Any]]) -> str:
     return "\n".join(
         [
-            "Evaluate a simulated interview answer against evidence.",
-            f"Question: {json.dumps(question, ensure_ascii=False)}",
-            f"Answer: {answer}",
-            "Evidence context:",
+            "根据证据评估模拟面试回答。反馈和建议必须使用中文。",
+            f"问题: {json.dumps(question, ensure_ascii=False)}",
+            f"回答: {answer}",
+            "证据上下文:",
             _context_block(evidence_citations),
             (
-                "Return JSON: {\"score\":4.0,\"feedback\":\"...\","
-                "\"improvement_suggestions\":[\"...\"],\"evidence_citations\":[{\"source_id\":\"...\"}]}"
+                "返回JSON: {\"score\":4.0,\"feedback\":\"中文反馈\","
+                "\"improvement_suggestions\":[\"中文建议\"],\"evidence_citations\":[{\"source_id\":\"...\"}]}"
             ),
         ]
     )
@@ -408,16 +408,16 @@ def _deterministic_questions(
     citations = _select_citations(None, evidence_citations)
     evidence = _evidence_phrase(citations)
     questions: list[dict[str, Any]] = []
-    for index, focus in enumerate(focus_items or ["evidence-backed delivery"], start=1):
+    for index, focus in enumerate(focus_items or ["有证据支撑的项目交付"], start=1):
         questions.append(
             {
                 "question_id": f"{jd_id}-q-{index:03d}",
                 "jd_id": jd_id,
                 "question": (
-                    f"Describe a specific {focus} example grounded in {evidence}. "
-                    "What did you build, how was it validated, and what tradeoff mattered most?"
+                    f"请描述一个与 {focus} 相关的具体项目经历，"
+                    f"基于 {evidence} 中的证据。你做了什么、如何验证的、最大的技术取舍是什么？"
                 ),
-                "expected_direction": f"Use retrieved evidence to explain {focus} without adding unsupported facts.",
+                "expected_direction": f"使用已有证据解释 {focus}，不得添加未经证实的事实。",
                 "evidence_citations": citations,
                 "provenance_citation_count": len(citations),
                 "generation": generation or {},
@@ -442,8 +442,9 @@ def _deterministic_answers(
                 "jd_id": str(question.get("jd_id")),
                 "question": str(question.get("question") or ""),
                 "answer": (
-                    f"Anchor the answer in {evidence}. Start with the problem, describe the direct implementation work, "
-                    "then explain the artifact or validation result. Avoid unsupported hard facts and keep the story tied to the cited source."
+                    f"回答应基于 {evidence} 中的证据。先描述问题背景，再说明你直接负责的实施工作，"
+                    "最后阐述产出物或验证结果。避免编造不存在的雇主、日期、学位、奖项等硬事实，"
+                    "确保整个叙述与引用来源保持一致。"
                 ),
                 "evidence_citations": citations,
                 "provenance_citation_count": len(citations),
@@ -458,10 +459,10 @@ def _deterministic_evaluation(question: dict[str, Any], answer: str, evidence_ci
     score = 4.0 if answer.strip() and citations else 2.5
     return {
         "score": score,
-        "feedback": "The answer is usable when it stays tied to the retrieved evidence and avoids unsupported facts.",
+        "feedback": "回答与已有证据一致且避免编造硬事实时可用。",
         "improvement_suggestions": [
-            "Name the cited artifact explicitly.",
-            "Separate direct action from measurable validation.",
+            "明确指出引用的证据来源。",
+            "区分直接实施行为和可衡量的验证结果。",
         ],
         "evidence_citations": citations,
     }
