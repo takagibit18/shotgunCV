@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import operator
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
@@ -27,7 +26,6 @@ class _ReviewGraphState(TypedDict, total=False):
     candidate_id: str
     candidate_profile: dict[str, Any]
     jd_ids: list[str]
-    jd_id: str
     jd_profiles: list[dict[str, Any]]
     scorecards: list[dict[str, Any]]
     gates: list[dict[str, Any]]
@@ -35,7 +33,6 @@ class _ReviewGraphState(TypedDict, total=False):
     strategies: list[dict[str, Any]]
     requirement_matrix: list[dict[str, Any]]
     evidence_records: Annotated[list[dict[str, Any]], operator.add]
-    evidence_record: dict[str, Any]
     decision_review: Annotated[list[dict[str, Any]], operator.add]
     evidence_gap_reports: Annotated[list[dict[str, Any]], operator.add]
     validation: dict[str, Any]
@@ -57,11 +54,11 @@ def run_post_run_review(
         "evidence_gap_reports": [],
     }
     if 0 < len(_preview_jd_ids(run_dir, jd_id=jd_id)) <= SMALL_BATCH_BYPASS_MAX_JDS:
-        return _run_small_batch_serial(initial_state)["review"]
+        return _run_sequential(initial_state, "small-batch-serial")["review"]
     graph_result = _run_langgraph(initial_state)
     if graph_result is not None:
         return graph_result["review"]
-    return _run_threadpool_fallback(initial_state)["review"]
+    return _run_sequential(initial_state, "sequential-fallback")["review"]
 
 
 def _preview_jd_ids(run_dir: Path, *, jd_id: str | None) -> list[str]:
@@ -101,53 +98,18 @@ def _clear_compiled_review_graph_cache() -> None:
 
 def _compile_review_graph() -> Any:
     from langgraph.graph import END, START, StateGraph
-    from langgraph.types import Send
 
-    send_cls = Send
     graph = StateGraph(_ReviewGraphState)
     graph.add_node("load_run_context", _logged_node("load_run_context", _load_run_context))
-    graph.add_node("assess_evidence_from_artifacts", _logged_node("assess_evidence_from_artifacts", _assess_evidence_from_artifacts))
-    graph.add_node("merge_evidence_assessment", _logged_node("merge_evidence_assessment", _merge_evidence_assessment))
-    graph.add_node("inspect_score_and_gates", _logged_node("inspect_score_and_gates", _inspect_score_and_gates))
-    graph.add_node("generate_evidence_gap_report", _logged_node("generate_evidence_gap_report", _generate_evidence_gap_report))
-    graph.add_node("merge_review_paths", _logged_node("merge_review_paths", _merge_review_paths))
+    graph.add_node("summarize_decision_context", _logged_node("summarize_decision_context", _summarize_decision_context))
+    graph.add_node("generate_gap_report_from_artifacts", _logged_node("generate_gap_report_from_artifacts", _generate_gap_report_from_artifacts))
     graph.add_node("validate_against_fabrication_policy", _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy))
     graph.add_node("write_review_artifact", _logged_node("write_review_artifact", _write_review_artifact))
 
-    def _send_assess_jobs(state: _ReviewGraphState) -> list[Any]:
-        return [
-            send_cls(
-                "assess_evidence_from_artifacts",
-                {**_shared_branch_context(state), "jd_id": jd_id},
-            )
-            for jd_id in state["jd_ids"]
-        ]
-
-    def _send_review_path_jobs(state: _ReviewGraphState) -> list[Any]:
-        records = _evidence_records_by_jd(state)
-        jobs: list[Any] = []
-        for jd_id in state["jd_ids"]:
-            record = records[jd_id]
-            node = "inspect_score_and_gates" if record["evidence_status"] == "sufficient" else "generate_evidence_gap_report"
-            jobs.append(
-                send_cls(
-                    node,
-                    {**_shared_branch_context(state), "jd_id": jd_id, "evidence_record": record},
-                )
-            )
-        return jobs
-
     graph.add_edge(START, "load_run_context")
-    graph.add_conditional_edges("load_run_context", _send_assess_jobs, ["assess_evidence_from_artifacts"])
-    graph.add_edge("assess_evidence_from_artifacts", "merge_evidence_assessment")
-    graph.add_conditional_edges(
-        "merge_evidence_assessment",
-        _send_review_path_jobs,
-        ["inspect_score_and_gates", "generate_evidence_gap_report"],
-    )
-    graph.add_edge("inspect_score_and_gates", "merge_review_paths")
-    graph.add_edge("generate_evidence_gap_report", "merge_review_paths")
-    graph.add_edge("merge_review_paths", "validate_against_fabrication_policy")
+    graph.add_edge("load_run_context", "summarize_decision_context")
+    graph.add_edge("summarize_decision_context", "generate_gap_report_from_artifacts")
+    graph.add_edge("generate_gap_report_from_artifacts", "validate_against_fabrication_policy")
     graph.add_edge("validate_against_fabrication_policy", "write_review_artifact")
     graph.add_edge("write_review_artifact", END)
     return graph.compile()
@@ -159,99 +121,28 @@ def _log_langgraph_fallback(state: _ReviewGraphState, exc: Exception) -> None:
         stage="review",
         operation="post_run_review_graph",
         from_provider="langgraph-send",
-        to_provider="threadpool-fallback",
+        to_provider="sequential-fallback",
         reason=f"{exc.__class__.__name__}: {str(exc)[:300]}",
     )
 
 
-def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
-    state = {**state, "graph_runtime": "threadpool-fallback"}
+def _run_sequential(state: _ReviewGraphState, graph_runtime: str) -> _ReviewGraphState:
+    """Run the review pipeline sequentially without LangGraph fan-out.
+
+    Unified fallback for both small-batch bypass and LangGraph-unavailable paths.
+    Calls each node in order — all per-JD processing happens inside
+    summarize_decision_context and generate_gap_report_from_artifacts.
+    """
+    state = {**state, "graph_runtime": graph_runtime}
     state = _apply_update(state, _logged_node("load_run_context", _load_run_context)(state))
-    shared_context = _shared_branch_context(state)
-    assess_states: list[_ReviewGraphState] = []
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(state["jd_ids"])))) as executor:
-        futures = {
-            executor.submit(
-                _logged_node("assess_evidence_from_artifacts", _assess_evidence_from_artifacts),
-                {**shared_context, "jd_id": jd_id},
-            ): jd_id
-            for jd_id in state["jd_ids"]
-        }
-        for future in as_completed(futures):
-            assess_states.append(future.result())
-    for item in assess_states:
-        state["evidence_records"].extend(item.get("evidence_records", []))
-
-    branch_states: list[_ReviewGraphState] = []
-    records = _evidence_records_by_jd(state)
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(state["jd_ids"])))) as executor:
-        futures = {}
-        for jd_id in state["jd_ids"]:
-            record = records[jd_id]
-            node = _inspect_score_and_gates if record["evidence_status"] == "sufficient" else _generate_evidence_gap_report
-            name = "inspect_score_and_gates" if record["evidence_status"] == "sufficient" else "generate_evidence_gap_report"
-            futures[
-                executor.submit(
-                    _logged_node(name, node),
-                    {**_shared_branch_context(state), "jd_id": jd_id, "evidence_record": record},
-                )
-            ] = jd_id
-        for future in as_completed(futures):
-            branch_states.append(future.result())
-    for item in branch_states:
-        state["decision_review"].extend(item.get("decision_review", []))
-        state["evidence_gap_reports"].extend(item.get("evidence_gap_reports", []))
-    state = _apply_update(state, _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy)(state))
-    return _apply_update(state, _logged_node("write_review_artifact", _write_review_artifact)(state))
-
-
-def _run_small_batch_serial(state: _ReviewGraphState) -> _ReviewGraphState:
-    state = {**state, "graph_runtime": "small-batch-serial"}
-    state = _apply_update(state, _logged_node("load_run_context", _load_run_context)(state))
-    shared_context = _shared_branch_context(state)
-
-    for jd_id in state["jd_ids"]:
-        assess_state = _logged_node("assess_evidence_from_artifacts", _assess_evidence_from_artifacts)(
-            {**shared_context, "jd_id": jd_id}
-        )
-        state["evidence_records"].extend(assess_state.get("evidence_records", []))
-
-    records = _evidence_records_by_jd(state)
-    for jd_id in state["jd_ids"]:
-        record = records[jd_id]
-        node = _inspect_score_and_gates if record["evidence_status"] == "sufficient" else _generate_evidence_gap_report
-        name = "inspect_score_and_gates" if record["evidence_status"] == "sufficient" else "generate_evidence_gap_report"
-        branch_state = _logged_node(name, node)(
-            {**_shared_branch_context(state), "jd_id": jd_id, "evidence_record": record}
-        )
-        state["decision_review"].extend(branch_state.get("decision_review", []))
-        state["evidence_gap_reports"].extend(branch_state.get("evidence_gap_reports", []))
-
+    state = _apply_update(state, _logged_node("summarize_decision_context", _summarize_decision_context)(state))
+    state = _apply_update(state, _logged_node("generate_gap_report_from_artifacts", _generate_gap_report_from_artifacts)(state))
     state = _apply_update(state, _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy)(state))
     return _apply_update(state, _logged_node("write_review_artifact", _write_review_artifact)(state))
 
 
 def _apply_update(state: _ReviewGraphState, updates: _ReviewGraphState) -> _ReviewGraphState:
     return {**state, **updates}
-
-
-def _shared_branch_context(state: _ReviewGraphState) -> dict[str, Any]:
-    return {
-        "run_dir": state["run_dir"],
-        "requested_jd_id": state.get("requested_jd_id"),
-        "database_url": state.get("database_url"),
-        "graph_runtime": state.get("graph_runtime", "unknown"),
-        "run_id": state["run_id"],
-        "candidate_id": state["candidate_id"],
-        "candidate_profile": state["candidate_profile"],
-        "jd_ids": state["jd_ids"],
-        "jd_profiles": state["jd_profiles"],
-        "scorecards": state["scorecards"],
-        "gates": state["gates"],
-        "explanations": state["explanations"],
-        "strategies": state["strategies"],
-        "requirement_matrix": state["requirement_matrix"],
-    }
 
 
 def _logged_node(name: str, node: Any) -> Any:
@@ -306,6 +197,11 @@ def _logged_node(name: str, node: Any) -> Any:
     return _run
 
 
+# ---------------------------------------------------------------------------
+# graph nodes
+# ---------------------------------------------------------------------------
+
+
 def _load_run_context(state: _ReviewGraphState) -> _ReviewGraphState:
     run_dir = state["run_dir"]
     candidate = _read_json(run_dir / "analyze" / "candidate_profile.json", {})
@@ -330,129 +226,143 @@ def _load_run_context(state: _ReviewGraphState) -> _ReviewGraphState:
     }
 
 
-def _assess_evidence_from_artifacts(state: _ReviewGraphState) -> _ReviewGraphState:
-    """Determine evidence sufficiency from structured artifacts (requirement_matrix + preflight_gates).
+def _summarize_decision_context(state: _ReviewGraphState) -> _ReviewGraphState:
+    """Assess evidence and produce decision review for all JDs from structured artifacts.
 
-    Replaces the former retrieval-based evidence gate. Reads requirement_matrix.json
-    and preflight_gates.json directly instead of running BM25/dense retrieval over chunks.
+    Replaces the former fan-out of per-JD assess_evidence + inspect_score/generate_gap.
+    Reads requirement_matrix, preflight_gates, scorecards, explanations, and strategies
+    directly — no retrieval calls.
     """
-    jd_id = state["jd_id"]
+    evidence_records: list[dict[str, Any]] = []
+    decision_review: list[dict[str, Any]] = []
     requirement_matrix: list[dict[str, Any]] = state["requirement_matrix"]
     gates: list[dict[str, Any]] = state["gates"]
 
-    # --- Count evidence statuses from requirement_matrix for this JD ---
-    jd_requirements = [item for item in requirement_matrix if str(item.get("jd_id")) == jd_id]
-    verified_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "verified")
-    inferred_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "inferred")
-    missing_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "missing")
-    mismatch_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "mismatch")
-    total_requirements = len(jd_requirements)
+    for jd_id in state["jd_ids"]:
+        # --- evidence assessment (from requirement_matrix + preflight_gates) ---
+        jd_requirements = [item for item in requirement_matrix if str(item.get("jd_id")) == jd_id]
+        verified_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "verified")
+        inferred_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "inferred")
+        missing_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "missing")
+        mismatch_count = sum(1 for item in jd_requirements if item.get("evidence_status") == "mismatch")
+        total_requirements = len(jd_requirements)
 
-    # --- Read preflight gate for this JD ---
-    gate = _first_match(gates, jd_id=jd_id) or {}
-    gate_status = str(gate.get("status") or "unknown")
+        gate = _first_match(gates, jd_id=jd_id) or {}
+        gate_status = str(gate.get("status") or "unknown")
 
-    # --- Determine evidence sufficiency ---
-    # A JD passes the evidence gate when:
-    #   - preflight gate is "pass" (no hard-gate mismatch or missing)
-    #   - at least one requirement is verified or inferred
-    # Insufficient when:
-    #   - preflight gate is "blocked" (hard-gate mismatch) or "needs_review" (hard-gate missing)
-    #   - OR no verified/inferred requirements at all
-    if gate_status == "blocked":
-        evidence_status = "insufficient"
-        reason = "preflight gate blocked: hard-gate mismatch"
-    elif gate_status == "needs_review":
-        evidence_status = "insufficient"
-        reason = "preflight gate needs_review: hard-gate evidence missing"
-    elif verified_count + inferred_count == 0:
-        evidence_status = "insufficient"
-        reason = "no verified or inferred requirements"
-    else:
-        evidence_status = "sufficient"
-        reason = f"{verified_count} verified, {inferred_count} inferred"
+        if gate_status == "blocked":
+            evidence_status = "insufficient"
+            reason = "preflight gate blocked: hard-gate mismatch"
+        elif gate_status == "needs_review":
+            evidence_status = "insufficient"
+            reason = "preflight gate needs_review: hard-gate evidence missing"
+        elif verified_count + inferred_count == 0:
+            evidence_status = "insufficient"
+            reason = "no verified or inferred requirements"
+        else:
+            evidence_status = "sufficient"
+            reason = f"{verified_count} verified, {inferred_count} inferred"
 
-    evidence_count = verified_count + inferred_count
-    record = {
-        "jd_id": jd_id,
-        "evidence_count": evidence_count,
-        "verified_count": verified_count,
-        "inferred_count": inferred_count,
-        "missing_count": missing_count,
-        "mismatch_count": mismatch_count,
-        "total_requirements": total_requirements,
-        "gate_status": gate_status,
-        "evidence_status": evidence_status,
-        "reason": reason,
-    }
-    return {"evidence_records": [record]}
+        evidence_count = verified_count + inferred_count
+        record = {
+            "jd_id": jd_id,
+            "evidence_count": evidence_count,
+            "verified_count": verified_count,
+            "inferred_count": inferred_count,
+            "missing_count": missing_count,
+            "mismatch_count": mismatch_count,
+            "total_requirements": total_requirements,
+            "gate_status": gate_status,
+            "evidence_status": evidence_status,
+            "reason": reason,
+        }
+        evidence_records.append(record)
 
+        # --- decision review ---
+        jd = _first_match(state["jd_profiles"], jd_id=jd_id) or {}
+        if evidence_status == "sufficient":
+            scorecard = _first_match(state["scorecards"], jd_id=jd_id) or {}
+            explanation = _first_match(state["explanations"], jd_id=jd_id) or {}
+            strategy = _first_match(state["strategies"], jd_id=jd_id) or {}
+            decision = {
+                "jd_id": jd_id,
+                "title": jd.get("title", ""),
+                "company": jd.get("company", ""),
+                "evidence_status": "sufficient",
+                "evidence_count": evidence_count,
+                "verified_count": verified_count,
+                "inferred_count": inferred_count,
+                "gate_status": gate.get("status") or scorecard.get("gate_status") or "unknown",
+                "final_score": scorecard.get("final_overall_score") or scorecard.get("overall_score") or 0,
+                "decision_source": scorecard.get("final_decision_source", ""),
+                "ranking_summary": explanation.get("decision_summary", ""),
+                "apply_decision": strategy.get("apply_decision", "review"),
+            }
+        else:
+            decision = {
+                "jd_id": jd_id,
+                "title": jd.get("title", ""),
+                "company": jd.get("company", ""),
+                "evidence_status": "insufficient",
+                "evidence_count": evidence_count,
+                "gate_status": "evidence_insufficient",
+                "final_score": None,
+                "decision_source": "evidence-gap-report",
+                "ranking_summary": f"证据不足：{reason}。跳过评分检查，请先补证据。",
+                "apply_decision": "evidence_needed",
+            }
+        decision_review.append(decision)
 
-def _merge_evidence_assessment(state: _ReviewGraphState) -> _ReviewGraphState:
-    return {}
-
-
-def _inspect_score_and_gates(state: _ReviewGraphState) -> _ReviewGraphState:
-    jd_id = state["jd_id"]
-    scorecard = _first_match(state["scorecards"], jd_id=jd_id) or {}
-    gate = _first_match(state["gates"], jd_id=jd_id) or {}
-    explanation = _first_match(state["explanations"], jd_id=jd_id) or {}
-    strategy = _first_match(state["strategies"], jd_id=jd_id) or {}
-    record = state["evidence_record"]
-    decision = {
-        "jd_id": jd_id,
-        "title": (_first_match(state["jd_profiles"], jd_id=jd_id) or {}).get("title", ""),
-        "company": (_first_match(state["jd_profiles"], jd_id=jd_id) or {}).get("company", ""),
-        "evidence_status": "sufficient",
-        "evidence_count": record.get("evidence_count", 0),
-        "verified_count": record.get("verified_count", 0),
-        "inferred_count": record.get("inferred_count", 0),
-        "gate_status": gate.get("status") or scorecard.get("gate_status") or "unknown",
-        "final_score": scorecard.get("final_overall_score") or scorecard.get("overall_score") or 0,
-        "decision_source": scorecard.get("final_decision_source", ""),
-        "ranking_summary": explanation.get("decision_summary", ""),
-        "apply_decision": strategy.get("apply_decision", "review"),
-    }
-    return {"decision_review": [decision]}
-
-
-def _generate_evidence_gap_report(state: _ReviewGraphState) -> _ReviewGraphState:
-    jd_id = state["jd_id"]
-    record = state["evidence_record"]
-    jd = _first_match(state["jd_profiles"], jd_id=jd_id) or {}
-    focus = _gap_focus_for_jd(jd)
-    report = {
-        "jd_id": jd_id,
-        "evidence_count": record.get("evidence_count", 0),
-        "verified_count": record.get("verified_count", 0),
-        "inferred_count": record.get("inferred_count", 0),
-        "missing_count": record.get("missing_count", 0),
-        "mismatch_count": record.get("mismatch_count", 0),
-        "gate_status": record.get("gate_status", "unknown"),
-        "gap_reason": record.get("reason", ""),
-        "recommended_evidence": [
-            f"补充与 {focus} 直接相关的项目、职责或成果证据。",
-            "标注可复核来源，例如原简历条目、项目材料或过往申请反馈。",
-            "证据不足前不要生成模板化面试题、参考答案或简历改写任务。",
-        ],
-    }
-    decision = {
-        "jd_id": jd_id,
-        "title": jd.get("title", ""),
-        "company": jd.get("company", ""),
-        "evidence_status": "insufficient",
-        "evidence_count": record.get("evidence_count", 0),
-        "gate_status": record.get("gate_status", "evidence_insufficient"),
-        "final_score": None,
-        "decision_source": "evidence-gap-report",
-        "ranking_summary": f"证据不足：{record.get('reason', '')}。跳过评分检查，请先补证据。",
-        "apply_decision": "evidence_needed",
-    }
-    return {"decision_review": [decision], "evidence_gap_reports": [report]}
+    return {"evidence_records": evidence_records, "decision_review": decision_review}
 
 
-def _merge_review_paths(state: _ReviewGraphState) -> _ReviewGraphState:
-    return {}
+def _generate_gap_report_from_artifacts(state: _ReviewGraphState) -> _ReviewGraphState:
+    """Generate evidence gap reports from requirement_matrix missing/mismatch entries.
+
+    Only processes JDs with insufficient evidence. Reads missing/mismatch detail
+    from requirement_matrix — no retrieval calls.
+    """
+    gap_reports: list[dict[str, Any]] = []
+    requirement_matrix: list[dict[str, Any]] = state["requirement_matrix"]
+
+    for record in state.get("evidence_records", []):
+        if record.get("evidence_status") != "insufficient":
+            continue
+        jd_id = str(record.get("jd_id", ""))
+        jd = _first_match(state["jd_profiles"], jd_id=jd_id) or {}
+
+        jd_requirements = [item for item in requirement_matrix if str(item.get("jd_id")) == jd_id]
+        missing_items = [
+            {
+                "requirement_id": item.get("requirement_id", ""),
+                "requirement_text": item.get("requirement_text", ""),
+                "evidence_status": item.get("evidence_status", ""),
+                "fabrication_policy": item.get("fabrication_policy", ""),
+            }
+            for item in jd_requirements
+            if item.get("evidence_status") in ("missing", "mismatch")
+        ]
+
+        focus = _gap_focus_for_jd(jd)
+        report = {
+            "jd_id": jd_id,
+            "evidence_count": record.get("evidence_count", 0),
+            "verified_count": record.get("verified_count", 0),
+            "inferred_count": record.get("inferred_count", 0),
+            "missing_count": record.get("missing_count", 0),
+            "mismatch_count": record.get("mismatch_count", 0),
+            "gate_status": record.get("gate_status", "unknown"),
+            "gap_reason": record.get("reason", ""),
+            "missing_requirements": missing_items,
+            "recommended_evidence": [
+                f"补充与 {focus} 直接相关的项目、职责或成果证据。",
+                "标注可复核来源，例如原简历条目、项目材料或过往申请反馈。",
+                "证据不足前不要生成模板化面试题、参考答案或简历改写任务。",
+            ],
+        }
+        gap_reports.append(report)
+
+    return {"evidence_gap_reports": gap_reports}
 
 
 def _validate_against_fabrication_policy(state: _ReviewGraphState) -> _ReviewGraphState:
@@ -489,36 +399,19 @@ def _write_review_artifact(state: _ReviewGraphState) -> _ReviewGraphState:
     return {"review": review}
 
 
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+
 def _parallel_topology(state: _ReviewGraphState) -> dict[str, Any]:
-    if state.get("graph_runtime") == "small-batch-serial":
-        return {
-            "assess": "serial_by_jd",
-            "inspect": "serial_by_jd",
-            "generation": "run_level_evidence_sufficient_only",
-            "small_batch_bypass_max_jds": SMALL_BATCH_BYPASS_MAX_JDS,
-            "fan_in_nodes": [],
-        }
-    if state.get("graph_runtime") == "threadpool-fallback":
-        return {
-            "assess": "threadpool_by_jd",
-            "inspect": "threadpool_by_jd",
-            "generation": "run_level_evidence_sufficient_only",
-            "fan_in_nodes": [],
-        }
     return {
-        "assess": "fanout_by_jd",
-        "inspect": "fanout_by_jd",
-        "generation": "run_level_evidence_sufficient_only",
-        "fan_in_nodes": ["merge_evidence_assessment", "merge_review_paths"],
+        "assess": "sequential",
+        "inspect": "sequential",
+        "generation": "run_level",
+        "small_batch_bypass_max_jds": SMALL_BATCH_BYPASS_MAX_JDS,
+        "fan_in_nodes": [],
     }
-
-
-def _evidence_records_by_jd(state: _ReviewGraphState) -> dict[str, dict[str, Any]]:
-    records = {str(item["jd_id"]): item for item in state.get("evidence_records", [])}
-    missing = [jd_id for jd_id in state["jd_ids"] if jd_id not in records]
-    if missing:
-        raise ValueError(f"Missing evidence assessment records for: {', '.join(missing)}")
-    return records
 
 
 def _state_summary(state: _ReviewGraphState) -> dict[str, Any]:
@@ -526,7 +419,6 @@ def _state_summary(state: _ReviewGraphState) -> dict[str, Any]:
     return {
         "run_id": state.get("run_id") or (run_dir.name if isinstance(run_dir, Path) else None),
         "requested_jd_id": state.get("requested_jd_id"),
-        "jd_id": state.get("jd_id"),
         "jd_count": len(state.get("jd_ids", [])),
         "evidence_record_count": len(state.get("evidence_records", [])),
         "decision_count": len(state.get("decision_review", [])),
@@ -535,8 +427,6 @@ def _state_summary(state: _ReviewGraphState) -> dict[str, Any]:
 
 
 def _node_jd_id(state: _ReviewGraphState) -> str | None:
-    if state.get("jd_id"):
-        return str(state["jd_id"])
     return None
 
 

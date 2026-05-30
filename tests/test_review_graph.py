@@ -18,32 +18,34 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
     review = _read_json(run_dir / "review" / "post_run_review.json")
     assert review["schema_version"] == "post-run-review-v4"
     assert review["graph_runtime"] == "small-batch-serial"
-    assert review["parallel_topology"]["assess"] == "serial_by_jd"
-    assert review["parallel_topology"]["inspect"] == "serial_by_jd"
+    assert review["parallel_topology"]["assess"] == "sequential"
+    assert review["parallel_topology"]["inspect"] == "sequential"
     assert review["parallel_topology"]["fan_in_nodes"] == []
     assert review["parallel_topology"]["small_batch_bypass_max_jds"] == 3
     assert review["jd_ids"] == ["jd-high", "jd-low"]
 
     events = _read_events(run_dir)
-    assess_events = _finished_node_events(events, "assess_evidence_from_artifacts")
-    inspect_events = _finished_node_events(events, "inspect_score_and_gates")
-    gap_events = _finished_node_events(events, "generate_evidence_gap_report")
-    merge_assess_events = _finished_node_events(events, "merge_evidence_assessment")
-    merge_review_events = _finished_node_events(events, "merge_review_paths")
+    summarize_events = _finished_node_events(events, "summarize_decision_context")
+    gap_events = _finished_node_events(events, "generate_gap_report_from_artifacts")
 
-    assert {event["jd_id"] for event in assess_events} == {"jd-high", "jd-low"}
-    assert {event["jd_id"] for event in inspect_events} == {"jd-high"}
-    assert {event["jd_id"] for event in gap_events} == {"jd-low"}
-    assert merge_assess_events == []
-    assert merge_review_events == []
-    assert all(event["graph_runtime"] == "small-batch-serial" for event in assess_events)
-    assert all(isinstance(event["duration_ms"], int) for event in assess_events)
-    # Evidence assessment is now based on structured artifacts (requirement_matrix + preflight_gates),
-    # not retrieval queries. Evidence assessment events use graph_node_started/finished tracking
-    # with the "assess_evidence_from_artifacts" node.
+    # summarize_decision_context is run-level (no per-JD fanout) → single event
+    assert len(summarize_events) == 1
+    assert summarize_events[0]["jd_id"] is None
+    assert summarize_events[0]["graph_runtime"] == "small-batch-serial"
+    assert isinstance(summarize_events[0]["duration_ms"], int)
+
+    # generate_gap_report_from_artifacts is run-level → single event
+    assert len(gap_events) == 1
+    assert gap_events[0]["jd_id"] is None
+
+    # Verify no legacy fanout-node events are emitted
+    assert _finished_node_events(events, "assess_evidence_from_artifacts") == []
+    assert _finished_node_events(events, "inspect_score_and_gates") == []
+    assert _finished_node_events(events, "merge_evidence_assessment") == []
+    assert _finished_node_events(events, "merge_review_paths") == []
 
 
-def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
+def test_review_command_runs_langgraph_for_four_jds(tmp_path: Path) -> None:
     run_dir = _write_review_ready_artifacts(tmp_path)
     _add_two_extra_jds(run_dir)
 
@@ -52,8 +54,8 @@ def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
     assert exit_code == 0, output
     review = _read_json(run_dir / "review" / "post_run_review.json")
     assert review["graph_runtime"].startswith("langgraph")
-    assert review["parallel_topology"]["assess"] == "fanout_by_jd"
-    assert review["parallel_topology"]["inspect"] == "fanout_by_jd"
+    assert review["parallel_topology"]["assess"] == "sequential"
+    assert review["parallel_topology"]["inspect"] == "sequential"
     assert review["jd_ids"] == ["jd-high", "jd-low", "jd-extra-1", "jd-extra-2"]
 
 
@@ -106,6 +108,11 @@ def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> N
         "标注可复核来源，例如原简历条目、项目材料或过往申请反馈。",
         "证据不足前不要生成模板化面试题、参考答案或简历改写任务。",
     ]
+    # Verify missing_requirements are populated from requirement_matrix
+    assert len(gap_report["missing_requirements"]) == 1
+    assert gap_report["missing_requirements"][0]["requirement_text"] == "Contracts / Legal Operations"
+    assert gap_report["missing_requirements"][0]["evidence_status"] == "missing"
+    assert gap_report["missing_requirements"][0]["fabrication_policy"] == "never_fabricate"
 
 
 def test_interview_prep_generates_from_structured_artifacts(tmp_path: Path) -> None:
@@ -115,21 +122,18 @@ def test_interview_prep_generates_from_structured_artifacts(tmp_path: Path) -> N
 
     assert exit_code == 0, output
     result = _read_json(run_dir / "review" / "interview_prep.json")
-    assert result["schema_version"] == "interview-prep-v1"
+    assert result["schema_version"] == "interview-prep-v2"
     assert result["candidate_id"] == "cand-001"
     assert result["jd_ids"] == ["jd-high", "jd-low"]
-    # jd-low has missing hard gate -> no evidence citations
-    assert result["evidence_citations_by_jd"]["jd-low"] == 0
+    # jd-low has missing hard gate -> no evidence citations (absent from map)
+    assert "jd-low" not in result["evidence_citations_by_jd"]
     # jd-high has 2 verified requirements with evidence_refs
     assert result["evidence_citations_by_jd"]["jd-high"] >= 1
     assert len(result["interview_questions"]) >= 1
-    assert len(result["reference_answers"]) >= 1
     question = result["interview_questions"][0]
     assert question["jd_id"] == "jd-high"
     assert question["generation"]["provider"] == "deterministic"
     assert question["evidence_citations"]
-    answer = result["reference_answers"][0]
-    assert answer["provenance_citation_count"] >= 1
 
 
 def test_interview_prep_respects_jd_id_filter(tmp_path: Path) -> None:
