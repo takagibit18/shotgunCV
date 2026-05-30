@@ -17,8 +17,8 @@ from shotguncv_core.run_logs import (
 
 PROMPT_TOKEN_BUDGET = 3000
 COMPLETION_TOKEN_BUDGET = 1000
-STRUCTURED_PROMPT_BUDGET = 4000   # Module instructions + evidence, Chinese ~2 chars/token
-STRUCTURED_COMPLETION_BUDGET = 3000  # Multi-layer answers: points + ref + follow-ups + mistakes + rubric
+STRUCTURED_PROMPT_BUDGET = 3000   # Module instructions + evidence, Chinese ~2 chars/token
+STRUCTURED_COMPLETION_BUDGET = 1500  # Multi-layer answers: points + ref + follow-ups + mistakes + rubric
 DEFAULT_MODEL = "gpt-4o-mini"
 
 

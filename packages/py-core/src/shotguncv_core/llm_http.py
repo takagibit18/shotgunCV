@@ -6,6 +6,8 @@ Environment-configurable via .env:
   SHOTGUNCV_LLM_RPS          Max calls per second (default 5)
   SHOTGUNCV_LLM_TIMEOUT_SEC  HTTP timeout in seconds (default 30)
   SHOTGUNCV_LLM_MAX_RETRIES  Max retries on transient failure (default 1)
+  SHOTGUNCV_LLM_WAIT         Wait for rate limit permit (default true).
+                             Set to "false" to fast-fail to fallback.
 
 Circuit breaker: after N consecutive failures, skip LLM for M seconds.
 """
@@ -125,6 +127,15 @@ def reset_rate_limiter() -> None:
     _circuit_breaker = None
 
 
+def _should_wait() -> bool:
+    """Check if the caller should wait for rate limit permits.
+
+    When SHOTGUNCV_LLM_WAIT=false, callers fast-fail to fallback
+    instead of blocking on rate limit.
+    """
+    return os.environ.get("SHOTGUNCV_LLM_WAIT", "true").strip().lower() != "false"
+
+
 # ── Main LLM HTTP call ────────────────────────────────────────────────
 
 def llm_json_call(
@@ -154,16 +165,19 @@ def llm_json_call(
     if breaker.is_open:
         raise RuntimeError("LLM circuit breaker open — too many consecutive failures")
 
+    # ── Acquire rate limit permit (exactly once, not per retry) ──
+    if _should_wait():
+        if not limiter.wait(timeout=float(timeout_sec)):
+            raise RuntimeError("Rate limit wait timed out after acquiring permit")
+    else:
+        if not limiter.acquire():
+            raise RuntimeError("LLM rate limited (fast-fail mode)")
+
+    # ── Make HTTP call, retry only on transient errors (not timeout) ──
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
-        # Wait for rate limit permit
-        if not limiter.wait(timeout=float(timeout_sec)):
-            last_error = RuntimeError("Rate limit wait timed out")
-            breaker.record_failure()
-            continue
-
         try:
-            return _http_json_call(
+            result = _http_json_call(
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
@@ -173,17 +187,21 @@ def llm_json_call(
                 max_tokens=max_tokens,
                 timeout_sec=timeout_sec,
             )
+            breaker.record_success()
+            return result
+        except TimeoutError as exc:
+            # Timeout — don't retry, the provider is slow
+            breaker.record_failure()
+            raise RuntimeError("LLM call timed out") from exc
         except Exception as exc:
             last_error = exc
             breaker.record_failure()
             if breaker.is_open:
                 raise RuntimeError(f"LLM circuit breaker opened after {breaker.max_failures} failures") from exc
-            # Exponential backoff before retry
             if attempt < max_retries:
                 delay = 2.0 ** attempt
                 time.sleep(delay)
 
-    breaker.record_failure()
     raise last_error or RuntimeError("LLM call failed after retries")
 
 
@@ -218,11 +236,7 @@ def _http_json_call(
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout_sec) as handle:
-        body: dict[str, Any] = json.loads(handle.read().decode("utf-8"))
-        # Record success
-        breaker = _get_circuit_breaker()
-        breaker.record_success()
-        return body
+        return json.loads(handle.read().decode("utf-8"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
