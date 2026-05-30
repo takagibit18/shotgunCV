@@ -95,14 +95,6 @@ def _counter_from_event_maps(events: list[dict[str, Any]], key: str) -> Counter[
 
 def _collect_ab_run_metrics(run_dir: Path, *, source_run_id: str, threshold: int) -> dict[str, Any]:
     events = _events(run_dir)
-    retrieval_events = [
-        event
-        for event in events
-        if event.get("event") == "retrieval_query" and event.get("stage") == "review"
-    ]
-    combined_events = [
-        event for event in retrieval_events if event.get("retrieval_scope") == "combined_deduped"
-    ]
     graph_finished = [
         event
         for event in events
@@ -110,7 +102,8 @@ def _collect_ab_run_metrics(run_dir: Path, *, source_run_id: str, threshold: int
     ]
     review = _read_json(run_dir / "review" / "post_run_review.json", {})
     decisions = review.get("decision_review", []) if isinstance(review, dict) else []
-    evidence_records = (review.get("retrieval", {}) or {}).get("evidence_by_jd", []) if isinstance(review, dict) else []
+    evidence_assessment = (review.get("evidence_assessment", {}) or {}) if isinstance(review, dict) else {}
+    evidence_records = evidence_assessment.get("evidence_by_jd", [])
 
     return {
         "run_id": run_dir.name,
@@ -125,19 +118,18 @@ def _collect_ab_run_metrics(run_dir: Path, *, source_run_id: str, threshold: int
             {
                 "jd_id": item.get("jd_id"),
                 "evidence_count": item.get("evidence_count"),
-                "minimum_required": item.get("minimum_required"),
-                "result_count": item.get("result_count"),
+                "verified_count": item.get("verified_count"),
+                "inferred_count": item.get("inferred_count"),
+                "missing_count": item.get("missing_count"),
+                "mismatch_count": item.get("mismatch_count"),
+                "gate_status": item.get("gate_status"),
                 "evidence_status": item.get("evidence_status"),
+                "reason": item.get("reason"),
             }
             for item in evidence_records
         ],
         "review_apply_decision_distribution": dict(Counter(str(item.get("apply_decision", "unknown")) for item in decisions)),
         "review_gate_status_distribution": dict(Counter(str(item.get("gate_status", "unknown")) for item in decisions)),
-        "retrieval_query_count": len(retrieval_events),
-        "retrieval_combined_query_count": len(combined_events),
-        "retrieval_supporting_hit_count": _summary(_numeric_event_values(combined_events, "supporting_hit_count")),
-        "retrieval_source_type_hit_counts": dict(_counter_from_event_maps(combined_events, "source_type_hit_counts")),
-        "retrieval_source_type_available_counts": dict(_counter_from_event_maps(combined_events, "source_type_available_counts")),
         "graph_node_finished_count": len(graph_finished),
         "graph_node_duration_ms": _summary(_numeric_event_values(graph_finished, "duration_ms")),
         "graph_node_business_duration_ms": _summary(_timing_values(graph_finished, "business")),
@@ -154,18 +146,11 @@ def _aggregate_by_threshold(runs: list[dict[str, Any]]) -> dict[str, Any]:
     for threshold, items in sorted(grouped.items()):
         decisions = Counter()
         gates = Counter()
-        source_hits = Counter()
-        source_available = Counter()
-        supporting_hit_avgs: list[float] = []
         graph_duration_avgs: list[float] = []
         graph_business_avgs: list[float] = []
         for item in items:
             decisions.update(item.get("review_apply_decision_distribution", {}))
             gates.update(item.get("review_gate_status_distribution", {}))
-            source_hits.update(item.get("retrieval_source_type_hit_counts", {}))
-            source_available.update(item.get("retrieval_source_type_available_counts", {}))
-            if isinstance(item.get("retrieval_supporting_hit_count", {}).get("avg"), int | float):
-                supporting_hit_avgs.append(float(item["retrieval_supporting_hit_count"]["avg"]))
             if isinstance(item.get("graph_node_duration_ms", {}).get("avg"), int | float):
                 graph_duration_avgs.append(float(item["graph_node_duration_ms"]["avg"]))
             if isinstance(item.get("graph_node_business_duration_ms", {}).get("avg"), int | float):
@@ -178,14 +163,10 @@ def _aggregate_by_threshold(runs: list[dict[str, Any]]) -> dict[str, Any]:
             "review_low_evidence_jd_count": sum(int(item.get("review_low_evidence_jd_count", 0)) for item in items),
             "review_sufficient_evidence_jd_count": sum(int(item.get("review_sufficient_evidence_jd_count", 0)) for item in items),
             "evidence_gap_report_count": sum(int(item.get("evidence_gap_report_count", 0)) for item in items),
-            "retrieval_combined_query_count": sum(int(item.get("retrieval_combined_query_count", 0)) for item in items),
-            "retrieval_supporting_hit_count_avg_by_run": _summary(supporting_hit_avgs),
             "graph_node_duration_ms_avg_by_run": _summary(graph_duration_avgs),
             "graph_node_business_duration_ms_avg_by_run": _summary(graph_business_avgs),
             "review_apply_decision_distribution": dict(decisions),
             "review_gate_status_distribution": dict(gates),
-            "retrieval_source_type_hit_counts": dict(source_hits),
-            "retrieval_source_type_available_counts": dict(source_available),
         }
     return aggregate
 
@@ -207,7 +188,7 @@ def _run_review_for_threshold(
     _prepare_ab_run(source_run_dir, target_run_dir)
     stage_started = log_stage_started(target_run_dir, "review")
     try:
-        run_post_run_review(target_run_dir, database_url=database_url, evidence_threshold=threshold)
+        run_post_run_review(target_run_dir, database_url=database_url)
     except Exception as exc:
         log_stage_failed(target_run_dir, "review", stage_started, exc)
         raise

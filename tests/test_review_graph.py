@@ -43,56 +43,31 @@ def test_review_command_uses_small_batch_serial_path_for_three_or_fewer_jds(tmp_
 
     assert exit_code == 0, output
     review = _read_json(run_dir / "review" / "post_run_review.json")
-    assert review["schema_version"] == "post-run-review-v2"
+    assert review["schema_version"] == "post-run-review-v3"
     assert review["graph_runtime"] == "small-batch-serial"
-    assert review["parallel_topology"]["retrieve"] == "serial_by_jd"
+    assert review["parallel_topology"]["assess"] == "serial_by_jd"
     assert review["parallel_topology"]["inspect"] == "serial_by_jd"
     assert review["parallel_topology"]["fan_in_nodes"] == []
     assert review["parallel_topology"]["small_batch_bypass_max_jds"] == 3
-    assert review["parallel_topology"]["evidence_threshold"] == 3
     assert review["jd_ids"] == ["jd-high", "jd-low"]
 
     events = _read_events(run_dir)
-    retrieve_events = _finished_node_events(events, "retrieve_relevant_evidence")
+    assess_events = _finished_node_events(events, "assess_evidence_from_artifacts")
     inspect_events = _finished_node_events(events, "inspect_score_and_gates")
     gap_events = _finished_node_events(events, "generate_evidence_gap_report")
-    merge_retrieval_events = _finished_node_events(events, "merge_retrieval_results")
+    merge_assess_events = _finished_node_events(events, "merge_evidence_assessment")
     merge_review_events = _finished_node_events(events, "merge_review_paths")
 
-    assert {event["jd_id"] for event in retrieve_events} == {"jd-high", "jd-low"}
+    assert {event["jd_id"] for event in assess_events} == {"jd-high", "jd-low"}
     assert {event["jd_id"] for event in inspect_events} == {"jd-high"}
     assert {event["jd_id"] for event in gap_events} == {"jd-low"}
-    assert merge_retrieval_events == []
+    assert merge_assess_events == []
     assert merge_review_events == []
-    assert all(event["graph_runtime"] == "small-batch-serial" for event in retrieve_events)
-    assert all(isinstance(event["duration_ms"], int) for event in retrieve_events)
-
-    retrieval_queries = [event for event in events if event["event"] == "retrieval_query" and event["stage"] == "review"]
-    assert {event["retriever_type"] for event in retrieval_queries} == {"InMemoryVectorRetriever"}
-    assert {event["filters"].get("jd_id") for event in retrieval_queries if event["filters"].get("jd_id")} >= {"jd-high", "jd-low"}
-    assert all("query_preview" in event and "query" not in event for event in retrieval_queries)
-    scopes_by_jd: dict[str, set[str]] = {}
-    for event in retrieval_queries:
-        jd_id = event["filters"].get("jd_id")
-        if isinstance(jd_id, str):
-            scopes_by_jd.setdefault(jd_id, set()).add(str(event["retrieval_scope"]))
-        assert isinstance(event["raw_hit_count"], int)
-        assert isinstance(event["unique_hit_count"], int)
-        assert isinstance(event["supporting_hit_count"], int)
-        assert isinstance(event["source_type_available_counts"], dict)
-        assert "hit_rate" in event
-        if int(event["hit_count"]) > 0:
-            assert event["precision"] == event["supporting_hit_count"] / event["hit_count"]
-            assert event["hit_rate"] == event["hit_count"] / event["limit"]
-        else:
-            assert event["precision"] is None
-            assert event["hit_rate"] == 0.0
-        assert "query" not in event
-    assert scopes_by_jd["jd-high"] == {"jd_filtered", "combined_deduped"}
-    assert scopes_by_jd["jd-low"] == {"jd_filtered", "combined_deduped"}
-    combined_events = [event for event in retrieval_queries if event["retrieval_scope"] == "combined_deduped"]
-    assert {event["filters"]["jd_id"] for event in combined_events} == {"jd-high", "jd-low"}
-    assert all(event["unique_hit_count"] == event["hit_count"] for event in combined_events)
+    assert all(event["graph_runtime"] == "small-batch-serial" for event in assess_events)
+    assert all(isinstance(event["duration_ms"], int) for event in assess_events)
+    # Evidence assessment is now based on structured artifacts (requirement_matrix + preflight_gates),
+    # not retrieval queries. Evidence assessment events use graph_node_started/finished tracking
+    # with the "assess_evidence_from_artifacts" node.
 
 
 def test_review_command_keeps_fanout_for_four_jds(tmp_path: Path) -> None:
