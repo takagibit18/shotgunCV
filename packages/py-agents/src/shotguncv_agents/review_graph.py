@@ -5,10 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
-from shotguncv_agents.interview_llm import (
-    generate_interview_questions as generate_llm_interview_questions,
-    generate_reference_answers as generate_llm_reference_answers,
-)
 from shotguncv_core.run_logs import (
     log_fallback_used,
     log_graph_node_finished,
@@ -19,12 +15,6 @@ from shotguncv_core.storage import dump_json, load_json, stage_dir
 
 SMALL_BATCH_BYPASS_MAX_JDS = 3
 GRAPH_NAME = "post_run_review"
-REVIEW_SKIPPED_NODES = [
-    "inspect_score_and_gates",
-    "generate_interview_questions",
-    "generate_reference_answers",
-    "generate_revision_tasks",
-]
 _COMPILED_REVIEW_GRAPH: Any | None = None
 
 
@@ -48,9 +38,6 @@ class _ReviewGraphState(TypedDict, total=False):
     evidence_record: dict[str, Any]
     decision_review: Annotated[list[dict[str, Any]], operator.add]
     evidence_gap_reports: Annotated[list[dict[str, Any]], operator.add]
-    interview_questions: Annotated[list[dict[str, Any]], operator.add]
-    reference_answers: Annotated[list[dict[str, Any]], operator.add]
-    revision_tasks: Annotated[list[dict[str, Any]], operator.add]
     validation: dict[str, Any]
     review: dict[str, Any]
 
@@ -124,9 +111,6 @@ def _compile_review_graph() -> Any:
     graph.add_node("inspect_score_and_gates", _logged_node("inspect_score_and_gates", _inspect_score_and_gates))
     graph.add_node("generate_evidence_gap_report", _logged_node("generate_evidence_gap_report", _generate_evidence_gap_report))
     graph.add_node("merge_review_paths", _logged_node("merge_review_paths", _merge_review_paths))
-    graph.add_node("generate_interview_questions", _logged_node("generate_interview_questions", _generate_interview_questions))
-    graph.add_node("generate_reference_answers", _logged_node("generate_reference_answers", _generate_reference_answers))
-    graph.add_node("generate_revision_tasks", _logged_node("generate_revision_tasks", _generate_revision_tasks))
     graph.add_node("validate_against_fabrication_policy", _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy))
     graph.add_node("write_review_artifact", _logged_node("write_review_artifact", _write_review_artifact))
 
@@ -153,9 +137,6 @@ def _compile_review_graph() -> Any:
             )
         return jobs
 
-    def _route_after_review_paths(state: _ReviewGraphState) -> str:
-        return "generate" if _sufficient_jd_ids(state) else "validate"
-
     graph.add_edge(START, "load_run_context")
     graph.add_conditional_edges("load_run_context", _send_assess_jobs, ["assess_evidence_from_artifacts"])
     graph.add_edge("assess_evidence_from_artifacts", "merge_evidence_assessment")
@@ -166,14 +147,7 @@ def _compile_review_graph() -> Any:
     )
     graph.add_edge("inspect_score_and_gates", "merge_review_paths")
     graph.add_edge("generate_evidence_gap_report", "merge_review_paths")
-    graph.add_conditional_edges(
-        "merge_review_paths",
-        _route_after_review_paths,
-        {"generate": "generate_interview_questions", "validate": "validate_against_fabrication_policy"},
-    )
-    graph.add_edge("generate_interview_questions", "generate_reference_answers")
-    graph.add_edge("generate_reference_answers", "generate_revision_tasks")
-    graph.add_edge("generate_revision_tasks", "validate_against_fabrication_policy")
+    graph.add_edge("merge_review_paths", "validate_against_fabrication_policy")
     graph.add_edge("validate_against_fabrication_policy", "write_review_artifact")
     graph.add_edge("write_review_artifact", END)
     return graph.compile()
@@ -227,10 +201,6 @@ def _run_threadpool_fallback(state: _ReviewGraphState) -> _ReviewGraphState:
     for item in branch_states:
         state["decision_review"].extend(item.get("decision_review", []))
         state["evidence_gap_reports"].extend(item.get("evidence_gap_reports", []))
-    if _sufficient_jd_ids(state):
-        state = _apply_update(state, _logged_node("generate_interview_questions", _generate_interview_questions)(state))
-        state = _apply_update(state, _logged_node("generate_reference_answers", _generate_reference_answers)(state))
-        state = _apply_update(state, _logged_node("generate_revision_tasks", _generate_revision_tasks)(state))
     state = _apply_update(state, _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy)(state))
     return _apply_update(state, _logged_node("write_review_artifact", _write_review_artifact)(state))
 
@@ -257,10 +227,6 @@ def _run_small_batch_serial(state: _ReviewGraphState) -> _ReviewGraphState:
         state["decision_review"].extend(branch_state.get("decision_review", []))
         state["evidence_gap_reports"].extend(branch_state.get("evidence_gap_reports", []))
 
-    if _sufficient_jd_ids(state):
-        state = _apply_update(state, _logged_node("generate_interview_questions", _generate_interview_questions)(state))
-        state = _apply_update(state, _logged_node("generate_reference_answers", _generate_reference_answers)(state))
-        state = _apply_update(state, _logged_node("generate_revision_tasks", _generate_revision_tasks)(state))
     state = _apply_update(state, _logged_node("validate_against_fabrication_policy", _validate_against_fabrication_policy)(state))
     return _apply_update(state, _logged_node("write_review_artifact", _write_review_artifact)(state))
 
@@ -446,7 +412,6 @@ def _inspect_score_and_gates(state: _ReviewGraphState) -> _ReviewGraphState:
         "decision_source": scorecard.get("final_decision_source", ""),
         "ranking_summary": explanation.get("decision_summary", ""),
         "apply_decision": strategy.get("apply_decision", "review"),
-        "skipped_nodes": [],
     }
     return {"decision_review": [decision]}
 
@@ -480,9 +445,8 @@ def _generate_evidence_gap_report(state: _ReviewGraphState) -> _ReviewGraphState
         "gate_status": record.get("gate_status", "evidence_insufficient"),
         "final_score": None,
         "decision_source": "evidence-gap-report",
-        "ranking_summary": f"证据不足：{record.get('reason', '')}。跳过评分检查和生成节点，先补证据。",
+        "ranking_summary": f"证据不足：{record.get('reason', '')}。跳过评分检查，请先补证据。",
         "apply_decision": "evidence_needed",
-        "skipped_nodes": REVIEW_SKIPPED_NODES,
     }
     return {"decision_review": [decision], "evidence_gap_reports": [report]}
 
@@ -491,78 +455,13 @@ def _merge_review_paths(state: _ReviewGraphState) -> _ReviewGraphState:
     return {}
 
 
-def _generate_interview_questions(state: _ReviewGraphState) -> _ReviewGraphState:
-    sufficient_jd_ids = [state["jd_id"]] if state.get("jd_id") else _sufficient_jd_ids(state)
-    questions: list[dict[str, Any]] = []
-    for jd_id in sufficient_jd_ids:
-        jd = _first_match(state["jd_profiles"], jd_id=jd_id) or {}
-        questions.extend(
-            generate_llm_interview_questions(
-                run_dir=state["run_dir"],
-                jd_id=jd_id,
-                jd_profile=jd,
-                evidence_citations=[],  # TODO: replace with structured artifact citations in follow-up PR
-            )
-        )
-    return {"interview_questions": questions}
-
-
-def _generate_reference_answers(state: _ReviewGraphState) -> _ReviewGraphState:
-    jd_id = _node_jd_id(state)
-    answers: list[dict[str, Any]] = []
-    questions_by_jd: dict[str, list[dict[str, Any]]] = {}
-    for question in state.get("interview_questions", []):
-        question_jd_id = str(question.get("jd_id") or "")
-        if jd_id and question_jd_id != jd_id:
-            continue
-        questions_by_jd.setdefault(question_jd_id, []).append(question)
-    for question_jd_id, questions in questions_by_jd.items():
-        answers.extend(
-            generate_llm_reference_answers(
-                run_dir=state["run_dir"],
-                questions=questions,
-                evidence_citations=[],  # TODO: replace with structured artifact citations in follow-up PR
-            )
-        )
-    return {"reference_answers": answers}
-
-
-def _generate_revision_tasks(state: _ReviewGraphState) -> _ReviewGraphState:
-    jd_id = _node_jd_id(state)
-    sufficient_jd_ids = {jd_id} if jd_id else set(_sufficient_jd_ids(state))
-    tasks: list[dict[str, Any]] = []
-    for strategy in state["strategies"]:
-        jd_id = strategy.get("jd_id")
-        if jd_id not in sufficient_jd_ids:
-            continue
-        for item in strategy.get("resume_revision_tasks", []) or strategy.get("recommended_actions", []):
-            tasks.append(
-                {
-                    "jd_id": jd_id,
-                    "task": str(item),
-                    "evidence_policy": "rewrite_only",
-                    "source": "plan/application_strategies.json",
-                }
-            )
-    return {"revision_tasks": tasks}
-
-
 def _validate_against_fabrication_policy(state: _ReviewGraphState) -> _ReviewGraphState:
-    blocked_needles = ["学历", "学位", "专业", "证书", "雇主", "工作年限", "论文", "奖项", "work authorization"]
-    safe_tasks: list[dict[str, Any]] = []
-    removed: list[dict[str, Any]] = []
-    for task in state.get("revision_tasks", []):
-        text = str(task.get("task", "")).lower()
-        if any(needle.lower() in text for needle in blocked_needles) and "证据" not in text:
-            removed.append(task)
-            continue
-        safe_tasks.append(task)
     validation = {
         "fabrication_policy": "passed",
-        "unsupported_hard_fact_tasks_removed": removed,
+        "unsupported_hard_fact_tasks_removed": [],
         "warnings": [],
     }
-    return {"revision_tasks": safe_tasks, "validation": validation}
+    return {"validation": validation}
 
 
 def _write_review_artifact(state: _ReviewGraphState) -> _ReviewGraphState:
@@ -571,11 +470,11 @@ def _write_review_artifact(state: _ReviewGraphState) -> _ReviewGraphState:
     decisions = _ordered_by_jd(state["decision_review"], state["jd_ids"])
     evidence_records = _ordered_by_jd(state["evidence_records"], state["jd_ids"])
     review = {
-        "schema_version": "post-run-review-v3",
+        "schema_version": "post-run-review-v4",
         "run_id": state["run_id"],
         "candidate_id": state["candidate_id"],
         "jd_ids": state["jd_ids"],
-        "provider": {"provider": "deterministic-review-agent", "model": "structured-evidence-v3"},
+        "provider": {"provider": "deterministic-review-agent", "model": "structured-evidence-v4"},
         "graph_runtime": state.get("graph_runtime", "unknown"),
         "parallel_topology": _parallel_topology(state),
         "decision_review": decisions,
@@ -584,13 +483,9 @@ def _write_review_artifact(state: _ReviewGraphState) -> _ReviewGraphState:
             "evidence_by_jd": evidence_records,
         },
         "evidence_gap_reports": _ordered_by_jd(state.get("evidence_gap_reports", []), state["jd_ids"]),
-        "interview_questions": state.get("interview_questions", []),
-        "reference_answers": state.get("reference_answers", []),
-        "revision_tasks": state.get("revision_tasks", []),
         "validation": state["validation"],
     }
     dump_json(review_dir / "post_run_review.json", review)
-    (review_dir / "interview_prep.md").write_text(_render_interview_prep(review), encoding="utf-8")
     return {"review": review}
 
 
@@ -626,32 +521,6 @@ def _evidence_records_by_jd(state: _ReviewGraphState) -> dict[str, dict[str, Any
     return records
 
 
-def _sufficient_jd_ids(state: _ReviewGraphState) -> list[str]:
-    decisions = {str(item.get("jd_id")): item for item in state.get("decision_review", [])}
-    return [jd_id for jd_id in state["jd_ids"] if decisions.get(jd_id, {}).get("evidence_status") == "sufficient"]
-
-
-def _render_interview_prep(review: dict[str, Any]) -> str:
-    lines = [f"# 面试准备 - {review['run_id']}", ""]
-    for jd_decision in review.get("decision_review", []):
-        lines.append(f"## {jd_decision.get('title', '')} ({jd_decision.get('company', '')})")
-        lines.append("")
-        lines.append(f"证据状态: {jd_decision.get('evidence_status', 'unknown')}")
-        lines.append(f"匹配分: {jd_decision.get('final_score', 'N/A')}")
-        lines.append(f"投递建议: {jd_decision.get('apply_decision', 'review')}")
-        lines.append("")
-    lines.extend(["", "## 问题与参考回答", ""])
-    for answer in review.get("reference_answers", []):
-        lines.append(f"### {answer.get('question', '')}")
-        lines.append("")
-        lines.append(answer.get("answer", ""))
-        lines.append("")
-    lines.extend(["## 简历修订任务", ""])
-    for task in review.get("revision_tasks", []):
-        lines.append(f"- {task.get('task', '')}")
-    return "\n".join(lines).strip() + "\n"
-
-
 def _state_summary(state: _ReviewGraphState) -> dict[str, Any]:
     run_dir = state.get("run_dir")
     return {
@@ -662,19 +531,12 @@ def _state_summary(state: _ReviewGraphState) -> dict[str, Any]:
         "evidence_record_count": len(state.get("evidence_records", [])),
         "decision_count": len(state.get("decision_review", [])),
         "evidence_gap_count": len(state.get("evidence_gap_reports", [])),
-        "question_count": len(state.get("interview_questions", [])),
-        "answer_count": len(state.get("reference_answers", [])),
-        "revision_task_count": len(state.get("revision_tasks", [])),
     }
 
 
 def _node_jd_id(state: _ReviewGraphState) -> str | None:
     if state.get("jd_id"):
         return str(state["jd_id"])
-    for key in ["interview_questions", "reference_answers", "revision_tasks"]:
-        jd_ids = {str(item.get("jd_id")) for item in state.get(key, []) if item.get("jd_id")}
-        if len(jd_ids) == 1:
-            return next(iter(jd_ids))
     return None
 
 
