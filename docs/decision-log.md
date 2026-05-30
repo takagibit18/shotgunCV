@@ -70,3 +70,33 @@ Indeed MCP 岗位导入与预期产品方向一致：它可以作为 JD 信息�
 该能力暂不进入当前优先级。原因是当前项目更需要先稳定 RAG、数据库投影、LangGraph 复盘 Agent、检索观测事件和质量基线；同时 Indeed 官方 MCP 仍标注 beta，且当前文档约束为 only available for Claude Connector。后续若要实现，应先做只读技术 spike 验证直接 MCP client 是否可达；若不可达，再评估 Claude MCP connector bridge 或 Indeed 官方 API/Partner 路线。
 
 边界：不做自动投递、不做招聘网站抓取、不做浏览器自动化登录；Indeed 只作为可选 JD 导入源，不能改变 `run_dir` 与 Python pipeline 的业务真源地位。
+
+## RAG 架构纠偏（2026-05-30）
+
+经过多轮评估（grid search 440组权重、30条golden set、21-run baseline），做出以下架构决策：
+
+### Hybrid search 默认废弃，BM25 为默认检索器
+
+Grid search 证实任何 hybrid 权重下 MRR 均低于纯 BM25（最优 hybrid 0.316 vs 纯 BM25 0.333）。jd_id 过滤后搜索空间坍缩到 5-30 chunks，BM25 的 keyword matching 已提供最优排序信号，BGE-M3 dense embedding 在绝大多数 query 上表现为噪声。
+
+dense/hybrid 代码保留为实验模式（CLI 参数），不进入默认检索路径。重新引入条件：query 变为开放自然语言问题、chunk 不再以精确 ID 为主要排序信号、embedding 对中英混合短文本有实测收益。
+
+### RAG evidence gate 砍掉
+
+evaluate 阶段已有 `requirement_matrix.evidence_status` + `evidence_refs` + `preflight_gates` + `fabrication_policy`，RAG evidence gate 把结构化判定降级成 chunk 搜索后计数，属于重复劳动且精度更低（BM25 MRR 仅 0.333 vs 结构化精确匹配）。
+
+砍掉后，inspect_score/gap_report 直接读 scorecards/preflight_gates/requirement_matrix，不依赖检索。
+
+### 面试题生成从 RAG review 拆出
+
+面试题生成所需数据（JD画像、CV经历、需求矩阵）全部在 analyze artifact 中，是 prompt engineering + 结构化数据拼接，不需要检索。作为独立 interview_prep 模块，消费 analyze artifact，遵守 fabrication_policy。
+
+RAG 仅在未来跨 run 面试历史积累后，提供"历史问法/相似JD面试题"作为补充上下文。
+
+### RAG 重新定位：查询与记忆层
+
+修正后 RAG 只做三件事：(1) 当前 run artifact 自由查询；(2) 多 run 历史记忆；(3) JD/经验/反馈相似检索。
+
+RAG 不参与评分、不覆盖 gate、不生成核心 ranking。保持独立手动触发，不嵌入主流程。
+
+详见 `docs/rag-realignment-plan.md`。
