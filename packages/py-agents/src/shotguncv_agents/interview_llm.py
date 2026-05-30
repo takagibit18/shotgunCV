@@ -5,8 +5,8 @@ import os
 import re
 from pathlib import Path
 from typing import Any
-from urllib import request
 
+from shotguncv_core.llm_http import llm_json_call, reset_rate_limiter
 from shotguncv_core.run_logs import (
     log_fallback_used,
     log_llm_call_failed,
@@ -20,7 +20,6 @@ COMPLETION_TOKEN_BUDGET = 1000
 STRUCTURED_PROMPT_BUDGET = 4000   # Module instructions + evidence, Chinese ~2 chars/token
 STRUCTURED_COMPLETION_BUDGET = 3000  # Multi-layer answers: points + ref + follow-ups + mistakes + rubric
 DEFAULT_MODEL = "gpt-4o-mini"
-DEFAULT_TIMEOUT_SEC = 30
 
 
 def generate_interview_questions(
@@ -284,29 +283,16 @@ def _llm_config() -> dict[str, str]:
 
 
 def _openai_json_call(config: dict[str, str], prompt: str, max_tokens: int = COMPLETION_TOKEN_BUDGET) -> dict[str, Any]:
-    payload = json.dumps(
-        {
-            "model": config["model"],
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Return strict JSON only. Use only the supplied evidence. Do not fabricate facts. All content must be in Chinese.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-            "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
-        }
-    ).encode("utf-8")
-    req = request.Request(
-        url=f"{config['base_url'].rstrip('/')}/chat/completions",
-        data=payload,
-        headers={"Authorization": f"Bearer {config['api_key']}", "Content-Type": "application/json"},
-        method="POST",
+    """Make an LLM JSON call via the shared rate-limited HTTP client."""
+    return llm_json_call(
+        base_url=config["base_url"],
+        api_key=config["api_key"],
+        model=config["model"],
+        prompt=prompt,
+        system_prompt="Return strict JSON only. Use only the supplied evidence. Do not fabricate facts. All content must be in Chinese.",
+        temperature=0.2,
+        max_tokens=max_tokens,
     )
-    with request.urlopen(req, timeout=DEFAULT_TIMEOUT_SEC) as handle:
-        return json.loads(handle.read().decode("utf-8"))
 
 
 def _question_prompt(

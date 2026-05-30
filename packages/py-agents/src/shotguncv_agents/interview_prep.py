@@ -11,7 +11,6 @@ Usage:
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Any
 
@@ -62,11 +61,9 @@ def run_interview_prep(
         allocation = allocate_questions(jd, total_questions=total_questions)
 
         jd_questions: list[dict[str, Any]] = []
-        module_keys = [k for k, v in allocation.items() if v > 0]
-        for i, module_key in enumerate(module_keys):
-            count = allocation[module_key]
-            if i > 0:
-                time.sleep(3.0)  # Rate limit for free-tier endpoints
+        for module_key, count in allocation.items():
+            if count <= 0:
+                continue
             module_def = module_by_key(module_key)
             questions = generate_module_questions(
                 run_dir=run_dir,
