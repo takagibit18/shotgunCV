@@ -42,6 +42,34 @@ def build_retrieval_chunks(run_dir: Path, run_id: str, candidate_id: str) -> lis
     return chunks
 
 
+def _build_jd_context_map(jd_profiles: list[dict[str, Any]]) -> dict[str, str]:
+    """Build a jd_id -> context string map for document enrichment.
+
+    The context string includes the JD title, company, and keywords so that
+    chunks inherit searchable terms from their parent JD.  This fixes the
+    vocabulary-mismatch problem where a chunk's text (e.g. a gap_map entry)
+    does not contain the terms users actually search for.
+    """
+    context_map: dict[str, str] = {}
+    for jd in jd_profiles:
+        jd_id = str(jd.get("jd_id") or "")
+        if not jd_id:
+            continue
+        parts: list[str] = []
+        title = str(jd.get("title") or "").strip()
+        if title:
+            parts.append(title)
+        company = str(jd.get("company") or "").strip()
+        if company:
+            parts.append(company)
+        keywords = [str(k).strip() for k in jd.get("keywords", []) if str(k).strip()]
+        if keywords:
+            parts.append(", ".join(keywords))
+        if parts:
+            context_map[jd_id] = " | ".join(parts)
+    return context_map
+
+
 def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> list[Document]:
     documents: list[Document] = []
     manifest = _read_json(run_dir / "ingest" / "manifest.json") or {}
@@ -50,6 +78,8 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
     requirements = _read_json(run_dir / "analyze" / "requirement_matrix.json") or []
     gap_maps = _read_json(run_dir / "evaluate" / "gap_maps.json") or []
     variants = _read_json(run_dir / "generate" / "resume_variants.json") or []
+
+    jd_context = _build_jd_context_map(jd_profiles)
 
     candidate_lines = []
     for field in ("core_claims", "verified_evidence", "experiences", "projects", "skills", "strengths"):
@@ -94,9 +124,12 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
     for item in requirements:
         jd_id = str(item.get("jd_id") or "")
         requirement_id = str(item.get("requirement_id") or "")
+        jd_prefix = jd_context.get(jd_id, "")
+        context_prefix = f"[{jd_prefix}] " if jd_prefix else ""
         documents.append(
             _document(
-                "\n".join(
+                context_prefix
+                + "\n".join(
                     [
                         str(item.get("requirement_text") or ""),
                         str(item.get("evidence_status") or ""),
@@ -115,15 +148,20 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
 
     for gap_map in gap_maps:
         jd_id = str(gap_map.get("jd_id") or "")
+        jd_prefix = jd_context.get(jd_id, "")
         gap_text = "\n".join(
             "\n".join(str(value) for value in item.values() if isinstance(value, (str, list)))
             for item in gap_map.get("items", [])
             if isinstance(item, dict)
         )
         if gap_text.strip():
+            # Prepend JD context so the chunk inherits searchable terms
+            # (title, company, keywords) from its parent JD.  Without this,
+            # gap_map chunks are invisible to queries that use JD-level terms.
+            enriched = f"[{jd_prefix}]\n{gap_text}" if jd_prefix else gap_text
             documents.append(
                 _document(
-                    gap_text,
+                    enriched,
                     source_type="gap_map",
                     source_id=f"{run_id}:{jd_id}:gap-map",
                     candidate_id=candidate_id,

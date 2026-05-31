@@ -386,13 +386,88 @@ python scripts/evaluate_rag_layers.py \
 
 ---
 
+## Chunk 内容增强（2026-05-30）
+
+分支：`feat/chunk-content-enrichment`
+
+### 诊断
+
+Query expansion 只修复了 2/17 的零命中 query。进一步分析发现：剩余 15 条 query 的目标文档**完全不包含** query 关键词。这不是 query 的问题——是 chunk 内容结构性不足。
+
+```
+gap_map chunk (jd-012:gap-map) 的文本：
+  "Role alignment\nRelevant foundation...\nConfidently discuss evaluation"
+  ↑ 没有 JD title、没有 company、没有 keywords
+
+Query 问 "PgVector 向量检索" → 但 chunk 里没有任何一个词和 PgVector 相关
+```
+
+根因：`build_documents_from_run` 构建 gap_map 和 requirement_evidence 文档时，只包含自身字段（requirement_text、evidence_status、gap items），不包含父级 JD 的上下文（title、company、keywords）。
+
+### 方案
+
+在构建文档时为 gap_map 和 requirement_evidence 注入 JD 上下文：
+
+```python
+jd_context = _build_jd_context_map(jd_profiles)
+# → {"jd-001": "AI Engineer (MTS) | micro1 | python, rag, langgraph", ...}
+
+# gap_map: [JD context]\n<original gap text>
+enriched = f"[{jd_context[jd_id]}]\n{gap_text}"
+
+# requirement_evidence: [JD context] <original requirement text>
+enriched = f"[{jd_context[jd_id]}] {requirement_text}\n..."
+```
+
+改动量：`documents.py` 40 行（新增 `_build_jd_context_map` + 两处注入）。
+
+### 效果
+
+| 指标 | 原始 BM25 | Enrichment | Enrichment + Static | 累计提升 |
+|------|:--------:|:----------:|:-------------------:|:-------:|
+| MRR | 0.333 | 0.348 (+4.5%) | **0.390 (+17%)** | +17% |
+| precision@1 | 0.24 | 0.28 (+17%) | **0.32 (+33%)** | +33% |
+| recall@10 | 0.52 | 0.48 | 0.54 (+4%) | +4% |
+
+#### 零命中修复
+
+```
+原始零命中: 19/25
+Enrichment + Expansion 修复: 3/19 (16%)
+仍为零: 16/19    ← 受限于文档内容本身，目标文档不含 query 关键词
+```
+
+### 为什么剩余 16 条修不了
+
+这不是 retrieval 的问题——是标注数据与 chunk 内容之间的结构性 gap：
+
+- Golden set 标注者凭**语义知识**知道 `jd-012:gap-map` 回答了 PgVector 问题
+- 但 jd-012 的实际数据里没有 "PgVector" 这个词（JD 是 "AI Evaluation Specialist"）
+- Chunk 能注入的上下文最多到 JD title/company/keywords——如果这些也没有 PgVector，就无法弥合
+
+这类 query 需要 **dense retrieval**（语义匹配而非关键词匹配）或 **LLM-based 评估**（理解文档语义而非文本重叠）来修复。这指向了后续的 P4（Hybrid Search 修复）和 P1（Cross-Encoder Reranker）。
+
+### 累积 RAG 优化进展
+
+```
+原始 BM25 (P0 修复后):         MRR 0.333
+  ├─ P0: Chunking 按类型决策   → MRR 0.337 (+1.2%)
+  ├─ P1: Query Expansion       → MRR 0.373 (+10.9%)
+  └─ Chunk 内容增强             → MRR 0.390 (+17.1%)
+                                    ↓
+                                累积: +17%, p@1 +33%
+```
+
+---
+
 ## 剩余改进优先级（更新于 2026-05-30）
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
 | ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316，但仍低于纯 BM25（0.333）。 |
 | ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。jd_description 2.1x→1.0x。BM25 MRR +1.2%，0 退化。 |
-| ~~**P1**~~ | ~~Query Expansion（中英文对齐）~~ | ✅ 已完成。Static MRR 0.337→0.373 (+10.9%)，2 改善 0 退化。 |
+| ~~**P1**~~ | ~~Query Expansion~~ | ✅ 已完成。Static MRR 0.337→0.373 (+10.9%)，2 改善 0 退化。 |
+| ~~**Chunk**~~ | ~~内容增强~~ | ✅ 已完成。MRR 0.333→0.390 (+17%)，p@1 0.24→0.32 (+33%)。 |
 | **P1** | Cross-Encoder Reranker | 新建 `rag/reranking.py`，集成 `BAAI/bge-reranker-v2-m3`。retriever top-50 → reranker top-10 |
 | **P3** | 多尺寸 Chunking | 对保留切分的 source_type 按文档特性配置不同 chunk_size |
 | **P4** | Hybrid Search 修复 | 按 case_type 诊断 dense 正向贡献，做 query-level 自适应权重 |
