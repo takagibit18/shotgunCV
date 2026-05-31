@@ -460,15 +460,106 @@ Enrichment + Expansion 修复: 3/19 (16%)
 
 ---
 
+---
+
+## P1 完成：Cross-Encoder Reranker（2026-05-30）
+
+分支：`feat/cross-encoder-reranker`
+专用文档：`docs/rag-reranker-analysis.md`
+
+### 方案
+
+两阶段检索：BM25 粗召回 top-20 → `BAAI/bge-reranker-v2-m3` Cross-Encoder 精排 top-10。
+
+```python
+# rag/reranking.py (47 行)
+class CrossEncoderReranker:
+    def rerank(self, query, candidates, top_k=10):
+        pairs = [(query, c.text) for c in candidates]
+        scores = self._model.predict(pairs)  # query+doc 同时过 transformer
+        return sorted_by_score(candidates)[:top_k]
+```
+
+### 效果
+
+| 配置 | MRR | precision@1 | recall@10 |
+|------|:---:|:-----------:|:---------:|
+| BM25 baseline | 0.348 | 0.28 | 0.48 |
+| BM25 + static expansion | 0.390 | 0.32 | 0.54 |
+| **BM25 @20 → reranker** | **0.398** | **0.32** | **0.54** |
+| BM25 @50 → reranker | 0.387 | 0.28 | 0.54 |
+| BM25+static @50 → reranker | 0.374 ⚠️ | 0.28 | 0.56 |
+
+### 关键发现
+
+1. **最优：BM25 @20 → reranker**。窄粗召回（20）优于宽召回（50/100）——噪声越少，reranker 越准。
+2. **Reranker fixes 5/12 zero-MRR queries (42%)**，其中 2 条达到 MRR=1.0。
+3. **Expansion + reranker 互斥**（0.374 < 0.390）。Expansion 词扰乱 Cross-Encoder 的语义判断。
+4. **BM25 和 Dense 粗召回经 reranker 后收敛**（均为 0.387）——reranker 补偿了粗召回质量差异。
+5. 仍剩余 7 条零命中——目标文档内容与 query intent 的结构性 gap 超出 retrieval 层修复能力。
+
+### 使用方式
+
+```bash
+python scripts/evaluate_rag_layers.py --layer retriever --retriever-mode bm25 \
+  --reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 20 \
+  --golden-file ... --run-dir ... --output ...
+```
+
+详见 `docs/rag-reranker-analysis.md` 完整评估矩阵。
+
+---
+
+## Reranker 后时代：系统天花板分析（2026-05-30）
+
+Cross-Encoder Reranker 完成后，检索优化进入瓶颈期。MRR 从 0.333 提升到 0.398 (+19.5%)，但进一步堆模型（更大的 reranker、更好的 embedding）的边际收益急剧递减。
+
+**核心发现：系统的真正天花板不在检索模型，在评估数据质量和 chunk 内容完备性。**
+
+### 当前瓶颈分析
+
+```
+已修复的 zero-MRR queries:   12/19 (63%) — 通过 chunking + expansion + enrichment + reranker
+仍为零的 queries:              7/19 (37%) — 不可通过检索模型修复
+
+7 条永久零命中的根因分类：
+  类型A: Golden set 标注问题 — annotator 凭语义知识标注，但文档不含对应关键词
+  类型B: 文档内容缺失 — jd_id 对应的数据确实没有 query 相关的术语
+  类型C: 硬 case — query 意图本身模糊，多个文档部分相关但 golden set 只标注了一个
+```
+
+### 调整后的优先级
+
+| 优先级 | 方向 | 原因 |
+|--------|------|------|
+| ~~**P0-P1**~~ | ~~检索优化五步~~ | ✅ 全部完成。MRR 0.333→0.398 (+19.5%)，p@1 0.24→0.32 (+33%)。 |
+| **P0** | Golden Set 质量审计 | 逐条审计 7 条零命中 query 的标注合理性。区分"标注错误"vs"文档缺失"vs"硬case"。这是解锁后续所有工作的基础。 |
+| **P1** | LLM as Judge 评估试点 | 对零命中 query 用 LLM 做端到端 relevance 判断，突破 chunk-level 关键词匹配的天花板。 |
+| **P2** | Chunk 内容二次增强 | 注入同 JD 的 requirement 关键词列表到 gap_map 和 requirement_evidence。 |
+| **P3** | 系统天花板量化 | Oracle/BM25-ceiling/Reranker-ceiling 实验，量化"还有多少提升空间"。 |
+| **P4** | 多尺寸 Chunking | 对保留切分的 source_type 按文档特性配置不同 chunk_size |
+| **P5** | Graded Relevance 评估升级 | 利用 golden set 已有的 `document_roles` 做加权 nDCG |
+
+## 累积进展总览
+
+| 阶段 | MRR | precision@1 | recall@10 | 零命中 |
+|------|:---:|:-----------:|:---------:|:------:|
+| 原始 (P0 metadata filtering) | 0.013 | 0.00 | 0.08 | ~25 |
+| P0 修复 (jd_id 过滤) | 0.333 | 0.24 | 0.52 | ~19 |
+| + Chunking 按类型 (P0) | 0.337 | 0.24 | 0.54 | ~19 |
+| + Query Expansion (P1) | 0.373 | 0.28 | 0.58 | ~17 |
+| + Chunk 内容增强 | 0.390 | 0.32 | 0.54 | ~12 |
+| **+ Cross-Encoder Reranker (P1)** | **0.398** | **0.32** | **0.54** | **7** |
+| → 目标: Golden Set 审计 + LLM Judge | 0.45+ | — | — | <5 |
+
 ## 剩余改进优先级（更新于 2026-05-30）
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
-| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316，但仍低于纯 BM25（0.333）。 |
-| ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。jd_description 2.1x→1.0x。BM25 MRR +1.2%，0 退化。 |
-| ~~**P1**~~ | ~~Query Expansion~~ | ✅ 已完成。Static MRR 0.337→0.373 (+10.9%)，2 改善 0 退化。 |
-| ~~**Chunk**~~ | ~~内容增强~~ | ✅ 已完成。MRR 0.333→0.390 (+17%)，p@1 0.24→0.32 (+33%)。 |
-| **P1** | Cross-Encoder Reranker | 新建 `rag/reranking.py`，集成 `BAAI/bge-reranker-v2-m3`。retriever top-50 → reranker top-10 |
-| **P3** | 多尺寸 Chunking | 对保留切分的 source_type 按文档特性配置不同 chunk_size |
-| **P4** | Hybrid Search 修复 | 按 case_type 诊断 dense 正向贡献，做 query-level 自适应权重 |
-| **P5** | Graded Relevance 评估升级 | 利用 golden set 已有的 `document_roles` 做加权 nDCG |
+| ~~**P0-P1**~~ | ~~检索优化五步~~ | ✅ 全部完成。 |
+| **P0** | Golden Set 质量审计 | 7 条零命中需要区分标注错误 vs 文档缺失 vs 硬case |
+| **P1** | LLM as Judge 评估试点 | 突破 chunk-level 关键词匹配的天花板 |
+| **P2** | Chunk 内容二次增强 | 注入同 JD requirement 关键词列表 |
+| **P3** | 系统天花板量化 | Oracle/ceiling 实验 |
+| **P4** | 多尺寸 Chunking | 按 source_type 配置不同 chunk_size |
+| **P5** | Graded Relevance 评估升级 | 利用 `document_roles` 做加权 nDCG |
