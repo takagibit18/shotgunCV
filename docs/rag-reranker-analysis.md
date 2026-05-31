@@ -266,5 +266,27 @@ P3 (方法论): 系统天花板量化
   └── 工作量：0.5 天
 ```
 
+---
 
+## P0 落地：Golden Set 零命中审计入口（2026-05-31）
+
+本轮新增 `scripts/audit_golden_rag_zero_hits.py`，用于把“零命中到底是不是标注问题”从人工猜测变成可复跑报告。脚本读取 retriever layer report、`rag-golden-v1` 和真实 run artifacts，自动抽出 `MRR == 0` 的 query，并回填：
+
+- golden set 的 `expected_documents`
+- expected label 在真实 retrieval chunks 中匹配到的文本预览
+- retriever top hits 的文本预览
+- query 与 expected chunk / top hit 的 content-token overlap
+- `root_cause_hint`：`missing_expected_document_label`、`expected_document_vocabulary_gap`、`retrieval_ranking_failure` 或 `needs_human_review`
+
+推荐用于 reranker 残留 7 条零命中：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\audit_golden_rag_zero_hits.py `
+  --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 `
+  --golden-file fixtures\golden_rag_questions.json `
+  --retriever-report outputs\reranker-bm25-fs20.json `
+  --output baseline\post-reranker-zero-hit-audit.json
+```
+
+本地 sanity check 先用 BM25 report 跑通了审计链路：12 条 BM25 zero-MRR query 中，10 条被标记为 `expected_document_vocabulary_gap`，2 条被标记为 `retrieval_ranking_failure`。对 reranker 后仍为零的 7 条 query ID（`rag-golden-001`、`005`、`010`、`012`、`015`、`024`、`027`）做 expected-document 文本审计时，7/7 都呈现 `expected_document_vocabulary_gap`。这还不能直接判定“标注错误”还是“文档内容缺失”，但已经说明下一步应先人工复核 golden set / chunk 内容，而不是继续换更大的检索模型。
 

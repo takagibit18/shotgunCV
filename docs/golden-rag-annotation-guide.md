@@ -58,6 +58,18 @@ Retriever layer:
   --k 1 --k 3 --k 5 --k 10
 ```
 
+Zero-hit audit:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\audit_golden_rag_zero_hits.py `
+  --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 `
+  --golden-file fixtures\golden_rag_questions.json `
+  --retriever-report baseline\rag-layered-20260526\retriever.json `
+  --output baseline\rag-layered-20260526\zero-hit-audit.json
+```
+
+Use this before editing golden labels. The audit report separates missing labels, expected-document vocabulary gaps, and likely ranking failures so annotation fixes do not get mixed up with retriever tuning.
+
 Generator layer uses perfect documents from the golden set and evaluates an answer file. The answer file schema is:
 
 ```json
