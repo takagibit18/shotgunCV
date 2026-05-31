@@ -152,3 +152,119 @@ python scripts/evaluate_rag_layers.py \
   --output outputs/reranker-bm25-fs20.json
 ```
 
+---
+
+## 综合评估判断（2026-05-30）
+
+### 总评：中等成功——价值在定性发现，不在量化提升
+
+```
+Reranker (2.2GB, 568M params):     MRR 0.398
+Static Expansion (27行 dict):      MRR 0.390
+                                   ─────────
+差距：                               +0.008 (+2.1%)
+```
+
+**一个 27 行的静态词典和一个 2.2GB 的 Cross-Encoder 之间的净差距只有 0.008 MRR。**
+
+### Reranker 的三个价值（不在 aggregate 指标里）
+
+**1. "窄粗召回更优"——反直觉的工程 insight**
+
+`@20 > @50 = @100`。更少的候选反而让 Cross-Encoder 排序更准。Reranker 不是"给更多候选就能排更好"——它在做精密的 discrimination，噪声直接损害它。这对生产部署有实际指导意义：**粗召回宽度不是越大越好，找 recall-precision 平衡点**。
+
+**2. "Expansion + Reranker 互斥"——非预期的负交互**
+
+2.2GB transformer 被 27 行 dict append 搞乱了。Expansion 词使 Cross-Encoder 误以为匹配了这些词的 chunk 更相关。**面试叙事价值**：这是"你遇到过什么非预期的模型行为"的绝佳案例。
+
+**3. "Reranker 抹平粗召回差异"——两阶段架构验证**
+
+BM25 和 Dense 经 reranker 后 MRR 完全相同（0.387）。验证了两阶段架构的核心假设：**粗召回只需要 recall，精排负责 precision**。Pipeline 变得对 retriever 选择鲁棒。
+
+### 天花板判断
+
+7 条 query 仍然零命中。不是检索模型的问题——是**标注数据与文档内容的语义 gap**。
+
+```
+Reranker 可以弥合："不同词说同一件事"
+  例：query 写 "LangChain 要求" → chunk 写 "orchestration framework"
+  → Cross-Encoder 理解语义等价
+
+Reranker 无法弥合："文档根本不包含这件事"
+  例：query 问 "PgVector 检索能力" → jd-012 的 JD 数据里完全没有 PgVector
+  → 任何检索模型都无法匹配
+```
+
+这意味着系统的真正天花板不在检索模型，而在**评估数据质量**和**chunk 内容完备性**。
+
+---
+
+## 接下来需要重点排查的方向
+
+### 方向一：Golden Set 质量审计（最高优先级）
+
+**症状**：7 条永久零命中 query 的目标文档完全不包含 query 关键词。
+
+**排查步骤**：
+
+1. **逐条审计**：对每条零命中 query，检查其 `expected_documents` 的 chunk 文本，判断标注是否合理
+2. **标注一致性检查**：同一 annotator 是否用"语义理解"标注了一个缺失关键词的文档？还是 golden set 是从另一个 run 迁移过来的（source_id 匹配但内容不同）？
+3. **输出审计报告**：标注每条零命中 query 的根因——是"标注错误"还是"文档内容缺失"还是"真正的 hard case"
+
+**预期发现**：至少有部分 zero-MRR query 属于"标注错误"——annotator 凭领域知识链接了 query 和文档，但文档的文本确实不包含相关关键词。这类 query 需要修正 expected_documents 或改写 query。
+
+### 方向二：评估方式改革——LLM as Judge（中优先级）
+
+**症状**：当前评估是 chunk-level 关键词匹配。`_chunk_matches_label` 用 `label.lower() in haystack` 判断是否命中。这在 Cross-Encoder 时代已经不够了——Reranker 返回的 top-1 chunk 可能语义上完美回答了 query，但因为 golden set 没标注它就计为零命中。
+
+**方案**：引入 LLM-based relevance judge：
+- 对每个 query，取 top-5 retrieval results
+- 用 LLM 判断每个 result 是否"能够支撑对该 query 的回答"
+- 不再依赖 golden set 的 chunk-level 标注，而是做端到端 relevance 评估
+
+**优势**：绕开 vocabulary mismatch 的硬天花板，评估的是"检索结果是否有用"而不是"检索结果是否有特定关键词"。
+
+### 方向三：Chunk 内容二次增强（低优先级，但根因修复）
+
+**症状**：即使加了 JD context（title/company/keywords），仍有文档缺少 query 相关的术语。
+
+**方案**：在 chunk 文本中注入更多 requirement_matrix 的上下文：
+- `requirement_evidence` chunk：追加同 JD 下的其他 requirement 关键词
+- `gap_map` chunk：追加同 JD 下的所有 requirement_text 列表
+- `jd_description` chunk：追加从 requirement_matrix 提取的该 JD 的技术栈关键词
+
+**风险**：过度增强可能引入噪声（类似 expansion + reranker 的负交互）。需要评估增量效果。
+
+### 方向四：系统天花板量化（方法论价值）
+
+**目标**：回答"当前系统在多大数据量和检索方法下能达到的理论上限"。
+
+**方案**：
+1. **Oracle experiment**：直接用 golden set 的 expected_documents 作为检索结果（模拟完美检索），计算 MRR 上限
+2. **BM25 ceiling**：在所有 chunk 的 search text 中显式注入 golden set label（模拟完美关键词匹配），看 MRR 能到多少
+3. **Reranker ceiling**：在 oracle 候选集上跑 reranker，确认 reranker 的排序精度上限
+
+**价值**：量化"还有多少提升空间"，避免在已达上限的方向上继续投入。
+
+### 优先级排序
+
+```
+P0 (立即): Golden Set 质量审计
+  └── 修复标注错误，让评估指标反映真实检索质量
+  └── 工作量：0.5-1 天
+
+P1 (短期): LLM as Judge 评估试点
+  └── 对 7 条零命中 query 做手动 LLM 评估，验证思路
+  └── 工作量：0.5 天
+
+P2 (中期): Chunk 内容二次增强
+  └── 注入更多 requirement_matrix 上下文
+  └── 工作量：0.5 天
+
+P3 (方法论): 系统天花板量化
+  └── Oracle + BM25 ceiling + Reranker ceiling 实验
+  └── 工作量：0.5 天
+```
+
+
+
