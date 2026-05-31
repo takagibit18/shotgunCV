@@ -93,6 +93,53 @@ def test_evaluate_labeled_retrieval_queries_aggregates_query_metrics() -> None:
     ]
 
 
+def test_evaluate_labeled_retrieval_queries_reports_weighted_multi_document_coverage() -> None:
+    retriever = _FakeRetriever(
+        {
+            "multi doc": [
+                _result("supporting-doc", "evaluate/gap_maps.json", 0.9),
+                _result("unrelated", "plan/application_strategies.json", 0.8),
+                _result("primary-doc", "analyze/requirement_matrix.json", 0.7),
+            ],
+        }
+    )
+
+    report = evaluate_labeled_retrieval_queries(
+        retriever=retriever,
+        query_specs=[
+            {
+                "query_id": "rag-golden-weighted",
+                "query": "multi doc",
+                "expected_chunks": ["primary-doc", "supporting-doc"],
+                "expected_documents": [
+                    {"label": "primary-doc", "role": "primary"},
+                    {"label": "supporting-doc", "role": "supporting"},
+                ],
+            }
+        ],
+        k_values=[1, 3],
+    )
+
+    query = report["queries"][0]
+    assert query["ranked_relevance"] == [True, False, True]
+    assert query["evidence_coverage"] == {
+        "expected_label_count": 2,
+        "hit_label_count": 2,
+        "missing_labels": [],
+        "primary_expected_count": 1,
+        "primary_hit_count": 1,
+        "supporting_expected_count": 1,
+        "supporting_hit_count": 1,
+        "all_expected_hit": True,
+        "all_primary_hit": True,
+    }
+    assert query["weighted_metrics"]["role_weights"] == {"primary-doc": 1.0, "supporting-doc": 0.5}
+    assert query["weighted_metrics"]["weighted_recall_at_k"]["1"] == 1 / 3
+    assert query["weighted_metrics"]["weighted_recall_at_k"]["3"] == 1.0
+    assert query["weighted_metrics"]["weighted_ndcg_at_k"]["1"] == 0.5
+    assert report["aggregate"]["weighted_recall_at_k"]["3"] == 1.0
+
+
 class _FakeRetriever:
     def __init__(self, results_by_query: dict[str, list[RetrievalResult]]) -> None:
         self.results_by_query = results_by_query
