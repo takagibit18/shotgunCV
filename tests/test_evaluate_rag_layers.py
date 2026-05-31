@@ -6,7 +6,7 @@ import math
 import re
 from pathlib import Path
 
-from scripts.evaluate_rag_layers import evaluate_generator_layer, evaluate_retriever_layer
+from scripts.evaluate_rag_layers import _sample_to_query_spec, evaluate_generator_layer, evaluate_retriever_layer
 
 
 def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None:
@@ -76,6 +76,93 @@ def test_evaluate_retriever_layer_can_select_hybrid_retriever(tmp_path: Path) ->
     assert report["retriever_mode"] == "hybrid"
     assert report["retriever_type"] == "InMemoryHybridRetriever"
     assert report["metrics"]["query_count"] == 25
+
+
+def test_sample_to_query_spec_does_not_apply_jd_filter_to_mixed_scope_docs() -> None:
+    spec = _sample_to_query_spec(
+        {
+            "question_id": "rag-golden-027",
+            "question": "What candidate profile and JD evidence support this fit?",
+            "case_type": "multi_document",
+            "expected_documents": [
+                {
+                    "source_type": "candidate_evidence",
+                    "source_id": "cand-001:candidate-profile",
+                    "label": "candidate-profile",
+                    "role": "primary",
+                },
+                {
+                    "source_type": "requirement_evidence",
+                    "source_id": "jd-005-req-013",
+                    "label": "jd-005-req-013",
+                    "role": "supporting",
+                },
+            ],
+        }
+    )
+
+    assert "jd_id" not in spec
+    assert "source_type" not in spec
+    assert spec["filter_scope"] == "mixed_scope"
+    assert spec["filters"] == {}
+
+
+def test_sample_to_query_spec_applies_jd_filter_only_for_single_jd_docs() -> None:
+    spec = _sample_to_query_spec(
+        {
+            "question_id": "rag-golden-001",
+            "question": "What evidence supports the JD requirements?",
+            "case_type": "multi_document",
+            "expected_documents": [
+                {
+                    "source_type": "requirement_evidence",
+                    "source_id": "jd-001-req-001",
+                    "label": "jd-001-req-001",
+                    "role": "primary",
+                },
+                {
+                    "source_type": "requirement_evidence",
+                    "source_id": "jd-001-req-002",
+                    "label": "jd-001-req-002",
+                    "role": "supporting",
+                },
+            ],
+        }
+    )
+
+    assert spec["jd_id"] == "jd-001"
+    assert spec["source_type"] == "requirement_evidence"
+    assert spec["filter_scope"] == "single_jd"
+    assert spec["filters"] == {"jd_id": "jd-001", "source_type": "requirement_evidence"}
+
+
+def test_sample_to_query_spec_applies_source_type_filter_for_global_same_type_docs() -> None:
+    spec = _sample_to_query_spec(
+        {
+            "question_id": "rag-golden-global",
+            "question": "What candidate evidence supports this profile?",
+            "case_type": "multi_document",
+            "expected_documents": [
+                {
+                    "source_type": "candidate_evidence",
+                    "source_id": "cand-001:candidate-profile",
+                    "label": "candidate-profile",
+                    "role": "primary",
+                },
+                {
+                    "source_type": "candidate_evidence",
+                    "source_id": "cand-001:candidate-summary",
+                    "label": "candidate-summary",
+                    "role": "supporting",
+                },
+            ],
+        }
+    )
+
+    assert "jd_id" not in spec
+    assert spec["source_type"] == "candidate_evidence"
+    assert spec["filter_scope"] == "single_source_type"
+    assert spec["filters"] == {"source_type": "candidate_evidence"}
 
 
 def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Path) -> None:

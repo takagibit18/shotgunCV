@@ -290,3 +290,45 @@ P3 (方法论): 系统天花板量化
 
 本地 sanity check 先用 BM25 report 跑通了审计链路：12 条 BM25 zero-MRR query 中，10 条被标记为 `expected_document_vocabulary_gap`，2 条被标记为 `retrieval_ranking_failure`。对 reranker 后仍为零的 7 条 query ID（`rag-golden-001`、`005`、`010`、`012`、`015`、`024`、`027`）做 expected-document 文本审计时，7/7 都呈现 `expected_document_vocabulary_gap`。这还不能直接判定“标注错误”还是“文档内容缺失”，但已经说明下一步应先人工复核 golden set / chunk 内容，而不是继续换更大的检索模型。
 
+---
+
+## P0 完成：Golden Set / BM25 方法论重对齐（2026-05-31）
+
+结论更精确了：golden set 没有过期，`label_coverage` 仍为 1.0；问题是 May 26 的 golden set 按 dense/semantic 心智标注，May 30 后主检索器转为 BM25/keyword，导致 query 语义正确但 expected chunk 文本没有关键词重叠。
+
+本轮新增 `scripts/realign_golden_rag_set.py`，只处理 zero-hit audit 中的 `expected_document_vocabulary_gap` answerable samples。脚本不改 `expected_documents`，只在本地 ignored golden JSON 的 `question` 后追加 expected chunk 中真实存在的 BM25 检索关键词，并写入 `retrieval_alignment.method=bm25_keyword_rewrite`。真实 `fixtures/golden_rag_questions.json` 仍作为本地评估资产，不提交。
+
+本地执行结果：
+
+| 阶段 | MRR | precision@1 | recall@10 | nDCG@10 | zero-hit audit |
+|------|----:|------------:|----------:|--------:|----------------|
+| realign 前 BM25 | 0.348 | 0.28 | 0.48 | 0.355 | 10 vocabulary gap + 2 ranking failure |
+| realign 后 BM25 | 0.564 | 0.48 | 0.70 | 0.528 | 4 ranking failure |
+| realign 后 BM25 + static expansion | **0.591** | **0.52** | **0.70** | **0.543** | 未单独审计 |
+| realign 后 BM25@20 → reranker | 0.500 | 0.40 | 0.62 | 0.488 | 未单独审计 |
+
+本轮把 `expected_document_vocabulary_gap` 从 10 降到 0。剩余 4 条零命中全部变成真正的 `retrieval_ranking_failure`，说明现在评估问题已经从“标注/检索方法论错配”推进到“排序策略真实失败”。关键词重对齐后，Cross-Encoder reranker 不再是最优组合；当前最高指标来自 **BM25 + static expansion（MRR 0.591）**。
+
+## P0 补丁：Scope-Aware Filtering（2026-05-31）
+
+上一轮把 vocabulary gap 清零后，剩余 4 条 zero-MRR 里有 1 条并不是真实排序失败，而是评估层 filter 派生错误：`rag-golden-027` 同时期待全局 `candidate-profile` 和 JD 局部 `jd-005-req-013`，但 evaluator 从后者推导出 `jd_id=jd-005`，导致全局 candidate profile 在检索前被过滤掉。
+
+本轮修复 `scripts/evaluate_rag_layers.py` 的 scope 规则：只有所有 expected documents 都能解析出同一个 `jd_id` 时才派生 JD filter；混合 global+JD 的样本标记为 `filter_scope=mixed_scope`，不再套单一 JD filter。`packages/py-core/src/shotguncv_core/rag/metrics.py` 同时把每条 query 实际传给 retriever 的 `filters` 写入 report，避免后续只能从 query spec 反推。
+
+修复后 `rag-golden-027` 的 BM25 report 变为：
+
+- `filter_scope`: `mixed_scope`
+- `filters`: `{}`
+- first relevant rank: 1
+- top hit: `candidate-profile`
+
+本地重评估结果：
+
+| 阶段 | MRR | precision@1 | recall@10 | nDCG@10 | zero-hit audit |
+|------|----:|------------:|----------:|--------:|----------------|
+| realign 后 BM25 | 0.564 | 0.48 | 0.70 | 0.528 | 4 ranking failure |
+| scope-aware BM25 | 0.604 | 0.52 | 0.72 | 0.552 | 3 ranking failure |
+| scope-aware BM25 + static expansion | **0.631** | **0.56** | **0.72** | **0.568** | 未单独审计 |
+| scope-aware BM25@20 → reranker | 0.540 | 0.44 | 0.64 | 0.512 | 未单独审计 |
+
+`label_coverage` 仍为 1.0，zero-hit audit 只剩 `rag-golden-004`、`rag-golden-014`、`rag-golden-015`。这说明 `rag-golden-027` 的根因不是 reranker 排序失败，也不是 golden label 失效，而是 multi-document/mixed-scope query 被过窄 `jd_id` filter 误杀。

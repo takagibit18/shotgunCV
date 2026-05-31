@@ -85,13 +85,21 @@ def test_evaluate_labeled_retrieval_queries_aggregates_query_metrics() -> None:
     assert report["aggregate"]["mrr"] == 0.75
     assert report["queries"][0]["ranked_relevance"] == [False, True, True]
     assert report["queries"][1]["ranked_relevance"] == [True]
+    assert report["queries"][0]["filters"] == {"jd_id": "jd-001"}
+    assert report["queries"][1]["filters"] == {"jd_id": "jd-002"}
+    assert retriever.calls == [
+        {"query": "query one", "limit": 3, "filters": {"jd_id": "jd-001"}},
+        {"query": "query two", "limit": 3, "filters": {"jd_id": "jd-002"}},
+    ]
 
 
 class _FakeRetriever:
     def __init__(self, results_by_query: dict[str, list[RetrievalResult]]) -> None:
         self.results_by_query = results_by_query
+        self.calls: list[dict[str, object]] = []
 
-    def search(self, query: str, *, limit: int = 5, **_: object) -> list[RetrievalResult]:
+    def search(self, query: str, *, limit: int = 5, **filters: object) -> list[RetrievalResult]:
+        self.calls.append({"query": query, "limit": limit, "filters": filters})
         return self.results_by_query[query][:limit]
 
 

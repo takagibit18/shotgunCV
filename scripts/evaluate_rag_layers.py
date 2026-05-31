@@ -202,27 +202,44 @@ def _samples(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _sample_to_query_spec(sample: dict[str, Any]) -> dict[str, Any]:
     expected_docs = sample.get("expected_documents", [])
+    jd_id = _extract_jd_id(expected_docs)
+    source_type = _extract_source_type(expected_docs)
+    filters = _query_filters(jd_id=jd_id, source_type=source_type)
     spec: dict[str, Any] = {
         "query_id": sample["question_id"],
         "query": sample["question"],
         "case_type": sample.get("case_type"),
         "expected_chunks": [_document_label(document) for document in expected_docs],
         "expected_documents": expected_docs,
+        "filter_scope": _filter_scope(jd_id=jd_id, source_type=source_type),
+        "filters": filters,
     }
-    jd_id = _extract_jd_id(expected_docs)
     if jd_id:
         spec["jd_id"] = jd_id
-    source_type = _extract_source_type(expected_docs)
     if source_type:
         spec["source_type"] = source_type
     return spec
 
 
 def _extract_jd_id(expected_documents: list[dict[str, Any]]) -> str | None:
+    jd_ids = [_document_jd_id(doc) for doc in expected_documents]
+    if not jd_ids or any(jd_id is None for jd_id in jd_ids):
+        return None
+    unique_jd_ids = set(jd_ids)
+    return unique_jd_ids.pop() if len(unique_jd_ids) == 1 else None
+
+
+def _document_jd_id(document: dict[str, Any]) -> str | None:
+    source_type = str(document.get("source_type") or "").strip().lower()
+    label = str(document.get("label") or "")
+    source_id = str(document.get("source_id") or "")
+    if source_type == "candidate_evidence":
+        return None
+    if "candidate-profile" in f"{label}\n{source_id}".lower():
+        return None
     jd_ids: set[str] = set()
-    for doc in expected_documents:
-        source_id = str(doc.get("source_id") or "")
-        m = _JD_ID_RE.search(source_id)
+    for value in (source_id, label):
+        m = _JD_ID_RE.search(value)
         if m:
             jd_ids.add(m.group(0))
     return jd_ids.pop() if len(jd_ids) == 1 else None
@@ -232,6 +249,23 @@ def _extract_source_type(expected_documents: list[dict[str, Any]]) -> str | None
     source_types: set[str] = {str(doc.get("source_type") or "").strip() for doc in expected_documents}
     source_types.discard("")
     return source_types.pop() if len(source_types) == 1 else None
+
+
+def _query_filters(*, jd_id: str | None, source_type: str | None) -> dict[str, str]:
+    filters: dict[str, str] = {}
+    if jd_id:
+        filters["jd_id"] = jd_id
+    if source_type:
+        filters["source_type"] = source_type
+    return filters
+
+
+def _filter_scope(*, jd_id: str | None, source_type: str | None) -> str:
+    if jd_id:
+        return "single_jd"
+    if source_type:
+        return "single_source_type"
+    return "mixed_scope"
 
 
 def _label_coverage(chunks: list[dict[str, Any]], query_specs: list[dict[str, Any]]) -> dict[str, Any]:

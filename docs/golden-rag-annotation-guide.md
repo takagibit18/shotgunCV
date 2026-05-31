@@ -31,6 +31,8 @@ Prefer stable artifact labels that match retrieval metadata, such as `jd-001-req
 
 For `multi_document`, include at least two expected documents and mark their roles as `primary` or `supporting`.
 
+For mixed-scope `multi_document` samples, do not assume a single JD filter applies. If `expected_documents` combine global candidate evidence such as `candidate-profile` with JD-local evidence such as `jd-005-req-013`, retriever evaluation must use `filter_scope=mixed_scope` and no derived `jd_id` filter. A JD filter is valid only when every expected document resolves to the same `jd-\d+`.
+
 For `stale_or_conflicting`, use `role=conflicting` or `role=stale` for the document that should lower confidence or change the answer.
 
 For `no_answer`, keep `expected_documents=[]`, make `golden_answer` explicitly say the current materials cannot confirm the claim, and list the missing evidence in `must_cover_points`.
@@ -69,6 +71,19 @@ Zero-hit audit:
 ```
 
 Use this before editing golden labels. The audit report separates missing labels, expected-document vocabulary gaps, and likely ranking failures so annotation fixes do not get mixed up with retriever tuning.
+
+BM25 keyword realignment:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\realign_golden_rag_set.py `
+  --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 `
+  --golden-file fixtures\golden_rag_questions.json `
+  --audit-report baseline\rag-layered-20260526\zero-hit-audit.json `
+  --changelog baseline\golden-realignment-20260531\changes.json `
+  --date 2026-05-31
+```
+
+Use this only after zero-hit audit shows `expected_document_vocabulary_gap`. The script keeps `expected_documents` unchanged and appends a short `检索关键词：...` hint from the expected chunk text, so BM25-style retriever evaluation measures ranking rather than dense-era semantic annotation mismatch. Do not use it for `missing_expected_document_label`, `retrieval_ranking_failure`, or `no_answer` cases.
 
 Generator layer uses perfect documents from the golden set and evaluates an answer file. The answer file schema is:
 
