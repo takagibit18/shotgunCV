@@ -25,6 +25,7 @@ def evaluate_labeled_retrieval_queries(
             value = spec.get(filter_key)
             if value:
                 search_kwargs[filter_key] = value
+        filters = {key: value for key, value in search_kwargs.items() if key != "limit"}
         results = retriever.search(query, **search_kwargs)
         ranked_ids = [_ranked_label_for_result(result, expected) for result in results]
         metrics = evaluate_ranked_retrieval(ranked_ids=ranked_ids, relevant_ids=set(expected), k_values=ks)
@@ -32,6 +33,8 @@ def evaluate_labeled_retrieval_queries(
             {
                 "query_id": spec.get("query_id"),
                 "jd_id": spec.get("jd_id"),
+                "filter_scope": spec.get("filter_scope"),
+                "filters": filters,
                 "query": query,
                 "expected_chunks": expected,
                 "ranked_ids": ranked_ids,
