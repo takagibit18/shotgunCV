@@ -165,6 +165,7 @@ def _audit_query(
         "expected_labels": [str(document["label"]) for document in expected_documents],
         "expected_documents": expected_documents,
         "top_hits": top_hits,
+        "retrieval_diagnostics": _retrieval_diagnostics(query_report, expected_documents),
         "token_overlap": token_overlap,
         "root_cause_hint": root_cause_hint,
         "root_cause_explanation": _root_cause_explanation(root_cause_hint),
@@ -200,6 +201,50 @@ def _top_hit_summary(hit: dict[str, Any], chunks: list[dict[str, Any]], *, max_t
         "text_preview": _preview(matches[0].get("text", ""), max_text_chars) if matches else "",
     }
     return summary
+
+
+def _retrieval_diagnostics(
+    query_report: dict[str, Any],
+    expected_documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    expected_labels = [str(document.get("label") or "") for document in expected_documents if str(document.get("label") or "")]
+    expected_set = set(expected_labels)
+    ranked_ids = [str(item) for item in query_report.get("ranked_ids", []) if str(item)]
+    hit_labels = {item for item in ranked_ids if item in expected_set}
+    ranked_relevance = query_report.get("ranked_relevance", [])
+    first_relevant_rank = None
+    if isinstance(ranked_relevance, list):
+        for index, value in enumerate(ranked_relevance, start=1):
+            if value is True:
+                first_relevant_rank = index
+                break
+    if first_relevant_rank is None:
+        for index, label in enumerate(ranked_ids, start=1):
+            if label in expected_set:
+                first_relevant_rank = index
+                break
+    return {
+        "filter_scope": query_report.get("filter_scope"),
+        "filters": query_report.get("filters", {}),
+        "first_relevant_rank": first_relevant_rank,
+        "top_hit_matches_expected": bool(ranked_ids and ranked_ids[0] in expected_set),
+        "expected_label_count": len(expected_set),
+        "hit_label_count": len(hit_labels),
+        "missing_labels": sorted(expected_set - hit_labels),
+        "expected_role_counts": _role_counts(expected_documents, expected_set),
+        "hit_role_counts": _role_counts(expected_documents, hit_labels),
+    }
+
+
+def _role_counts(expected_documents: list[dict[str, Any]], labels: set[str]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for document in expected_documents:
+        label = str(document.get("label") or "")
+        if label not in labels:
+            continue
+        role = str(document.get("role") or "primary").strip().lower() or "primary"
+        counts[role] += 1
+    return dict(sorted(counts.items()))
 
 
 def _chunks_for_hit(hit: dict[str, Any], chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:

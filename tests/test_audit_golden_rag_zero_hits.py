@@ -22,7 +22,11 @@ def test_audit_zero_hit_queries_reports_expected_document_vocabulary_gap(tmp_pat
                     {
                         "query_id": "rag-golden-001",
                         "query": "是否有 LangGraph RAG review pipeline 的真实项目证据？",
+                        "filter_scope": "single_jd",
+                        "filters": {"jd_id": "jd-001"},
                         "expected_chunks": ["jd-001-req-001"],
+                        "ranked_ids": ["jd-001-req-002"],
+                        "ranked_relevance": [False],
                         "metrics": {"mrr": 0.0},
                         "hits": [
                             {
@@ -64,6 +68,17 @@ def test_audit_zero_hit_queries_reports_expected_document_vocabulary_gap(tmp_pat
     assert item["token_overlap"]["query_expected_overlap_tokens"] == []
     assert "langgraph" in item["token_overlap"]["missing_query_tokens_in_expected_documents"]
     assert audit["queries"][0]["top_hits"][0]["source_id"] == "jd-001-req-002"
+    assert item["retrieval_diagnostics"] == {
+        "filter_scope": "single_jd",
+        "filters": {"jd_id": "jd-001"},
+        "first_relevant_rank": None,
+        "top_hit_matches_expected": False,
+        "expected_label_count": 1,
+        "hit_label_count": 0,
+        "missing_labels": ["jd-001-req-001"],
+        "expected_role_counts": {"primary": 1},
+        "hit_role_counts": {},
+    }
 
 
 def test_audit_zero_hit_queries_reports_missing_expected_label(tmp_path: Path) -> None:

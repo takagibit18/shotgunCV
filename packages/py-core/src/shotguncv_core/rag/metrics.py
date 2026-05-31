@@ -7,6 +7,14 @@ from typing import Any
 from shotguncv_core.rag.retrieval import RetrievalResult
 
 
+_ROLE_WEIGHTS = {
+    "primary": 1.0,
+    "conflicting": 1.0,
+    "stale": 0.75,
+    "supporting": 0.5,
+}
+
+
 def evaluate_labeled_retrieval_queries(
     *,
     retriever: Any,
@@ -29,6 +37,13 @@ def evaluate_labeled_retrieval_queries(
         results = retriever.search(query, **search_kwargs)
         ranked_ids = [_ranked_label_for_result(result, expected) for result in results]
         metrics = evaluate_ranked_retrieval(ranked_ids=ranked_ids, relevant_ids=set(expected), k_values=ks)
+        role_weights = _role_weights(spec.get("expected_documents", []), expected)
+        weighted_metrics = _weighted_retrieval_metrics(ranked_ids=ranked_ids, role_weights=role_weights, k_values=ks)
+        evidence_coverage = _evidence_coverage(
+            ranked_ids=ranked_ids,
+            expected=expected,
+            expected_documents=spec.get("expected_documents", []),
+        )
         query_reports.append(
             {
                 "query_id": spec.get("query_id"),
@@ -40,6 +55,8 @@ def evaluate_labeled_retrieval_queries(
                 "ranked_ids": ranked_ids,
                 "ranked_relevance": [ranked_id in set(expected) for ranked_id in ranked_ids],
                 "metrics": metrics,
+                "weighted_metrics": weighted_metrics,
+                "evidence_coverage": evidence_coverage,
                 "hits": [_result_summary(result) for result in results],
             }
         )
@@ -133,6 +150,109 @@ def _ranked_label_for_result(result: RetrievalResult, expected: Sequence[str]) -
     )
 
 
+def _role_weights(expected_documents: Any, expected: Sequence[str]) -> dict[str, float]:
+    weights = {str(label): 1.0 for label in expected}
+    if not isinstance(expected_documents, Sequence) or isinstance(expected_documents, (str, bytes)):
+        return weights
+    for document in expected_documents:
+        if not isinstance(document, dict):
+            continue
+        label = _document_label(document)
+        if not label or label not in weights:
+            continue
+        role = str(document.get("role") or "primary").strip().lower()
+        weights[label] = _ROLE_WEIGHTS.get(role, 1.0)
+    return weights
+
+
+def _weighted_retrieval_metrics(
+    *,
+    ranked_ids: Sequence[str],
+    role_weights: dict[str, float],
+    k_values: Sequence[int],
+) -> dict[str, Any]:
+    total_weight = sum(role_weights.values())
+    return {
+        "role_weights": role_weights,
+        "weighted_recall_at_k": {
+            str(k): _weighted_recall_at_k(ranked_ids, role_weights, total_weight, k) for k in k_values
+        },
+        "weighted_ndcg_at_k": {str(k): _weighted_ndcg_at_k(ranked_ids, role_weights, k) for k in k_values},
+    }
+
+
+def _weighted_recall_at_k(
+    ranked_ids: Sequence[str],
+    role_weights: dict[str, float],
+    total_weight: float,
+    k: int,
+) -> float:
+    if total_weight <= 0.0 or k <= 0:
+        return 0.0
+    seen = {item for item in ranked_ids[:k] if item in role_weights}
+    return sum(role_weights[item] for item in seen) / total_weight
+
+
+def _weighted_ndcg_at_k(ranked_ids: Sequence[str], role_weights: dict[str, float], k: int) -> float:
+    if not role_weights or k <= 0:
+        return 0.0
+    seen: set[str] = set()
+    dcg = 0.0
+    for index, item in enumerate(ranked_ids[:k], start=1):
+        if item not in role_weights or item in seen:
+            continue
+        seen.add(item)
+        dcg += role_weights[item] / math.log2(index + 1)
+    ideal_weights = sorted(role_weights.values(), reverse=True)[:k]
+    ideal_dcg = sum(weight / math.log2(index + 1) for index, weight in enumerate(ideal_weights, start=1))
+    return dcg / ideal_dcg if ideal_dcg else 0.0
+
+
+def _evidence_coverage(
+    *,
+    ranked_ids: Sequence[str],
+    expected: Sequence[str],
+    expected_documents: Any,
+) -> dict[str, Any]:
+    expected_set = {str(label) for label in expected}
+    hit_labels = {item for item in ranked_ids if item in expected_set}
+    role_by_label = _role_by_label(expected_documents, expected)
+    primary_expected = {label for label, role in role_by_label.items() if role == "primary"}
+    supporting_expected = {label for label, role in role_by_label.items() if role == "supporting"}
+    return {
+        "expected_label_count": len(expected_set),
+        "hit_label_count": len(hit_labels),
+        "missing_labels": sorted(expected_set - hit_labels),
+        "primary_expected_count": len(primary_expected),
+        "primary_hit_count": len(primary_expected & hit_labels),
+        "supporting_expected_count": len(supporting_expected),
+        "supporting_hit_count": len(supporting_expected & hit_labels),
+        "all_expected_hit": bool(expected_set) and expected_set <= hit_labels,
+        "all_primary_hit": bool(primary_expected) and primary_expected <= hit_labels,
+    }
+
+
+def _role_by_label(expected_documents: Any, expected: Sequence[str]) -> dict[str, str]:
+    roles = {str(label): "primary" for label in expected}
+    if not isinstance(expected_documents, Sequence) or isinstance(expected_documents, (str, bytes)):
+        return roles
+    for document in expected_documents:
+        if not isinstance(document, dict):
+            continue
+        label = _document_label(document)
+        if label in roles:
+            roles[label] = str(document.get("role") or "primary").strip().lower() or "primary"
+    return roles
+
+
+def _document_label(document: dict[str, Any]) -> str:
+    for field in ("label", "source_id", "chunk_id"):
+        value = str(document.get(field) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _result_summary(result: RetrievalResult) -> dict[str, Any]:
     return {
         "source_type": result.metadata.get("source_type"),
@@ -149,6 +269,10 @@ def _aggregate_query_metrics(query_reports: Sequence[dict[str, Any]], k_values: 
             "recall_at_k": {str(k): 0.0 for k in k_values},
             "ndcg_at_k": {str(k): 0.0 for k in k_values},
             "mrr": 0.0,
+            "weighted_recall_at_k": {str(k): 0.0 for k in k_values},
+            "weighted_ndcg_at_k": {str(k): 0.0 for k in k_values},
+            "all_expected_hit_rate": 0.0,
+            "all_primary_hit_rate": 0.0,
         }
     count = len(query_reports)
     return {
@@ -165,4 +289,18 @@ def _aggregate_query_metrics(query_reports: Sequence[dict[str, Any]], k_values: 
             for k in k_values
         },
         "mrr": sum(float(item["metrics"]["mrr"]) for item in query_reports) / count,
+        "weighted_recall_at_k": {
+            str(k): sum(float(item["weighted_metrics"]["weighted_recall_at_k"][str(k)]) for item in query_reports)
+            / count
+            for k in k_values
+        },
+        "weighted_ndcg_at_k": {
+            str(k): sum(float(item["weighted_metrics"]["weighted_ndcg_at_k"][str(k)]) for item in query_reports)
+            / count
+            for k in k_values
+        },
+        "all_expected_hit_rate": sum(1 for item in query_reports if item["evidence_coverage"]["all_expected_hit"])
+        / count,
+        "all_primary_hit_rate": sum(1 for item in query_reports if item["evidence_coverage"]["all_primary_hit"])
+        / count,
     }
