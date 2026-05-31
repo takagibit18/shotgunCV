@@ -460,15 +460,65 @@ Enrichment + Expansion 修复: 3/19 (16%)
 
 ---
 
+---
+
+## P1 完成：Cross-Encoder Reranker（2026-05-30）
+
+分支：`feat/cross-encoder-reranker`
+专用文档：`docs/rag-reranker-analysis.md`
+
+### 方案
+
+两阶段检索：BM25 粗召回 top-20 → `BAAI/bge-reranker-v2-m3` Cross-Encoder 精排 top-10。
+
+```python
+# rag/reranking.py (47 行)
+class CrossEncoderReranker:
+    def rerank(self, query, candidates, top_k=10):
+        pairs = [(query, c.text) for c in candidates]
+        scores = self._model.predict(pairs)  # query+doc 同时过 transformer
+        return sorted_by_score(candidates)[:top_k]
+```
+
+### 效果
+
+| 配置 | MRR | precision@1 | recall@10 |
+|------|:---:|:-----------:|:---------:|
+| BM25 baseline | 0.348 | 0.28 | 0.48 |
+| BM25 + static expansion | 0.390 | 0.32 | 0.54 |
+| **BM25 @20 → reranker** | **0.398** | **0.32** | **0.54** |
+| BM25 @50 → reranker | 0.387 | 0.28 | 0.54 |
+| BM25+static @50 → reranker | 0.374 ⚠️ | 0.28 | 0.56 |
+
+### 关键发现
+
+1. **最优：BM25 @20 → reranker**。窄粗召回（20）优于宽召回（50/100）——噪声越少，reranker 越准。
+2. **Reranker fixes 5/12 zero-MRR queries (42%)**，其中 2 条达到 MRR=1.0。
+3. **Expansion + reranker 互斥**（0.374 < 0.390）。Expansion 词扰乱 Cross-Encoder 的语义判断。
+4. **BM25 和 Dense 粗召回经 reranker 后收敛**（均为 0.387）——reranker 补偿了粗召回质量差异。
+5. 仍剩余 7 条零命中——目标文档内容与 query intent 的结构性 gap 超出 retrieval 层修复能力。
+
+### 使用方式
+
+```bash
+python scripts/evaluate_rag_layers.py --layer retriever --retriever-mode bm25 \
+  --reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 20 \
+  --golden-file ... --run-dir ... --output ...
+```
+
+详见 `docs/rag-reranker-analysis.md` 完整评估矩阵。
+
+---
+
 ## 剩余改进优先级（更新于 2026-05-30）
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
-| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316，但仍低于纯 BM25（0.333）。 |
-| ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。jd_description 2.1x→1.0x。BM25 MRR +1.2%，0 退化。 |
-| ~~**P1**~~ | ~~Query Expansion~~ | ✅ 已完成。Static MRR 0.337→0.373 (+10.9%)，2 改善 0 退化。 |
-| ~~**Chunk**~~ | ~~内容增强~~ | ✅ 已完成。MRR 0.333→0.390 (+17%)，p@1 0.24→0.32 (+33%)。 |
-| **P1** | Cross-Encoder Reranker | 新建 `rag/reranking.py`，集成 `BAAI/bge-reranker-v2-m3`。retriever top-50 → reranker top-10 |
+| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。 |
+| ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。 |
+| ~~**P1**~~ | ~~Query Expansion~~ | ✅ 已完成。 |
+| ~~**Chunk**~~ | ~~内容增强~~ | ✅ 已完成。 |
+| ~~**P1**~~ | ~~Cross-Encoder Reranker~~ | ✅ 已完成。BM25@20→reranker: MRR 0.398 (+14.5%)，5/12 零命中修复。 |
 | **P3** | 多尺寸 Chunking | 对保留切分的 source_type 按文档特性配置不同 chunk_size |
-| **P4** | Hybrid Search 修复 | 按 case_type 诊断 dense 正向贡献，做 query-level 自适应权重 |
+| **P4** | Hybrid Search 修复 | 用 reranker 替代 dense score 做 hybrid，重新评估 query-level 权重 |
 | **P5** | Graded Relevance 评估升级 | 利用 golden set 已有的 `document_roles` 做加权 nDCG |
