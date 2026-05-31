@@ -174,11 +174,138 @@ python scripts/grid_search_hybrid_weights.py \
   --output outputs/grid_search_hybrid_weights.json
 ```
 
-### 剩余改进优先级
+---
+
+## P2 → P0 升级：Chunking 按文档类型决策（2026-05-30）
+
+分支：`feat/chunking-by-source-type`
+
+### 诊断
+
+之前 P2 优先级标记为"同 source_id 多 chunk 合并"。实际分析发现问题的根源更早一步——**不是合并碎片，而是不应该制造碎片**。
+
+核心发现：
+
+| source_type | 典型长度 | 语义特性 | 当前碎片率 |
+|-------------|---------|---------|:----------:|
+| `requirement_evidence` | 200-500 chars | 单条 requirement，语义自包含 | **1.0x**（已无碎片） |
+| `jd_description` | 300-6000 chars | JD title+requirements 集合 | **2.1x**（问题集中在此） |
+| `gap_map` | 200-600 chars | 单条 gap item，语义自包含 | **1.0x** |
+| `candidate_evidence` | 500-2000 chars | 多段多主题拼接 | 1.0x |
+| `resume_variant` | 1000-3000 chars | 完整简历变体 | 1.0x |
+| `jd_input` | 500-6000 chars | 原始输入文本，无结构 | 2.1x |
+
+问题：`RecursiveCharacterTextSplitter(chunk_size=900)` 对**已有自然语义边界的结构化文档又切了一刀**。jd_description 被切成 2-7 个 chunk，同一 JD 的碎片在 rank 中互相竞争位置。
+
+```
+数据本身已经做了结构化切分：
+  requirement_matrix.json:
+    req-001: LangGraph 经验  ← 独立语义单元
+    req-002: RAG 评估经验    ← 独立语义单元
+
+但 RecursiveCharacterTextSplitter 又切了一刀：
+  jd_description jd-015:
+    chunk_0: "AI Platform Engineer\nExample AI\nBuild LangGraph..." (900 chars)
+    chunk_1: "...review automation\nDesign RAG evaluation..." (899 chars)
+    chunk_2: "...pipelines\nDeploy LLM orchestration..." (900 chars)
+    ...chunk_3-5
+
+同一 JD 描述被切成 6 个 chunk，在检索结果中互相竞争。
+```
+
+### 方案
+
+按 source_type 分类决策：结构化短文档不切分，直接整文档向量化；仅长文档保留切分。
+
+```python
+_ATOMIC_SOURCE_TYPES = {"requirement_evidence", "jd_description", "gap_map"}
+
+if source_type in _ATOMIC_SOURCE_TYPES:
+    # 短文档：整文档作为一个检索单元
+    chunks.append(single_chunk(document))
+else:
+    # 长文档：保持 RecursiveCharacterTextSplitter
+    for text in _split_text(document.page_content):
+        chunks.append(...)
+```
+
+改动量：`documents.py` 19 行。
+
+> 判断标准不是 chunk_size，而是文档是否已有自然语义边界。结构化 JSON artifact 的每个条目已经是一个完整的语义单元——chunking 不是 RAG 的必选项，是长文本场景下的工具。
+
+### 效果：Before vs After
+
+运行：`baseline-formal-r3-full-raw-library-20260520`，25 条 answerable 样本。
+
+#### 搜索空间
+
+| 指标 | Before | After | 变化 |
+|------|--------|-------|------|
+| 总 chunks | 625 | 594 | **-5%** |
+| jd_description 碎片率 | 2.1x (57/27) | **1.0x (27/27)** | 消除碎片 |
+| 唯一 source_id | 564 | 564 | 不变 |
+
+#### BM25 检索指标
+
+| 指标 | Before | After | Δ |
+|------|--------|-------|----|
+| MRR | 0.333 | **0.337** | +1.2% |
+| precision@1 | 0.24 | 0.24 | 持平 |
+| precision@10 | 0.064 | **0.068** | +6.3% |
+| recall@10 | 0.52 | **0.54** | +3.8% |
+| nDCG@10 | 0.359 | **0.366** | +2.0% |
+
+#### Per-query
+
+- 改善：1 条（"AI Agent 平台岗位中，最强两份证据是什么？" MRR 0.0 → 0.1）
+- 退化：**0 条**
+- 不变：24 条
+
+#### Dense/Hybrid
+
+| 指标 | Before | After | Δ |
+|------|--------|-------|----|
+| Dense MRR | 0.278 | 0.276 | 持平 |
+| No-answer abstained | 5/5 | 5/5 | 无泄漏 |
+
+### 为什么提升不大（诚实评估）
+
+jd_description 仅占总 chunks 的 9%（57/625）。大部分 chunks 是 requirement_evidence（467 个），它本身碎片率就是 1.0x——`RecursiveCharacterTextSplitter` 对 200-500 字符的短文档本来就不切。因此实际消除的碎片量有限。
+
+**但这次改动的正确性收益大于指标收益：**
+
+1. **工程文档化**：代码明确记录了**为什么**有些文档不切——这是有意识的工程决策，不是偷懒
+2. **检索结果可解释性提升**：jd_description 的检索结果现在返回**完整 JD 描述**，而不是 "JD 描述第 3/6 块"
+3. **为后续铺路**：P1（Cross-Encoder Reranker）输入变为干净的文档列表，P3（多尺寸 chunking）继承 source_type 分类框架
+
+### 面试叙事要点
+
+详见 `E:\PycharmProjects\知识库\Agent知识库\raw\sources\events\ShotgunCV RAG chunking 策略诊断与简历叙事事件.md`
+
+核心论证：chunking 不是 RAG 的必选项。当数据已有自然语义边界（结构化 JSON artifact），不做 chunking 反而是最优策略。这是"数据模型设计"替代"算法补救"的案例。
+
+### 数据
+
+评估脚本：
+```bash
+python scripts/evaluate_rag_layers.py \
+  --layer retriever \
+  --golden-file fixtures/golden_rag_questions.json \
+  --run-dir baseline/runs-formal-20260520/baseline-formal-r3-full-raw-library-20260520 \
+  --output baseline/p0-chunking-atomic-bm25.json \
+  --retriever-mode bm25
+```
+
+---
+
+## 剩余改进优先级（更新于 2026-05-30）
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
-| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316（+0.004），但仍低于纯 BM25（0.333）。**权重调优无法弥合差距。** |
-| **P1** | 对齐黄金 query 与 chunk 语言 | 改写 query 加入预期 chunk 中出现的英文技术术语，提升 dense 和 BM25 命中率 |
-| **P2** | 引入 cross-encoder reranker | 对第一阶段 top-50 结果做重排序，提升 top-k 精度 |
-| **P2** | 同 source_id 多 chunk 合并 | 将同一文档的多个 chunk 合并为单一检索单元，避免文档切碎后单 chunk 无法命中 |
+| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316（+0.004），但仍低于纯 BM25（0.333）。 |
+| ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。jd_description 碎片率 2.1x→1.0x。BM25 MRR +1.2%，recall@10 +3.8%，0 退化。提升不大因为 jd_description 仅占 9% 的 chunk。 |
+| **P1** | Query Expansion（中英文对齐） | 改写 query 加入预期 chunk 中出现的英文技术术语，提升 BM25 的 term 匹配和 dense 的跨语言信号 |
+| **P1** | Cross-Encoder Reranker | 新建 `rag/reranking.py`，集成 `BAAI/bge-reranker-v2-m3`。retriever top-50 → reranker top-10 |
+| **P3** | 多尺寸 Chunking | 对保留切分的 source_type（candidate_evidence/resume_variant/jd_input）按文档特性配置不同 chunk_size，增加 SemanticSplitter |
+| **P4** | Hybrid Search 修复 | 按 case_type 诊断 dense 在哪些 query 上有正向贡献，做 query-level 自适应权重 |
+| **P5** | Graded Relevance 评估升级 | 利用 golden set 已有的 `document_roles` 做加权 nDCG |
