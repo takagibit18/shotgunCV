@@ -18,7 +18,7 @@ def evaluate_labeled_retrieval_queries(
     search_limit = limit or (max(ks) if ks else 10)
     query_reports: list[dict[str, Any]] = []
     for spec in query_specs:
-        query = str(spec["query"])
+        query = str(spec.get("expanded_query") or spec["query"])
         expected = [str(item) for item in spec.get("expected_chunks", []) if str(item).strip()]
         search_kwargs: dict[str, Any] = {"limit": search_limit}
         for filter_key in ("candidate_id", "jd_id", "source_type"):

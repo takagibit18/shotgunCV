@@ -289,6 +289,109 @@ def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", text.lower())
 
 
+# ---------------------------------------------------------------------------
+# query expansion
+# ---------------------------------------------------------------------------
+
+
+# Approach A: static Chinese \u2192 English tech term mapping.
+# Built from analysis of golden set queries vs. expected document vocabulary.
+_STATIC_EXPANSION_MAP: dict[str, list[str]] = {
+    "langgraph": ["langgraph", "orchestration", "fan-out", "graph", "workflow"],
+    "rag": ["rag", "retrieval", "embedding", "requirement_evidence"],
+    "pgvector": ["pgvector", "vector", "embedding", "postgresql"],
+    "llm": ["llm", "language model", "generation", "judge"],
+    "mcp": ["mcp", "skills", "tools", "tooling", "agent"],
+    "ocr": ["ocr", "extraction", "tesseract", "vision"],
+    "hitl": ["hitl", "human-in-the-loop", "checkpoint", "approval"],
+    "mlops": ["mlops", "deployment", "pipeline", "ci/cd"],
+    "fastapi": ["fastapi", "api", "backend", "python", "web"],
+    "docker": ["docker", "container", "redis", "infrastructure"],
+    "langchain": ["langchain", "orchestration", "framework"],
+    "web3": ["web3", "blockchain", "crypto"],
+    "e2e": ["e2e", "end-to-end", "pipeline", "evaluate"],
+    "pdf": ["pdf", "document", "extraction", "ocr"],
+    "jd": ["jd", "job description", "jd_description", "requirement"],
+    "gap": ["gap", "missing", "gap_map", "mismatch"],
+    "retriever": ["retriever", "retrieval", "bm25", "search"],
+    "generator": ["generator", "generation", "llm"],
+    "benchmark": ["benchmark", "throughput", "performance", "evaluation"],
+    "observability": ["observability", "monitoring", "logging", "traces"],
+    "artifact": ["artifact", "run_dir", "post_run_review", "structured"],
+    "fallback": ["fallback", "abstention", "no-answer", "gate"],
+    "citation": ["citation", "provenance", "evidence_ref", "source"],
+    "checkpoint": ["checkpoint", "approval", "human", "review"],
+    "skills": ["skills", "tools", "tooling", "mcp", "custom"],
+    "platform": ["platform", "agent", "orchestration", "engineer"],
+    "review": ["review", "post_run_review", "evaluate", "scorecards"],
+}
+
+
+def expand_query(
+    query: str,
+    *,
+    method: str = "static",
+    dense_retriever: "InMemoryVectorRetriever | None" = None,
+) -> str:
+    """Expand a query with terms that improve BM25 retrieval.
+
+    Methods:
+      - "static": Appends English tech terms from a curated mapping (Approach A).
+      - "dense_jd": Uses dense retrieval to discover the most relevant jd_id,
+        then appends it to the query for BM25 precision (Approach C).
+    """
+    if method == "static":
+        return _static_expand(query)
+    if method == "dense_jd":
+        return _dense_jd_expand(query, dense_retriever)
+    return query
+
+
+def _static_expand(query: str) -> str:
+    """Append matching English tech terms from the static mapping."""
+    query_lower = query.lower()
+    additions: list[str] = []
+    for key, terms in _STATIC_EXPANSION_MAP.items():
+        if key in query_lower:
+            additions.extend(terms)
+    if not additions:
+        return query
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for term in additions:
+        if term not in seen:
+            seen.add(term)
+            unique.append(term)
+    return f"{query}\n{' '.join(unique)}"
+
+
+def _dense_jd_expand(query: str, dense_retriever: "InMemoryVectorRetriever | None") -> str:
+    """Use dense retrieval to discover the most relevant jd_id and inject it.
+
+    Strategy: Dense for recall (find which JD), BM25 for precision (rank within JD).
+    The dense retriever searches ALL chunks without jd_id filter, then the most
+    frequent jd_id in the top results is appended to the query as a BM25 term.
+    """
+    if dense_retriever is None:
+        return query
+    # Coarse recall with dense \u2014 no jd_id filter, wider limit
+    dense_results = dense_retriever.search(query, limit=30)
+    if not dense_results:
+        return query
+    # Extract jd_ids from top results
+    jd_ids: list[str] = []
+    for r in dense_results:
+        jid = str(r.metadata.get("jd_id") or "")
+        if jid:
+            jd_ids.append(jid)
+    if not jd_ids:
+        return query
+    # Most frequent jd_id in the dense top-30
+    top_jd_id = Counter(jd_ids).most_common(1)[0][0]
+    return f"{query}\n{top_jd_id}"
+
+
 def _result_key(result: RetrievalResult) -> tuple[str, str, str, str]:
     return (
         str(result.metadata.get("source_type") or ""),

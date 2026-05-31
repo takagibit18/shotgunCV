@@ -38,7 +38,10 @@ def evaluate_retriever_layer(
     retriever_mode: str = "dense",
     vector_weight: float = 0.75,
     bm25_weight: float = 0.25,
+    query_expansion: str = "none",
 ) -> dict[str, Any]:
+    from shotguncv_core.rag.retrieval import InMemoryVectorRetriever, expand_query
+
     payload = _load_valid_golden(golden_file)
     samples = _samples(payload)
     batch = build_projection_batch(run_dir)
@@ -49,7 +52,23 @@ def evaluate_retriever_layer(
         vector_weight=vector_weight,
         bm25_weight=bm25_weight,
     )
+    # Build dense retriever for query expansion if needed
+    expansion_dense = None
+    if query_expansion == "dense_jd":
+        expansion_dense = InMemoryVectorRetriever.from_chunks(
+            batch.retrieval_chunks, embedding_model=embedding_model
+        )
+
     query_specs = [_sample_to_query_spec(sample) for sample in samples if sample.get("case_type") != "no_answer"]
+
+    # Apply query expansion to each spec
+    for spec in query_specs:
+        if query_expansion != "none":
+            spec["expanded_query"] = expand_query(
+                str(spec["query"]),
+                method=query_expansion,
+                dense_retriever=expansion_dense,
+            )
     coverage = _label_coverage(batch.retrieval_chunks, query_specs)
     quality_gate = _quality_gate(coverage)
     if quality_gate["status"] != "passed":
@@ -563,6 +582,12 @@ def main() -> int:
     )
     parser.add_argument("--vector-weight", type=float, default=0.75, help="Hybrid retriever vector weight.")
     parser.add_argument("--bm25-weight", type=float, default=0.25, help="Hybrid retriever BM25 weight.")
+    parser.add_argument(
+        "--query-expansion",
+        choices=["none", "static", "dense_jd"],
+        default="none",
+        help="Query expansion strategy: static term mapping, or dense-driven jd_id discovery.",
+    )
     args = parser.parse_args()
     if args.layer == "retriever":
         if not args.run_dir:
@@ -576,6 +601,7 @@ def main() -> int:
             retriever_mode=args.retriever_mode,
             vector_weight=args.vector_weight,
             bm25_weight=args.bm25_weight,
+            query_expansion=args.query_expansion,
         )
         print(json.dumps({"output": str(args.output), "aggregate": report["metrics"]["aggregate"]}, ensure_ascii=False, indent=2))
         return 0
