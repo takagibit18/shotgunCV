@@ -298,14 +298,102 @@ python scripts/evaluate_rag_layers.py \
 
 ---
 
+## P1 完成：Query Expansion 中英文对齐（2026-05-30）
+
+分支：`feat/query-expansion`
+
+### 诊断
+
+Step 0 per-query 诊断发现：25 条 answerable query 中，21 条的 query token 与预期文档 token **零重叠**。
+
+```
+Query: "是否有 LangGraph/RAG review pipeline 的真实项目证据？"
+  BM25 tokens: [candidate, 是否有, langgraph, rag, review, pipeline, 的真实项目证据]
+
+Expected chunk (jd-001-req-014) 搜索文本：
+  source_id: jd-001-req-014
+  text:      "Education Roles\nmissing"   ← 23 chars，不含 LangGraph
+
+共享 token：0 个 → BM25 score = 0 → MRR = 0
+```
+
+根因：golden set 按 source_id 语义标注，但 chunk 文本与 query 关键词完全不重叠（vocabulary mismatch）。用户讨论 LangGraph，文档描述 Education Roles——语义相关，词不重叠。
+
+### 方案
+
+两种策略：
+
+**Approach A（static，推荐默认）：** 静态中文→英文技术词映射表（`_STATIC_EXPANSION_MAP`），当 query 命中映射 key 时，追加英文 corpus 词汇。
+
+```python
+_STATIC_EXPANSION_MAP = {
+    "langgraph": ["langgraph", "orchestration", "fan-out", "graph", "workflow"],
+    "rag": ["rag", "retrieval", "embedding", "requirement_evidence"],
+    ...
+}
+# "是否有 LangGraph 经验" → 追加 "orchestration fan-out graph workflow"
+```
+
+**Approach C（dense_jd，实验模式）：** Dense for recall, BM25 for precision。用 dense retriever 粗召回 top-30 → 提取最频繁的 jd_id → 注入 BM25 query。
+
+```
+query → dense search(top-30) → Counter(jd_ids) → "jd-001"
+query + "jd-001" → BM25 search → ranked results
+```
+
+### 效果
+
+| 指标 | BM25 baseline | +static expansion | +dense_jd expansion |
+|------|:------------:|:-----------------:|:-------------------:|
+| MRR | 0.337 | **0.373** (+10.9%) | 0.341 (+1.3%) |
+| precision@1 | 0.24 | **0.28** (+16.7%) | 0.24 |
+| recall@10 | 0.54 | **0.58** (+7.4%) | 0.54 |
+| nDCG@10 | 0.366 | **0.403** (+10.2%) | 0.379 (+3.5%) |
+
+#### Per-query
+
+| 方法 | 改善 | 退化 | 不变 |
+|------|:---:|:---:|:---:|
+| static | 2 | **0** | 23 |
+| dense_jd | 7 | 6 | 12 |
+
+**static 零退化，dense_jd 有退化。** Dense 有时从 Chinese query 中识别出错误的 jd_id（如 jd-002 而非 jd-006），引入的错误过滤词会误导 BM25。
+
+### 为什么 static 效果最好
+
+1. **确定性**：相同 query 始终产生相同 expansion，可调试、可解释
+2. **零副作用**：只追加词、不删除词，expansion 词只增加 recall 不降低 precision
+3. **精准命中**：追加的词正是 chunk search text 中的 source_type、source_id、provenance_summary 等结构化元数据
+4. **即时可用**：不需要额外 embedding 计算
+
+### 设计原则
+
+- static 为推荐默认，dense_jd 保留为实验模式
+- expansion 词来自 chunk corpus 的实际词汇表（source_type、source_id 等结构化标识符）
+- `expand_query()` 是独立函数，不侵入 retriever 内部
+
+### 使用方式
+
+```bash
+python scripts/evaluate_rag_layers.py \
+  --layer retriever \
+  --golden-file fixtures/golden_rag_questions.json \
+  --run-dir baseline/runs-formal-20260520/baseline-formal-r3-full-raw-library-20260520 \
+  --output outputs/qe-static-bm25.json \
+  --retriever-mode bm25 \
+  --query-expansion static
+```
+
+---
+
 ## 剩余改进优先级（更新于 2026-05-30）
 
 | 优先级 | 方向 | 原因 |
 |--------|------|------|
-| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316（+0.004），但仍低于纯 BM25（0.333）。 |
-| ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。jd_description 碎片率 2.1x→1.0x。BM25 MRR +1.2%，recall@10 +3.8%，0 退化。提升不大因为 jd_description 仅占 9% 的 chunk。 |
-| **P1** | Query Expansion（中英文对齐） | 改写 query 加入预期 chunk 中出现的英文技术术语，提升 BM25 的 term 匹配和 dense 的跨语言信号 |
+| ~~**P1**~~ | ~~Hybrid 权重调优~~ | ✅ 已完成。最优 v=0.75/b=0.25，MRR 0.316，但仍低于纯 BM25（0.333）。 |
+| ~~**P0**~~ | ~~Chunking 按文档类型决策~~ | ✅ 已完成。jd_description 2.1x→1.0x。BM25 MRR +1.2%，0 退化。 |
+| ~~**P1**~~ | ~~Query Expansion（中英文对齐）~~ | ✅ 已完成。Static MRR 0.337→0.373 (+10.9%)，2 改善 0 退化。 |
 | **P1** | Cross-Encoder Reranker | 新建 `rag/reranking.py`，集成 `BAAI/bge-reranker-v2-m3`。retriever top-50 → reranker top-10 |
-| **P3** | 多尺寸 Chunking | 对保留切分的 source_type（candidate_evidence/resume_variant/jd_input）按文档特性配置不同 chunk_size，增加 SemanticSplitter |
-| **P4** | Hybrid Search 修复 | 按 case_type 诊断 dense 在哪些 query 上有正向贡献，做 query-level 自适应权重 |
+| **P3** | 多尺寸 Chunking | 对保留切分的 source_type 按文档特性配置不同 chunk_size |
+| **P4** | Hybrid Search 修复 | 按 case_type 诊断 dense 正向贡献，做 query-level 自适应权重 |
 | **P5** | Graded Relevance 评估升级 | 利用 golden set 已有的 `document_roles` 做加权 nDCG |
