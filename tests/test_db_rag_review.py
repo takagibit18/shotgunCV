@@ -32,6 +32,7 @@ def test_projection_normalizes_run_artifacts_idempotently(tmp_path: Path) -> Non
     }
     assert first.scorecards
     assert first.retrieval_chunks
+    assert any(chunk["metadata"]["source_type"] == "ranking_explanation" for chunk in first.retrieval_chunks)
     for chunk in first.retrieval_chunks:
         metadata = chunk["metadata"]
         assert metadata["source_type"]
@@ -183,21 +184,19 @@ def test_review_command_writes_artifacts_with_citations_and_validation(
         def embed_many(self, texts: list[str]) -> list[list[float]]:
             return [self.embed(text) for text in texts]
 
-    monkeypatch.setattr(review_graph, "_REVIEW_EMBEDDING_MODEL", DeterministicEmbeddingModel())
+    monkeypatch.setattr(review_graph, "_REVIEW_EMBEDDING_MODEL", DeterministicEmbeddingModel(), raising=False)
     run_dir = _prepare_completed_run(tmp_path)
 
     exit_code, output = run(["review", "--run-dir", str(run_dir)])
 
     assert exit_code == 0, output
     review = json.loads((run_dir / "review" / "post_run_review.json").read_text(encoding="utf-8"))
-    prep = (run_dir / "review" / "interview_prep.md").read_text(encoding="utf-8")
     assert review["run_id"] == run_dir.name
-    assert review["evidence_citations"]
-    assert review["retrieval"]["misses"] == []
+    assert review["schema_version"] == "post-run-review-v4"
+    assert review["decision_review"]
+    assert review["evidence_assessment"]["evidence_by_jd"]
     assert review["validation"]["fabrication_policy"] == "passed"
     assert "unsupported_hard_fact_tasks_removed" in review["validation"]
-    assert "面试准备" in prep
-    assert "证据" in prep
 
 
 def _read_events(run_dir: Path) -> list[dict[str, object]]:

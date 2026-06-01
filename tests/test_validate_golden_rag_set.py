@@ -51,6 +51,41 @@ def test_validate_golden_set_rejects_invalid_no_answer_docs(tmp_path: Path) -> N
     assert "rag-golden-021 no_answer samples must not include expected_documents." in report["errors"]
 
 
+def test_validate_golden_set_rejects_mojibake_text(tmp_path: Path) -> None:
+    payload = _golden_payload()
+    payload["samples"][0]["question"] = "杩欎釜鍊欓€変汉鏄惁鏈?LangGraph 鐨勭湡瀹為」鐩瘉鎹紵"
+    golden_path = tmp_path / "golden_rag.json"
+    _write_json(golden_path, payload)
+
+    report = validate_golden_set(golden_path)
+
+    assert report["status"] == "failed"
+    assert any("rag-golden-001 question contains mojibake" in error for error in report["errors"])
+
+
+def test_validate_golden_set_rejects_bad_requirement_artifacts(tmp_path: Path) -> None:
+    payload = _golden_payload()
+    payload["samples"][0]["expected_documents"] = [
+        {
+            "source_type": "requirement_evidence",
+            "source_id": "jd-026-req-001",
+            "label": "jd-026-req-001",
+            "role": "primary",
+        }
+    ]
+    golden_path = tmp_path / "golden_rag.json"
+    _write_json(golden_path, payload)
+    run_dir = tmp_path / "run"
+    _write_bad_run(run_dir)
+
+    report = validate_golden_set(golden_path, run_dir=run_dir)
+
+    assert report["status"] == "failed"
+    assert any("jd-026-req-001 has low-quality requirement_text" in error for error in report["errors"])
+    assert any("jd-026-req-001 has invalid evidence_refs" in error for error in report["errors"])
+    assert any("jd-026-req-001 has duplicate evidence_refs" in error for error in report["errors"])
+
+
 def _golden_payload() -> dict[str, object]:
     samples = []
     case_types = (
@@ -106,3 +141,23 @@ def _golden_payload() -> dict[str, object]:
 
 def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_bad_run(run_dir: Path) -> None:
+    (run_dir / "analyze").mkdir(parents=True)
+    _write_json(
+        run_dir / "analyze" / "requirement_matrix.json",
+        [
+            {
+                "jd_id": "jd-026",
+                "requirement_id": "jd-026-req-001",
+                "tier": "high_priority",
+                "requirement_text": "Responsibilities:",
+                "evidence_status": "verified",
+                "evidence_refs": [
+                    "Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md",
+                    "Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md",
+                ],
+            }
+        ],
+    )

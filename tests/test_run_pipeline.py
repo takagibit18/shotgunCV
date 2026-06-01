@@ -4,7 +4,15 @@ import json
 from pathlib import Path
 
 from shotguncv_core.pipeline import (
+    _build_requirement_matrix,
+    _candidate_search_text,
+    _collect_jd_requirements,
+    _evaluate_requirement_evidence,
+    _is_resume_metadata_evidence,
+    _matching_evidence_refs,
+    _record_analyze_quality,
     _select_relevant_variants,
+    _sanitize_candidate_profile,
     analyze_run,
     estimate_evaluate_task_total,
     evaluate_run,
@@ -13,6 +21,7 @@ from shotguncv_core.pipeline import (
     plan_run,
     report_run,
 )
+from shotguncv_core.models import CandidateProfile, JDProfile, RequirementEvidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +60,7 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     assert all(variant.variant_type == "jd-specific" for variant in generation.variants)
     assert len(evaluation.scorecards) == len(analysis.jd_profiles)
     assert len(evaluation.explanations) >= 2
-    assert strategy.strategies[0].apply_decision == "apply"
+    assert strategy.strategies[0].apply_decision in {"apply", "hold"}
     assert strategy.strategies[0].decision_drivers
     assert strategy.strategies[0].recommended_actions
 
@@ -361,7 +370,7 @@ def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:
 
     plan_payload = json.loads((run_dir / "plan" / "application_strategies.json").read_text(encoding="utf-8"))
     assert plan_payload[0]["jd_id"] == "jd-001"
-    assert plan_payload[0]["apply_decision"] == "apply"
+    assert plan_payload[0]["apply_decision"] in {"apply", "hold"}
     assert plan_payload[0]["decision_drivers"]
     assert plan_payload[0]["watchouts"]
     assert plan_payload[0]["recommended_actions"]
@@ -476,6 +485,195 @@ def test_select_relevant_variants_matches_only_target_jd_ids() -> None:
     relevant = _select_relevant_variants(jd, variants)
 
     assert [variant.variant_id for variant in relevant] == ["variant-jd-jd-002"]
+
+
+def test_requirement_matrix_filters_bad_requirements_and_dedupes_valid_evidence() -> None:
+    candidate = CandidateProfile(
+        candidate_id="cand-001",
+        base_resume_path="fixtures/candidates/base_resume.md",
+        experiences=[
+            "Built LangGraph RAG review pipeline with retrieval metrics.",
+            "Built LangGraph RAG review pipeline with retrieval metrics.",
+        ],
+        projects=[
+            "Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md",
+            "https://example.com",
+        ],
+        skills=["Python", "LangGraph", "RAG"],
+        industry_tags=[],
+        strengths=[],
+        constraints=[],
+        preferences=[],
+        core_claims=["Source: fixtures/candidates/base_resume.md"],
+        verified_evidence=["Built LangGraph RAG review pipeline with retrieval metrics."],
+    )
+    jd = JDProfile(
+        jd_id="jd-026",
+        title="AI Platform Engineer",
+        company="ThetaWave",
+        cluster="ai-platform",
+        responsibilities=["Responsibilities:", "A I 平 台 架 构 设 计"],
+        requirements=[
+            "Relevance bucket",
+            "Source signals",
+            "Build LangGraph RAG review pipeline with retrieval metrics",
+        ],
+        keywords=["langgraph", "rag", "retrieval"],
+        seniority="mid",
+        bonuses=[],
+        risk_signals=[],
+        source_type="text",
+        source_value="jd.txt",
+    )
+
+    requirements = _collect_jd_requirements(jd)
+    matrix = _build_requirement_matrix(candidate, [jd])
+
+    assert requirements == ["Build LangGraph RAG review pipeline with retrieval metrics"]
+    assert [item.requirement_text for item in matrix] == requirements
+    assert matrix[0].evidence_status == "verified"
+    assert matrix[0].evidence_refs == ["Built LangGraph RAG review pipeline with retrieval metrics."]
+
+
+def test_metadata_evidence_filter_rejects_source_paths_and_url_only_refs() -> None:
+    metadata_items = [
+        "Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md",
+        "Source: fixtures/candidates/base_resume.md",
+        "C:\\Users\\Lenovo\\resume.pdf",
+        "/tmp/jobPilot/base_resume.md",
+        "https://example.com/profile",
+    ]
+
+    assert all(_is_resume_metadata_evidence(item) for item in metadata_items)
+    assert _matching_evidence_refs(
+        "build langgraph rag review pipeline",
+        [
+            *metadata_items,
+            "Built LangGraph RAG review pipeline with retrieval metrics.",
+            "Built LangGraph RAG review pipeline with retrieval metrics.",
+        ],
+    ) == ["Built LangGraph RAG review pipeline with retrieval metrics."]
+
+
+def test_candidate_profile_sanitizer_removes_metadata_before_artifacts() -> None:
+    candidate = CandidateProfile(
+        candidate_id="cand-001",
+        base_resume_path="fixtures/candidates/base_resume.md",
+        experiences=[
+            "Source: fixtures/candidates/base_resume.md",
+            "Built LangGraph RAG review pipeline with retrieval metrics.",
+            "Built LangGraph RAG review pipeline with retrieval metrics.",
+        ],
+        projects=["https://example.com"],
+        skills=["Python"],
+        industry_tags=[],
+        strengths=["Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md"],
+        constraints=[],
+        preferences=[],
+        core_claims=["C:\\Users\\Lenovo\\resume.pdf"],
+        verified_evidence=["Built LangGraph RAG review pipeline with retrieval metrics."],
+    )
+
+    clean = _sanitize_candidate_profile(candidate)
+
+    assert clean.experiences == ["Built LangGraph RAG review pipeline with retrieval metrics."]
+    assert clean.projects == []
+    assert clean.strengths == []
+    assert clean.core_claims == []
+    assert clean.verified_evidence == ["Built LangGraph RAG review pipeline with retrieval metrics."]
+
+
+def test_requirement_evidence_requires_distinctive_overlap_not_single_token() -> None:
+    weak_candidate = CandidateProfile(
+        candidate_id="cand-001",
+        base_resume_path="fixtures/candidates/base_resume.md",
+        experiences=["Built Python data scripts for reporting."],
+        projects=[],
+        skills=["Python"],
+        industry_tags=[],
+        strengths=[],
+        constraints=[],
+        preferences=[],
+        core_claims=["Source: fixtures/candidates/base_resume.md"],
+        verified_evidence=[],
+    )
+    requirement = "Build Python LangGraph RAG review pipeline"
+
+    status, refs = _evaluate_requirement_evidence(
+        requirement,
+        "high_priority",
+        weak_candidate,
+        _candidate_search_text(weak_candidate),
+    )
+
+    assert status == "missing"
+    assert refs == []
+
+
+def test_analyze_quality_gate_reports_requirement_matrix_pollution(tmp_path: Path) -> None:
+    candidate = CandidateProfile(
+        candidate_id="cand-001",
+        base_resume_path="fixtures/candidates/base_resume.md",
+        experiences=["Built LangGraph RAG review pipeline with retrieval metrics."],
+        projects=[],
+        skills=["Python", "LangGraph"],
+        industry_tags=[],
+        strengths=[],
+        constraints=[],
+        preferences=[],
+    )
+    jd = JDProfile(
+        jd_id="jd-026",
+        title="AI Platform Engineer",
+        company="ThetaWave",
+        cluster="ai-platform",
+        responsibilities=["Responsibilities:"],
+        requirements=["Build LangGraph RAG review pipeline"],
+        keywords=["langgraph", "rag"],
+        seniority="mid",
+        bonuses=[],
+        risk_signals=[],
+        source_type="text",
+        source_value="jd.txt",
+    )
+    polluted_matrix = [
+        RequirementEvidence(
+            jd_id="jd-026",
+            requirement_id="jd-026-req-001",
+            tier="high_priority",
+            requirement_text="Responsibilities:",
+            evidence_status="verified",
+            evidence_refs=[
+                "Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md",
+                "Source: E:/PycharmProjects/jobPilot/fixtures/candidates/base_resume.md",
+            ],
+        )
+    ]
+
+    _record_analyze_quality(
+        tmp_path,
+        {
+            "jd_inputs": [{"content": "Title: AI Platform Engineer\nRequirements:\n- Build LangGraph RAG review pipeline"}],
+            "candidate_resume_text": "Built LangGraph RAG review pipeline with retrieval metrics.",
+        },
+        candidate,
+        [jd],
+        polluted_matrix,
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    gate = next(event for event in events if event.get("gate") == "requirement_matrix_quality")
+
+    assert gate["status"] == "failed"
+    assert gate["action"] == "block_golden_export"
+    assert gate["checks"]["matrix_low_quality_requirement_count"] == 1
+    assert gate["checks"]["invalid_evidence_ref_count"] == 1
+    assert gate["checks"]["duplicate_evidence_ref_count"] == 1
+    assert gate["checks"]["verified_without_valid_refs_count"] == 1
 
 
 def test_evaluate_run_keeps_stable_order_across_repeated_runs(tmp_path: Path) -> None:

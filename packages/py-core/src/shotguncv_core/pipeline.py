@@ -75,6 +75,47 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 FIXTURES_ROOT = PROJECT_ROOT / "fixtures"
 UPLOAD_MANIFEST_PATH = Path("ingest") / "upload_manifest.json"
 GATED_SKIP_STAGES = ["generate", "evaluate", "llm_judge", "plan"]
+_CONTENT_TOKEN_RE = re.compile(r"[a-z][a-z0-9+#.-]*|[0-9]+|[\u4e00-\u9fff]{2,}", re.IGNORECASE)
+_GENERIC_REQUIREMENT_TOKENS = {
+    "ability",
+    "able",
+    "build",
+    "built",
+    "business",
+    "candidate",
+    "collaborate",
+    "develop",
+    "development",
+    "drive",
+    "experience",
+    "familiar",
+    "good",
+    "have",
+    "knowledge",
+    "manage",
+    "project",
+    "projects",
+    "related",
+    "required",
+    "requirements",
+    "responsibilities",
+    "responsibility",
+    "role",
+    "skills",
+    "source",
+    "team",
+    "using",
+    "with",
+    "工作",
+    "岗位",
+    "职责",
+    "要求",
+    "相关",
+    "能力",
+    "经验",
+    "负责",
+}
+_MOJIBAKE_MARKERS = ("锛", "鏄", "鐨", "杩", "妫", "绱", "€", "�")
 
 
 @dataclass(slots=True)
@@ -191,6 +232,7 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
         resume_text=manifest["candidate_resume_text"],
         jd_inputs=manifest["jd_inputs"],
     )
+    feedback.candidate_profile = _sanitize_candidate_profile(feedback.candidate_profile)
 
     analyze_directory = stage_dir(run_dir, "analyze")
     dump_json(analyze_directory / "candidate_profile.json", feedback.candidate_profile)
@@ -200,7 +242,7 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
     preflight_gates = _build_preflight_gates(requirement_matrix)
     dump_json(analyze_directory / "requirement_matrix.json", requirement_matrix)
     dump_json(analyze_directory / "preflight_gates.json", preflight_gates)
-    _record_analyze_quality(run_dir, manifest, feedback.candidate_profile, feedback.jd_profiles)
+    _record_analyze_quality(run_dir, manifest, feedback.candidate_profile, feedback.jd_profiles, requirement_matrix)
     return AnalysisArtifacts(candidate=feedback.candidate_profile, jd_profiles=feedback.jd_profiles, evidence_map=feedback.evidence_map)
 
 
@@ -587,7 +629,7 @@ def _collect_jd_requirements(jd: JDProfile) -> list[str]:
         for raw_item in source:
             item = _normalize_jd_requirement_item(raw_item)
             key = item.lower()
-            if not item or _is_jd_ui_noise(item) or key in seen:
+            if not item or _is_jd_ui_noise(item) or _is_low_quality_requirement(item) or key in seen:
                 continue
             seen.add(key)
             requirements.append(item)
@@ -634,11 +676,13 @@ def _evaluate_requirement_evidence(
     candidate_text: str,
 ) -> tuple[str, list[str]]:
     requirement_text = requirement.lower()
-    candidate_evidence = candidate.experiences + candidate.projects + candidate.skills + candidate.verified_evidence + candidate.core_claims
+    candidate_evidence = _candidate_evidence_items(candidate)
     refs = _matching_evidence_refs(requirement_text, candidate_evidence)
     if tier == "hard_gate":
         status = _evaluate_hard_gate(requirement_text, candidate_text)
-        return status, refs if status in {"verified", "inferred"} else []
+        if status in {"verified", "inferred"} and refs:
+            return status, refs
+        return ("missing" if status in {"verified", "inferred"} else status), []
     if refs:
         return "verified", refs
     if tier == "medium_priority":
@@ -669,15 +713,32 @@ def _evaluate_hard_gate(requirement: str, candidate_text: str) -> str:
 
 
 def _matching_evidence_refs(requirement: str, candidate_items: list[str]) -> list[str]:
-    tokens = [token for token in _requirement_tokens(requirement) if len(token) >= 2]
-    refs: list[str] = []
+    tokens = _distinctive_requirement_tokens(requirement)
+    if len(tokens) < 2:
+        return []
+    strong_refs: list[str] = []
+    weak_refs: list[str] = []
+    aggregate_overlap: set[str] = set()
+    seen: set[str] = set()
     for item in candidate_items:
+        item = item.strip()
         if _is_resume_metadata_evidence(item):
             continue
-        lowered = item.lower()
-        if any(token in lowered for token in tokens):
-            refs.append(item)
-    return refs[:3]
+        overlap = _evidence_token_overlap(tokens, item)
+        if not overlap:
+            continue
+        key = re.sub(r"\s+", " ", item).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        aggregate_overlap.update(overlap)
+        if len(overlap) >= 2:
+            strong_refs.append(item)
+        else:
+            weak_refs.append(item)
+    if len(aggregate_overlap) < 2:
+        return []
+    return (strong_refs or weak_refs)[:3]
 
 
 def _normalize_jd_requirement_item(item: str) -> str:
@@ -735,8 +796,71 @@ def _is_hard_gate_requirement(text: str) -> bool:
 
 
 def _looks_like_label_only(text: str) -> bool:
-    normalized = text.strip().strip(":：")
-    return normalized in {"education", "skills", "requirements", "responsibilities", "perks", "benefits"}
+    normalized = re.sub(r"\s+", " ", text.strip().strip(":：").lower())
+    return normalized in {
+        "education",
+        "skills",
+        "requirements",
+        "requirement",
+        "responsibilities",
+        "responsibility",
+        "perks",
+        "benefits",
+        "relevance bucket",
+        "source signals",
+        "source signal",
+        "source",
+        "responsibilities / requirements",
+        "requirements / responsibilities",
+    }
+
+
+def _is_low_quality_requirement(item: str) -> bool:
+    text = item.strip()
+    lowered = text.lower()
+    if not text:
+        return True
+    if _looks_like_label_only(lowered) or _is_resume_metadata_evidence(text):
+        return True
+    if _looks_like_mojibake(text) or _looks_like_ocr_spaced_cjk(text):
+        return True
+    tokens = _distinctive_requirement_tokens(text)
+    if len(tokens) < 2 and not _has_hard_gate_keyword(lowered):
+        return True
+    return False
+
+
+def _looks_like_mojibake(text: str) -> bool:
+    marker_hits = sum(1 for marker in _MOJIBAKE_MARKERS if marker in text)
+    replacement_hits = text.count("?") if any(marker in text for marker in _MOJIBAKE_MARKERS[:-1]) else 0
+    return marker_hits >= 2 or (marker_hits >= 1 and replacement_hits >= 1)
+
+
+def _looks_like_ocr_spaced_cjk(text: str) -> bool:
+    return bool(re.search(r"(?:[\u4e00-\u9fff]\s+){3,}[\u4e00-\u9fff]", text))
+
+
+def _has_hard_gate_keyword(text: str) -> bool:
+    return any(
+        term in text
+        for term in [
+            "学历",
+            "本科",
+            "硕士",
+            "博士",
+            "bachelor",
+            "master",
+            "phd",
+            "degree",
+            "证书",
+            "认证",
+            "certification",
+            "certificate",
+            "pmp",
+            "visa",
+            "sponsorship",
+        ]
+    )
 
 
 def _requires_master_only(requirement: str) -> bool:
@@ -760,6 +884,18 @@ def _has_master_or_above(text: str) -> bool:
 
 def _is_resume_metadata_evidence(item: str) -> bool:
     text = item.strip().lower()
+    if not text:
+        return True
+    if text.startswith(("source:", "source：", "source path:", "source file:", "file:", "path:")):
+        return True
+    if re.fullmatch(r"(?:https?://|www\.)\S+", text):
+        return True
+    if re.search(r"[a-z]:[\\/][^\s]+", text):
+        return True
+    if re.search(r"(?:^|\s)/(?:users|home|tmp|var|mnt|private_inputs|pycharmprojects)[^\s]*", text):
+        return True
+    if re.search(r"(?:^|\s)(?:\.{1,2}[\\/])?[\w.-]+(?:[\\/][\w .-]+)+\.(?:md|pdf|docx?|txt|json|png|jpe?g)(?:\s|$)", text):
+        return True
     return any(
         marker in text
         for marker in [
@@ -784,16 +920,105 @@ def _requirement_tokens(text: str) -> list[str]:
     return [token.lower() for token in tokens if token.strip()]
 
 
+def _content_tokens(text: str) -> list[str]:
+    seen: set[str] = set()
+    tokens: list[str] = []
+    for raw_token in _CONTENT_TOKEN_RE.findall(text.lower()):
+        token = raw_token.strip("-_.[](){}:,;|")
+        if not token or token in _GENERIC_REQUIREMENT_TOKENS:
+            continue
+        if len(token) < 2:
+            continue
+        if token not in seen:
+            seen.add(token)
+            tokens.append(token)
+    return tokens
+
+
+def _distinctive_requirement_tokens(text: str) -> list[str]:
+    return _content_tokens(text)
+
+
+def _evidence_has_minimum_overlap(requirement_tokens: list[str], evidence: str) -> bool:
+    return len(_evidence_token_overlap(requirement_tokens, evidence)) >= 2
+
+
+def _evidence_token_overlap(requirement_tokens: list[str], evidence: str) -> set[str]:
+    evidence_tokens = set(_content_tokens(evidence))
+    if not evidence_tokens:
+        return set()
+    return {token for token in requirement_tokens if token in evidence_tokens}
+
+
+def _candidate_evidence_items(candidate: CandidateProfile) -> list[str]:
+    items = candidate.experiences + candidate.projects + candidate.skills + candidate.verified_evidence + candidate.core_claims
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = item.strip()
+        if not text or _is_resume_metadata_evidence(text):
+            continue
+        key = re.sub(r"\s+", " ", text).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+    return deduped
+
+
+def _sanitize_candidate_profile(candidate: CandidateProfile) -> CandidateProfile:
+    list_fields = (
+        "experiences",
+        "projects",
+        "skills",
+        "industry_tags",
+        "strengths",
+        "constraints",
+        "preferences",
+        "core_claims",
+        "verified_evidence",
+        "missing_evidence_areas",
+        "preferred_role_tracks",
+    )
+    for field_name in list_fields:
+        values = getattr(candidate, field_name)
+        setattr(
+            candidate,
+            field_name,
+            [item for item in _dedupe_text_items(values) if not _is_resume_metadata_evidence(item)],
+        )
+    return candidate
+
+
+def _dedupe_text_items(items: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item).strip()
+        if not text:
+            continue
+        key = re.sub(r"\s+", " ", text).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+    return deduped
+
+
 def _candidate_search_text(candidate: CandidateProfile) -> str:
     return " ".join(
-        candidate.experiences
-        + candidate.projects
-        + candidate.skills
-        + candidate.industry_tags
-        + candidate.strengths
-        + candidate.constraints
-        + candidate.core_claims
-        + candidate.verified_evidence
+        item
+        for item in (
+            candidate.experiences
+            + candidate.projects
+            + candidate.skills
+            + candidate.industry_tags
+            + candidate.strengths
+            + candidate.constraints
+            + candidate.core_claims
+            + candidate.verified_evidence
+        )
+        if not _is_resume_metadata_evidence(item)
     ).lower()
 
 
@@ -916,6 +1141,7 @@ def _record_analyze_quality(
     manifest: dict[str, object],
     candidate: CandidateProfile,
     jd_profiles: list[JDProfile],
+    requirement_matrix: list[RequirementEvidence],
 ) -> None:
     jd_inputs = manifest.get("jd_inputs", [])
     jd_text_count = sum(
@@ -965,13 +1191,93 @@ def _record_analyze_quality(
         action="warn" if cv_warning else "continue",
     )
 
+    requirement_checks = _requirement_matrix_quality_checks(jd_profiles, requirement_matrix)
+    requirement_gate_failed = any(
+        requirement_checks[key] > 0
+        for key in [
+            "matrix_low_quality_requirement_count",
+            "invalid_evidence_ref_count",
+            "duplicate_evidence_ref_count",
+            "verified_without_valid_refs_count",
+        ]
+    )
+    log_quality_gate_checked(
+        run_dir,
+        stage="analyze",
+        gate="requirement_matrix_quality",
+        status="failed" if requirement_gate_failed else "ok",
+        checks=requirement_checks,
+        action="block_golden_export" if requirement_gate_failed else "continue",
+    )
+
     summaries: list[str] = []
     if jd_gate_failed:
         summaries.append("JD profile fields are incomplete.")
     if cv_warning:
         summaries.append("CV extraction quality is low.")
+    if requirement_gate_failed:
+        summaries.append("Requirement matrix contains low-quality requirements or unusable evidence refs.")
     if summaries:
         update_quality_status(run_dir, "warning", " ".join(summaries))
+
+
+def _requirement_matrix_quality_checks(
+    jd_profiles: list[JDProfile],
+    requirement_matrix: list[RequirementEvidence],
+) -> dict[str, object]:
+    raw_requirements = [
+        _normalize_jd_requirement_item(raw_item)
+        for jd in jd_profiles
+        for source in [
+            jd.must_have_requirements,
+            jd.requirements,
+            jd.responsibilities,
+            jd.nice_to_have_requirements,
+            jd.bonuses,
+        ]
+        for raw_item in source
+        if _normalize_jd_requirement_item(raw_item)
+    ]
+    low_quality_requirements = [item for item in raw_requirements if _is_low_quality_requirement(item)]
+    matrix_low_quality_requirements = [item.requirement_text for item in requirement_matrix if _is_low_quality_requirement(item.requirement_text)]
+    invalid_ref_items: list[str] = []
+    duplicate_ref_items: list[str] = []
+    verified_without_valid_refs: list[str] = []
+    for item in requirement_matrix:
+        refs = [ref for ref in item.evidence_refs if str(ref).strip()]
+        valid_refs = [ref for ref in refs if not _is_resume_metadata_evidence(ref)]
+        if len(valid_refs) != len(refs):
+            invalid_ref_items.append(item.requirement_id)
+        if len(_dedupe_evidence_refs(refs)) != len(refs):
+            duplicate_ref_items.append(item.requirement_id)
+        if item.evidence_status == "verified" and not valid_refs:
+            verified_without_valid_refs.append(item.requirement_id)
+    return {
+        "raw_requirement_count": len(raw_requirements),
+        "matrix_requirement_count": len(requirement_matrix),
+        "filtered_low_quality_raw_requirement_count": len(low_quality_requirements),
+        "filtered_low_quality_raw_requirement_examples": low_quality_requirements[:5],
+        "matrix_low_quality_requirement_count": len(matrix_low_quality_requirements),
+        "matrix_low_quality_requirement_examples": matrix_low_quality_requirements[:5],
+        "invalid_evidence_ref_count": len(invalid_ref_items),
+        "invalid_evidence_ref_examples": invalid_ref_items[:5],
+        "duplicate_evidence_ref_count": len(duplicate_ref_items),
+        "duplicate_evidence_ref_examples": duplicate_ref_items[:5],
+        "verified_without_valid_refs_count": len(verified_without_valid_refs),
+        "verified_without_valid_refs_examples": verified_without_valid_refs[:5],
+    }
+
+
+def _dedupe_evidence_refs(refs: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for ref in refs:
+        key = re.sub(r"\s+", " ", str(ref)).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(ref)
+    return deduped
 
 
 def _record_evaluate_quality(run_dir: Path, scorecards: list[ScoreCard], llm_failures: list[LLMFailure]) -> None:

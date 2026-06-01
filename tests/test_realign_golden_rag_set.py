@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.realign_golden_rag_set import realign_golden_set
 
 
@@ -10,13 +12,14 @@ def test_realign_golden_set_appends_expected_chunk_keywords_and_preserves_labels
     golden_path = tmp_path / "golden.json"
     payload = _golden_payload()
     _write_json(golden_path, payload)
+    run_dir = _write_good_run(tmp_path / "run", payload)
     audit_path = tmp_path / "audit.json"
     _write_json(audit_path, _audit_payload())
     changelog_path = tmp_path / "changes.json"
 
     report = realign_golden_set(
         golden_file=golden_path,
-        run_dir=tmp_path / "run",
+        run_dir=run_dir,
         audit_report_file=audit_path,
         changelog_file=changelog_path,
         today="2026-05-31",
@@ -61,13 +64,14 @@ def test_realign_golden_set_is_idempotent_when_keywords_already_exist(tmp_path: 
         "source": "old-audit.json",
     }
     _write_json(golden_path, payload)
+    run_dir = _write_good_run(tmp_path / "run", payload)
     audit_path = tmp_path / "audit.json"
     _write_json(audit_path, _audit_payload())
     changelog_path = tmp_path / "changes.json"
 
     report = realign_golden_set(
         golden_file=golden_path,
-        run_dir=tmp_path / "run",
+        run_dir=run_dir,
         audit_report_file=audit_path,
         changelog_file=changelog_path,
         today="2026-05-31",
@@ -77,6 +81,25 @@ def test_realign_golden_set_is_idempotent_when_keywords_already_exist(tmp_path: 
     assert report["rewritten_sample_count"] == 0
     assert rewritten["samples"][0]["question"].count("检索关键词：") == 1
     assert rewritten["samples"][0]["retrieval_alignment"]["date"] == "2026-05-30"
+
+
+def test_realign_golden_set_rejects_bad_requirement_artifact_before_rewrite(tmp_path: Path) -> None:
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    _write_json(golden_path, payload)
+    run_dir = tmp_path / "run"
+    _write_bad_run(run_dir)
+    audit_path = tmp_path / "audit.json"
+    _write_json(audit_path, _audit_payload())
+
+    with pytest.raises(ValueError, match="Golden set artifact audit failed"):
+        realign_golden_set(
+            golden_file=golden_path,
+            run_dir=run_dir,
+            audit_report_file=audit_path,
+            changelog_file=tmp_path / "changes.json",
+            today="2026-05-31",
+        )
 
 
 def _golden_payload() -> dict[str, object]:
@@ -189,3 +212,46 @@ def _audit_payload() -> dict[str, object]:
 
 def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_good_run(run_dir: Path, payload: dict[str, object]) -> Path:
+    (run_dir / "analyze").mkdir(parents=True)
+    samples = payload["samples"]
+    requirement_ids = [
+        str(document["source_id"])
+        for sample in samples  # type: ignore[assignment]
+        for document in sample.get("expected_documents", [])
+        if document.get("source_type") == "requirement_evidence"
+    ]
+    _write_json(
+        run_dir / "analyze" / "requirement_matrix.json",
+        [
+            {
+                "jd_id": requirement_id.split("-req-", 1)[0],
+                "requirement_id": requirement_id,
+                "tier": "high_priority",
+                "requirement_text": f"Build verified retrieval evidence for {requirement_id}",
+                "evidence_status": "verified",
+                "evidence_refs": [f"Built verified retrieval evidence for {requirement_id}."],
+            }
+            for requirement_id in requirement_ids
+        ],
+    )
+    return run_dir
+
+
+def _write_bad_run(run_dir: Path) -> None:
+    (run_dir / "analyze").mkdir(parents=True)
+    _write_json(
+        run_dir / "analyze" / "requirement_matrix.json",
+        [
+            {
+                "jd_id": "jd-001",
+                "requirement_id": "jd-001-req-001",
+                "tier": "high_priority",
+                "requirement_text": "Responsibilities:",
+                "evidence_status": "verified",
+                "evidence_refs": ["Source: fixtures/candidates/base_resume.md"],
+            }
+        ],
+    )
