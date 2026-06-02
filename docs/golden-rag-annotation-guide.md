@@ -23,7 +23,24 @@ Each sample must include:
 - `must_cover_points`: required answer points.
 - `forbidden_claims`: claims the generator must not make.
 - `answer_policy`: how to answer when evidence is absent, conflicting, stale, or incomplete.
-- `metadata`: at least `bucket`, `jd_count`, `input_media_types`, and `candidate_scope`.
+- `metadata`: at least `bucket`, `jd_count`, `input_media_types`, `candidate_scope`, and `golden_layer`.
+
+## Golden Layers
+
+Every sample must declare `metadata.golden_layer`. This field is separate from `case_type`: `case_type` describes the question shape, while `golden_layer` describes the source quality and metric purpose.
+
+See `docs/golden-rag-layering-design.md` for the full layer policy, current corpus classification, and the 2026-06-02 baseline observation.
+
+Supported layers:
+
+- `core_high_info`: high-information, stable samples used for the main RAG quality decision.
+- `low_info_stress`: broad or vague real-market JDs used only as stress samples.
+- `ocr_regression`: image/OCR-sensitive samples used to observe extraction and cleaning quality.
+- `non_target_negative`: out-of-domain or absent-capability samples used to observe abstention and leakage.
+
+Use `core_high_info` only when the raw JD and expected artifacts are clean enough for fair retrieval evaluation: no mojibake, no obvious OCR spacing, no label-only requirement, no path-only evidence, no broad `jd-xxx` expected label, and 100% expected-label coverage in the current clean run.
+
+Do not mix the non-core layers into the headline RAG metrics. They should be reported as guardrails through `golden_layer_metrics`.
 
 ## Evidence Rules
 

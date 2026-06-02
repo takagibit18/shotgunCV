@@ -159,6 +159,7 @@ def _golden_payload() -> dict[str, object]:
                     "jd_count": 27,
                     "input_media_types": ["text", "pdf", "image"],
                     "candidate_scope": "candidate-profile-global",
+                    "golden_layer": "core_high_info",
                 },
             }
         )

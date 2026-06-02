@@ -23,6 +23,7 @@ def test_validate_golden_set_accepts_complete_rag_schema(tmp_path: Path) -> None
     }
     assert report["source_type_counts"]["requirement_evidence"] == 25
     assert report["retriever_label_count"] == 38
+    assert report["golden_layer_counts"] == {"core_high_info": 30}
 
 
 def test_validate_golden_set_rejects_incomplete_distribution(tmp_path: Path) -> None:
@@ -49,6 +50,20 @@ def test_validate_golden_set_rejects_invalid_no_answer_docs(tmp_path: Path) -> N
 
     assert report["status"] == "failed"
     assert "rag-golden-021 no_answer samples must not include expected_documents." in report["errors"]
+
+
+def test_validate_golden_set_requires_supported_golden_layer(tmp_path: Path) -> None:
+    payload = _golden_payload()
+    del payload["samples"][0]["metadata"]["golden_layer"]  # type: ignore[index]
+    payload["samples"][1]["metadata"]["golden_layer"] = "ocr_mixed_into_core"  # type: ignore[index]
+    golden_path = tmp_path / "golden_rag.json"
+    _write_json(golden_path, payload)
+
+    report = validate_golden_set(golden_path)
+
+    assert report["status"] == "failed"
+    assert "rag-golden-001 metadata missing golden_layer." in report["errors"]
+    assert "rag-golden-002 metadata has unsupported golden_layer: ocr_mixed_into_core." in report["errors"]
 
 
 def test_validate_golden_set_rejects_mojibake_text(tmp_path: Path) -> None:
@@ -148,6 +163,7 @@ def _golden_payload() -> dict[str, object]:
                     "jd_count": 27,
                     "input_media_types": ["text", "pdf", "image"],
                     "candidate_scope": "candidate-profile-global",
+                    "golden_layer": "core_high_info",
                 },
             }
         )

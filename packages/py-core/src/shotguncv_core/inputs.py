@@ -232,6 +232,9 @@ def _normalize_extracted_text_for_ingest(text: str) -> str:
             continue
         line = _collapse_ocr_spaced_tokens(line)
         line = re.sub(r"[ \t]{2,}", " ", line).strip()
+        line = _normalize_ocr_confusions(line)
+        if _looks_like_ocr_job_metadata_line(line):
+            continue
         if _looks_like_symbol_noise_line(line):
             continue
         normalized_lines.append(line)
@@ -249,6 +252,63 @@ def _collapse_ocr_spaced_tokens(line: str) -> str:
         lambda match: re.sub(r"\s+", "", match.group(0)),
         current,
     )
+
+
+def _normalize_ocr_confusions(line: str) -> str:
+    replacements = {
+        "技术驿动": "技术驱动",
+        "校拙": "校招",
+        "稿定性": "稳定性",
+        "烈悉": "熟悉",
+        "熬悉": "熟悉",
+        "跟除新技术趋势": "跟踪新技术趋势",
+        "跟院 Agent 抚术": "跟踪 Agent 技术",
+        "抚术": "技术",
+        "跟院": "跟踪",
+    }
+    normalized = line
+    for source, target in replacements.items():
+        normalized = normalized.replace(source, target)
+    normalized = re.sub(r"^[¢]\s*", "- ", normalized)
+    normalized = re.sub(r"(?<![A-Za-z])Al(?![a-z])", "AI", normalized)
+    return re.sub(
+        r"(?<![A-Za-z])A(?=\s*(?:赋能|工具|方案|技术|应用|驱动|系统|接口|Agent|App|APP|模型|功能))",
+        "AI",
+        normalized,
+    )
+
+
+def _looks_like_ocr_job_metadata_line(line: str) -> bool:
+    text = line.strip().strip("-*•").strip()
+    lowered = text.lower()
+    if not text:
+        return True
+    if text in {"动化"}:
+        return True
+    if re.search(r"\b(published|posted)\b.*\b(ago|day|days|hour|hours|d|h)\b", lowered):
+        return True
+    if re.search(r"\busd\b|\$\s*\d|\b\d+\s*k\s*[-–]\s*\d+\s*k\b", lowered):
+        return True
+    recruitment_terms = ["校招", "春招", "招聘", "实习研发", "后端开发", "届国内", "届实习生"]
+    location_terms = ["北京", "上海", "深圳", "shenzhen", "remote"]
+    industry_terms = [
+        "intelligent manufacturing",
+        "industrial internet",
+        "industrial automation",
+        "智能制造",
+        "工业互联网",
+        "工业自动化",
+    ]
+    has_metadata_separator = "|" in text or "@" in text
+    if has_metadata_separator and any(term in lowered for term in industry_terms):
+        return True
+    if has_metadata_separator and any(term in text for term in recruitment_terms):
+        return True
+    if has_metadata_separator and any(term in text or term in lowered for term in location_terms) and len(text) <= 80:
+        return True
+    if "/" in text and len(text) <= 40 and any(term in text for term in ["互联网", "工业", "动化", "智能制造"]):
+        return True
+    return False
 
 
 def _looks_like_symbol_noise_line(line: str) -> bool:

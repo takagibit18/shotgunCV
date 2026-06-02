@@ -31,6 +31,14 @@ def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None
     assert report["no_answer_behavior"]["quality_gate"]["status"] == "passed"
     assert report["no_answer_behavior"]["score_threshold"] == 0.8
     assert report["no_answer_behavior"]["abstention_rate"] == 1.0
+    assert report["golden_layer_metrics"]["core_high_info"]["query_count"] == 25
+    assert report["golden_layer_metrics"]["core_high_info"]["aggregate"]["mrr"] == report["metrics"]["aggregate"]["mrr"]
+    assert report["golden_layer_metrics"]["core_high_info"]["aggregate"]["weighted_recall_at_k"]["3"] == (
+        report["metrics"]["aggregate"]["weighted_recall_at_k"]["3"]
+    )
+    assert report["golden_layer_metrics"]["core_high_info"]["aggregate"]["all_primary_hit_rate"] == (
+        report["metrics"]["aggregate"]["all_primary_hit_rate"]
+    )
     assert all(item["abstained"] for item in report["no_answer_behavior"]["queries"])
     assert all(item["effective_result_count"] == 0 for item in report["no_answer_behavior"]["queries"])
     assert {item["filter_scope"] for item in report["no_answer_behavior"]["queries"]} == {"candidate_evidence"}
@@ -184,6 +192,8 @@ def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Pa
     assert report["schema_version"] == "rag-generator-layer-metrics-v1"
     assert report["sample_count"] == 30
     assert report["answered_sample_count"] == 30
+    assert report["golden_layer_metrics"]["core_high_info"]["sample_count"] == 30
+    assert report["golden_layer_metrics"]["core_high_info"]["aggregate"] == report["aggregate"]
     assert report["aggregate"]["forbidden_claim_violation_count"] == 0
     assert report["aggregate"]["faithfulness"] > 0.9
     assert set(report["case_type_metrics"]) == {"common_question", "multi_document", "no_answer", "stale_or_conflicting"}
@@ -291,6 +301,7 @@ def _golden_payload() -> dict[str, object]:
                     "jd_count": 27,
                     "input_media_types": ["text", "pdf", "image"],
                     "candidate_scope": "candidate-profile-global",
+                    "golden_layer": "core_high_info",
                 },
             }
         )
