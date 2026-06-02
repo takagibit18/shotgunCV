@@ -5,6 +5,7 @@
 ## 当前样本
 
 - `candidates/base_resume.md`：候选人主简历最小样例
+- `candidates/real_cv_agent_engineer.md`：由真实 CV JSON 整合出的高信息密度 Agent 工程候选人样本，供 RAG golden set 与 baseline run 使用
 - `jds/sample_batch.txt`：两条 JD 的批量输入样例，供 CLI 和阶段链路测试复用
 
 补充：

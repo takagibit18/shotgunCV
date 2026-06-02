@@ -68,7 +68,7 @@ RAG 后续优化需要先建立人工标注 golden set。该数据集是 retriev
 
 ### Golden Set 规模与字段
 
-首版目标为 30-50 条人工标注样本。每条样本至少包含：
+首版目标为 30-60 条人工标注样本。每条样本至少包含：
 
 | 字段 | 说明 |
 |------|------|
@@ -138,7 +138,7 @@ E2E 报告应同时输出 retriever 指标、generator 指标和最终业务 rub
 
 | 优先级 | 工作项 | 产物 |
 |--------|--------|------|
-| P0-1 | 建立 30-50 条人工 golden set | versioned golden schema、标注指南、样本 JSON。 |
+| P0-1 | 建立 30-60 条人工 golden set | versioned golden schema、标注指南、样本 JSON。 |
 | P0-2 | 对齐真实业务 RAG 路径 | 默认 `BGE-M3 + run_dir artifact 本地向量检索`，PgVector 仅作为可选后端。 |
 | P0-3 | 固化 retriever 分层评估 | precision@k、recall@k、MRR、NDCG、label_coverage、source_type 拆分。 |
 | P0-4 | 固化 generator 分层评估 | 完美文档输入、faithfulness、answer relevance、覆盖率、引用准确性。 |

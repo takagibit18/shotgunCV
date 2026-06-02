@@ -72,8 +72,8 @@ def validate_golden_set(golden_file: Path, *, run_dir: Path | None = None) -> di
     if not isinstance(samples, list):
         errors.append("Golden set requires a samples list.")
         samples = []
-    if not 30 <= len(samples) <= 50:
-        errors.append("Golden set must contain 30-50 samples.")
+    if not 30 <= len(samples) <= 60:
+        errors.append("Golden set must contain 30-60 samples.")
 
     question_ids: set[str] = set()
     duplicate_ids: set[str] = set()
