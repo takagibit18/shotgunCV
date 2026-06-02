@@ -341,7 +341,7 @@ def _no_answer_behavior(
     for sample in samples:
         if sample.get("case_type") != "no_answer":
             continue
-        results = retriever.search(str(sample["question"]), limit=limit)
+        results = retriever.search(str(sample["question"]), limit=limit, source_type="candidate_evidence")
         top_score = results[0].score if results else None
         abstained = top_score is None or top_score < score_threshold
         reports.append(
@@ -351,6 +351,7 @@ def _no_answer_behavior(
                 "effective_result_count": 0 if abstained else len(results),
                 "top_score": top_score,
                 "score_threshold": score_threshold,
+                "filter_scope": "candidate_evidence",
                 "abstained": abstained,
                 "gate_status": "abstained" if abstained else "needs_review",
                 "should_abstain": True,

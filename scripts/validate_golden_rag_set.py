@@ -23,6 +23,7 @@ REQUIRED_SAMPLE_FIELDS = {
 }
 _MOJIBAKE_MARKERS = ("锛", "鏄", "鐨", "杩", "妫", "绱", "€", "�")
 _CONTENT_TOKEN_RE = re.compile(r"[a-z][a-z0-9+#.-]*|[0-9]+|[\u4e00-\u9fff]{2,}", re.IGNORECASE)
+_JD_LEVEL_LABEL_RE = re.compile(r"^jd-\d{3}$", re.IGNORECASE)
 _GENERIC_TOKENS = {
     "build",
     "built",
@@ -153,6 +154,11 @@ def _validate_document(question_id: str, document_index: int, document: Any, err
         errors.append(f"{question_id} expected_documents[{document_index}] requires source_type.")
     if not _document_label(document):
         errors.append(f"{question_id} expected_documents[{document_index}] requires label, source_id, or chunk_id.")
+    if _is_broad_jd_level_document(document):
+        errors.append(
+            f"{question_id} expected_documents[{document_index}] uses broad JD-level label "
+            f"{_document_label(document)}; use gap_map, ranking_explanation, or requirement_evidence instead."
+        )
     role = str(document.get("role") or "primary")
     if role not in {"primary", "supporting", "stale", "conflicting"}:
         errors.append(f"{question_id} expected_documents[{document_index}] has unsupported role: {role}.")
@@ -213,6 +219,15 @@ def _document_label(document: dict[str, Any]) -> str:
         if value:
             return value
     return ""
+
+
+def _is_broad_jd_level_document(document: dict[str, Any]) -> bool:
+    source_type = str(document.get("source_type") or "").strip()
+    label = _document_label(document)
+    source_id = str(document.get("source_id") or "").strip()
+    return source_type == "jd_description" and (
+        bool(_JD_LEVEL_LABEL_RE.match(label)) or bool(_JD_LEVEL_LABEL_RE.match(source_id))
+    )
 
 
 def _is_low_quality_requirement(text: str) -> bool:

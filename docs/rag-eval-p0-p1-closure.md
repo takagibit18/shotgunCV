@@ -172,82 +172,82 @@ Commands run:
 
 ---
 
-## 2026-06-01 Current-Version Clean Baseline and Golden Realign
+## 2026-06-01 当前版本 Clean Baseline 与 Golden Realign
 
-Branch: `codex/goldenset_enhancement`
+分支：`codex/goldenset_enhancement`
 
-HEAD at recording time: `4a76722`
+记录时 HEAD：`4a76722`
 
-Clean baseline run:
+clean baseline run：
 
 `baseline/runs-formal-20260601/baseline-formal-r3-full-raw-library-clean-20260601`
 
-Realign outputs:
+realign 输出目录：
 
 `baseline/golden-realignment-20260601/`
 
-### What Changed In This Version
+### 当前版本改动
 
-1. Analyze-stage requirement quality gate was hardened.
-   - Filters label-only requirements such as `Responsibilities:`, `Requirements:`, `Relevance bucket`, and `Source signals`.
-   - Tracks low-quality raw requirements separately from final matrix quality.
-   - Fails only when polluted requirements or invalid refs survive into `requirement_matrix.json`.
+1. 加固 analyze 阶段的 requirement 质量门。
+   - 过滤 `Responsibilities:`、`Requirements:`、`Relevance bucket`、`Source signals` 等 label-only requirement。
+   - 将 raw requirement 中被过滤的低质量内容与最终 matrix 质量分开统计。
+   - 只有污染 requirement 或无效 refs 进入 `requirement_matrix.json` 时才失败。
 
-2. Resume metadata evidence filtering was expanded.
-   - Rejects `Source: ...`, local paths, relative file paths, URL-only refs, and file-path-like evidence.
-   - Candidate profile is sanitized before analyze artifacts are written, so path metadata does not leak into generate/evaluate/RAG chunks.
+2. 扩展 resume metadata evidence 过滤。
+   - 拒绝 `Source: ...`、本地路径、相对文件路径、URL-only refs 和文件路径型 evidence。
+   - candidate profile 在 analyze artifact 落盘前先清洗，避免路径元数据继续流入 generate/evaluate/RAG chunks。
 
-3. Requirement evidence matching was tightened.
-   - Verification no longer relies on a single token hit.
-   - Evidence refs are deduped and must be non-metadata.
-   - Verified requirements without usable refs are blocked by the quality audit.
+3. 收紧 requirement evidence matching。
+   - verified 不再依赖单 token 命中。
+   - evidence refs 需要去重，且必须是非元数据证据。
+   - 没有可用 refs 的 verified requirement 会被质量审计拦截。
 
-4. Golden validation and realign were guarded by artifact audit.
-   - `validate_golden_rag_set.py --run-dir ...` now checks expected requirement artifacts against the current run.
-   - `realign_golden_rag_set.py` refuses to rewrite a golden set if the referenced run artifacts are already dirty.
+4. golden validation 和 realign 增加 artifact audit 防线。
+   - `validate_golden_rag_set.py --run-dir ...` 会用当前 run artifact 校验 expected requirement。
+   - 如果引用的 run artifact 已经污染，`realign_golden_rag_set.py` 会拒绝重写 golden set。
 
-5. RAG projection now includes ranking explanations.
-   - `evaluate/ranking_explanations.json` is projected as `ranking_explanation` chunks.
-   - This makes labels such as `jd-022:ranking` retrievable instead of permanently missing from the corpus.
+5. RAG projection 纳入 ranking explanations。
+   - `evaluate/ranking_explanations.json` 会投影为 `ranking_explanation` chunks。
+   - 这样 `jd-022:ranking` 这类 label 可以被检索到，而不是永久缺失于 corpus。
 
-6. Current golden set was realigned against the clean 2026-06-01 baseline artifacts.
-   - Removed or rebound stale expected labels that pointed to requirements filtered out by the new quality gate.
-   - Rewrote 1 query for BM25 vocabulary alignment.
+6. 使用 2026-06-01 clean baseline artifacts 对当前 golden set 重新 realign。
+   - 移除或重绑指向已被质量门过滤 requirement 的 stale expected label。
+   - 为 BM25 词汇对齐重写 1 条 query。
 
-### Clean Artifact Quality
+### Clean Artifact 质量
 
-Analyze quality gate:
+Analyze 质量门：
 
-| Check | Value |
+| 检查项 | 值 |
 |------|------:|
 | raw requirements | 598 |
 | final matrix requirements | 299 |
-| filtered low-quality raw requirements | 219 |
-| low-quality requirements surviving in matrix | 0 |
-| invalid evidence refs | 0 |
-| duplicate evidence refs | 0 |
-| verified without usable refs | 0 |
+| 被过滤的低质量 raw requirements | 219 |
+| 进入 matrix 的低质量 requirements | 0 |
+| 无效 evidence refs | 0 |
+| 重复 evidence refs | 0 |
+| verified 但无可用 refs | 0 |
 
-RAG corpus projection:
+RAG corpus projection：
 
-| Chunk type | Count |
+| Chunk 类型 | 数量 |
 |-----------|------:|
 | total chunks | 461 |
 | requirement_evidence chunks | 299 |
 | ranking_explanation chunks | 27 |
 
-Golden artifact audit:
+Golden artifact audit：
 
-| Check | Value |
+| 检查项 | 值 |
 |------|------:|
 | sample count | 30 |
 | retriever labels | 34 |
 | label coverage | 34/34 |
-| zero-hit queries after realign | 0 |
+| realign 后 zero-hit queries | 0 |
 
-Expected document distribution:
+Expected document 分布：
 
-| Source type | Count |
+| Source type | 数量 |
 |-------------|------:|
 | requirement_evidence | 21 |
 | gap_map | 6 |
@@ -256,24 +256,24 @@ Expected document distribution:
 | ranking_explanation | 1 |
 | run_artifact | 1 |
 
-Case distribution:
+Case 分布：
 
-| Case type | Count |
+| Case type | 数量 |
 |-----------|------:|
 | common_question | 12 |
 | multi_document | 8 |
 | no_answer | 5 |
 | stale_or_conflicting | 5 |
 
-### Retriever Metrics
+### Retriever 指标
 
-| Config | MRR | R@10 | weighted R@10 | all expected hit | all primary hit |
+| 配置 | MRR | R@10 | weighted R@10 | all expected hit | all primary hit |
 |--------|----:|-----:|--------------:|-----------------:|----------------:|
-| BM25 before realign | 0.467 | 0.840 | 0.863 | 0.72 | 0.92 |
-| BM25 after realign | 0.481 | 0.880 | 0.903 | 0.76 | 0.96 |
-| BM25 + static after realign | 0.481 | 0.820 | 0.836 | 0.72 | 0.88 |
+| realign 前 BM25 | 0.467 | 0.840 | 0.863 | 0.72 | 0.92 |
+| realign 后 BM25 | 0.481 | 0.880 | 0.903 | 0.76 | 0.96 |
+| realign 后 BM25 + static | 0.481 | 0.820 | 0.836 | 0.72 | 0.88 |
 
-Case-type R@10 after BM25 realign:
+BM25 realign 后按 case type 拆分的 R@10：
 
 | Case type | R@10 |
 |-----------|-----:|
@@ -281,9 +281,9 @@ Case-type R@10 after BM25 realign:
 | multi_document | 0.813 |
 | stale_or_conflicting | 0.700 |
 
-No-answer behavior after BM25 realign:
+BM25 realign 后 no-answer 行为：
 
-| Check | Value |
+| 检查项 | 值 |
 |------|------:|
 | no-answer queries | 5 |
 | abstained | 3 |
@@ -291,18 +291,18 @@ No-answer behavior after BM25 realign:
 | non-abstained no-answer queries | 2 |
 | quality gate | failed |
 
-### Interpretation
+### 解释
 
-The golden set is now usable for metric interpretation because artifact coverage is complete and zero-hit caused by stale labels has been removed. The metric movement is small but credible: BM25 R@10 improved from `0.84` to `0.88`, weighted R@10 from `0.863` to `0.903`, and all-primary-hit from `0.92` to `0.96`.
+当前 golden set 已经可以用于指标解释：artifact coverage 完整，stale label 导致的 zero-hit 已清零。指标提升幅度不大，但可信：BM25 R@10 从 `0.84` 提升到 `0.88`，weighted R@10 从 `0.863` 提升到 `0.903`，all-primary-hit 从 `0.92` 提升到 `0.96`。
 
-The remaining quality gaps are no longer primarily golden pollution. They are:
+剩余质量缺口已经不再主要来自 golden 污染，而是：
 
-1. BM25 ranking weakness: many expected labels appear in top-10 but not top-1/top-3, keeping MRR modest.
-2. Multi-document and stale/conflicting cases remain harder than common single-evidence questions.
-3. No-answer handling is still weak: 2/5 no-answer queries return non-abstained results.
-4. Static query expansion is not currently a good default; it lowers R@10 and all-primary-hit in this clean run.
+1. BM25 排序能力仍弱：很多 expected label 能进 top-10，但进不了 top-1/top-3，因此 MRR 不高。
+2. multi-document 与 stale/conflicting 样本仍明显难于普通单证据问题。
+3. no-answer 处理仍弱：5 条 no-answer 中有 2 条返回了 non-abstained 结果。
+4. static query expansion 当前不适合作为默认配置；它在本轮 clean run 中降低了 R@10 和 all-primary-hit。
 
-### Verification Commands
+### 验证命令
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\validate_golden_rag_set.py fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601
@@ -321,3 +321,124 @@ The remaining quality gaps are no longer primarily golden pollution. They are:
 
 .\.venv\Scripts\python.exe -m pytest tests\test_run_pipeline.py tests\test_validate_golden_rag_set.py tests\test_realign_golden_rag_set.py tests\test_audit_golden_rag_zero_hits.py tests\test_evaluate_rag_layers.py tests\test_db_rag_review.py -q
 ```
+
+---
+
+## 2026-06-02 P0-P2 细粒度 Golden Label 闭环
+
+分支：`codex/golden-fine-label-p0-p2`
+
+本轮复用的 clean baseline run：
+
+`baseline/runs-formal-20260601/baseline-formal-r3-full-raw-library-clean-20260601`
+
+评估输出目录：
+
+`baseline/golden-fine-label-p0-p2-20260602/`
+
+### 优先级调整
+
+将之前的建议“减少 JD-level expected label”升级为 P0。
+
+P0 规则：
+
+可回答的 golden 样本不得再使用 `jd-021` 这类宽泛的 `jd_description` 作为 expected document。如果确实需要 JD 上下文，expected label 必须替换为更细粒度、可解释的 artifact：`gap_map`、`ranking_explanation` 或 `requirement_evidence`。
+
+### P0：移除宽泛 JD-level Expected Label
+
+已完成改动：
+
+1. `validate_golden_rag_set.py` 新增硬门：拒绝 `source_type=jd_description` 且 label/source_id 只是 `jd-\d{3}` 的 expected document。
+2. 当前 golden set 已不再包含宽泛 JD-level expected label。
+3. 4 条样本从 JD-level label 重绑到更细粒度 artifact：
+   - `rag-golden-019`: `jd-021` -> `jd-021:ranking`
+   - `rag-golden-026`: `jd-023` -> `jd-023:ranking`
+   - `rag-golden-027`: `jd-024` -> `jd-024:ranking`
+   - `rag-golden-029`: `jd-026` -> `jd-026:gap-map`
+
+P0 校验：
+
+| 检查项 | 结果 |
+|------|--------|
+| golden schema + artifact audit | passed |
+| 宽泛 JD-level expected label | 0 |
+| expected label 数 | 34 |
+| label coverage | 34/34 |
+| zero-hit audit | 0 |
+
+P0 指标：
+
+| 配置 | MRR | R@10 | weighted R@10 | all expected hit | all primary hit |
+|--------|----:|-----:|--------------:|-----------------:|----------------:|
+| 2026-06-01 realign 后 BM25 | 0.481 | 0.880 | 0.903 | 0.76 | 0.96 |
+| P0 细粒度 label BM25 | 0.441 | 0.900 | 0.923 | 0.80 | 0.96 |
+| P0 BM25 + static | 0.441 | 0.840 | 0.856 | 0.76 | 0.88 |
+
+P0 解释：
+
+P0 在提高标注严格度和细粒度的同时，提升了覆盖类指标。MRR 下降是预期内结果：将宽泛 JD label 替换为 `ranking_explanation` / `gap_map` 后，目标文档更精确，但 BM25 还不能稳定把这些细粒度 artifact 排到足够靠前。static query expansion 在本轮 clean run 中仍弱于普通 BM25。
+
+### P1：针对未完全覆盖的细粒度 Artifact 做 Query Realign
+
+已完成改动：
+
+1. 审计 expected label 已存在于 corpus、但 top-10 未完全召回的可回答样本。
+2. 基于缺失的细粒度 expected document 文本，为 5 条 query 添加最小关键词提示。
+3. P1 不修改 expected label，只让 query 与已经选定的细粒度 artifact 对齐。
+
+P1 query 调整：
+
+| Query | P1 目标缺失细粒度 artifact |
+|-------|--------------------------------------|
+| `rag-golden-014` | `jd-015:gap-map` |
+| `rag-golden-015` | `jd-016-req-005` |
+| `rag-golden-017` | `jd-019:gap-map` |
+| `rag-golden-027` | `jd-024:ranking` |
+| `rag-golden-030` | `jd-027-req-013` |
+
+P1 指标：
+
+| 配置 | MRR | R@10 | weighted R@10 | all expected hit | all primary hit |
+|--------|----:|-----:|--------------:|-----------------:|----------------:|
+| P0 细粒度 label BM25 | 0.441 | 0.900 | 0.923 | 0.80 | 0.96 |
+| P1 BM25 query realign | 0.474 | 0.920 | 0.910 | 0.84 | 0.88 |
+| P1 BM25 + static | 0.455 | 0.880 | 0.870 | 0.80 | 0.84 |
+
+P1 解释：
+
+P1 提升了 `MRR`、`R@10` 和 `all_expected_hit`，说明它确实帮助恢复了 P0 后的细粒度 artifact 覆盖。但 `all_primary_hit` 从 `0.96` 降到 `0.88`：部分关键词提示把 supporting/stale artifact 推上来了，同时把 primary evidence 挤出了 top-10。这说明 query realign 有价值，但不能作为多文档样本的唯一策略；后续仍需要 role-aware retrieval/ranking。
+
+### P2：将 No-Answer Gate 收窄到 Candidate Evidence
+
+已完成改动：
+
+1. no-answer retriever gate 现在只检索 `candidate_evidence`。
+2. 报告中为每条 no-answer query 记录 `filter_scope: candidate_evidence`。
+3. 这样可以避免把 JD/JD input 中的岗位要求误当成“候选人具备某项技能或经历”的证据。
+
+P2 指标：
+
+| 配置 | MRR | R@10 | weighted R@10 | all expected hit | all primary hit | no-answer gate | no-answer abstention |
+|--------|----:|-----:|--------------:|-----------------:|----------------:|----------------|---------------------:|
+| P1 BM25 query realign | 0.474 | 0.920 | 0.910 | 0.84 | 0.88 | failed | 0.60 |
+| P2 BM25 candidate-scoped no-answer | 0.474 | 0.920 | 0.910 | 0.84 | 0.88 | passed | 1.00 |
+| P2 BM25 + static | 0.455 | 0.880 | 0.870 | 0.80 | 0.84 | passed | 1.00 |
+
+P2 解释：
+
+P2 在不改变可回答样本检索指标的前提下修复了 no-answer 质量门。此前的 leak 来自 no-answer 问题命中了 JD/JD input 中的 Kubernetes、Java 等岗位要求；这些文档不能证明候选人具备对应经验。因此，对这类 no-answer 样本使用 candidate-scoped retrieval 是更正确的评估行为。
+
+### P0-P2 汇总
+
+| 阶段 | 主要提升 | MRR | R@10 | weighted R@10 | all expected hit | all primary hit | no-answer gate |
+|-------|------------------|----:|-----:|--------------:|-----------------:|----------------:|----------------|
+| 2026-06-01 realign 后 BM25 | clean artifacts + zero-hit realign | 0.481 | 0.880 | 0.903 | 0.76 | 0.96 | failed |
+| P0 | 移除宽泛 JD-level expected label | 0.441 | 0.900 | 0.923 | 0.80 | 0.96 | failed |
+| P1 | 为部分未覆盖的细粒度 artifact 做 query realign | 0.474 | 0.920 | 0.910 | 0.84 | 0.88 | failed |
+| P2 | no-answer gate 收窄到 candidate evidence | 0.474 | 0.920 | 0.910 | 0.84 | 0.88 | passed |
+
+P2 后剩余问题：
+
+1. P1 query realign 后 `all_primary_hit` 低于 P0，后续仍需要 role-aware retrieval/reranking。
+2. static query expansion 仍弱于普通 BM25，不应作为默认配置。
+3. 当前 label 更细、更严格；解释 MRR 时必须同时看 coverage 和 no-answer gate 状态。

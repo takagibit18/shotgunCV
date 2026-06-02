@@ -86,6 +86,25 @@ def test_validate_golden_set_rejects_bad_requirement_artifacts(tmp_path: Path) -
     assert any("jd-026-req-001 has duplicate evidence_refs" in error for error in report["errors"])
 
 
+def test_validate_golden_set_rejects_broad_jd_level_expected_labels(tmp_path: Path) -> None:
+    payload = _golden_payload()
+    payload["samples"][0]["expected_documents"] = [
+        {
+            "source_type": "jd_description",
+            "source_id": "jd-021",
+            "label": "jd-021",
+            "role": "primary",
+        }
+    ]
+    golden_path = tmp_path / "golden_rag.json"
+    _write_json(golden_path, payload)
+
+    report = validate_golden_set(golden_path)
+
+    assert report["status"] == "failed"
+    assert any("uses broad JD-level label jd-021" in error for error in report["errors"])
+
+
 def _golden_payload() -> dict[str, object]:
     samples = []
     case_types = (
