@@ -312,6 +312,20 @@ describe("run viewer data loading", () => {
     expect(existingReport?.markdown).toContain("# ShotgunCV v0.3.0 LLM Eval Summary");
   });
 
+  it("renders report with core and guardrail summaries visible by default", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-v057", { includeV057Artifacts: true });
+    await makeRunRisky(runsDir, "demo-v057");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v057" }) }));
+
+    expect(html).toContain("Core");
+    expect(html).toContain("Guardrail");
+    expect(html).toContain("hard_gate_missing");
+    expect(html).toContain("risk score");
+  });
+
   it("creates a draft run with uploaded files and a metadata-only manifest", async () => {
     const runsDir = await createTempRunsDir();
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;

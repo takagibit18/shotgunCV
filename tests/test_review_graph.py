@@ -115,6 +115,25 @@ def test_review_graph_routes_low_evidence_jds_to_gap_report(tmp_path: Path) -> N
     assert gap_report["missing_requirements"][0]["fabrication_policy"] == "never_fabricate"
 
 
+def test_review_graph_requires_verified_candidate_evidence_for_sufficient_status(tmp_path: Path) -> None:
+    run_dir = _write_review_ready_artifacts(tmp_path)
+    matrix = _read_json(run_dir / "analyze" / "requirement_matrix.json")
+    for item in matrix:
+        if item["jd_id"] == "jd-high":
+            item["evidence_status"] = "inferred"
+    _write_json(run_dir / "analyze" / "requirement_matrix.json", matrix)
+
+    exit_code, output = run(["review", "--run-dir", str(run_dir)])
+
+    assert exit_code == 0, output
+    review = _read_json(run_dir / "review" / "post_run_review.json")
+    decisions = {item["jd_id"]: item for item in review["decision_review"]}
+    assert decisions["jd-high"]["evidence_status"] == "insufficient"
+    assert decisions["jd-high"]["apply_decision"] == "evidence_needed"
+    assert decisions["jd-high"]["gate_status"] == "evidence_insufficient"
+    assert "no verified candidate evidence" in decisions["jd-high"]["ranking_summary"]
+
+
 def test_interview_prep_generates_from_structured_artifacts(tmp_path: Path) -> None:
     run_dir = _write_review_ready_artifacts(tmp_path)
 

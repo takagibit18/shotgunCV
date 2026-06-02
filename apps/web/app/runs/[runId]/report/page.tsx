@@ -75,6 +75,38 @@ export default async function ReportPage({ params }: PageProps) {
           <SummaryCard icon="link" title="关键证据" items={reportSummary.evidence} />
           <SummaryCard icon="edit" title="面试前突击内容 / 改进重点" items={reportSummary.interviewPrep} />
         </div>
+        <div className="report-summary-grid">
+          <article className="report-summary-card">
+            <h3>
+              <span className="semantic-icon blue" aria-hidden="true">
+                <Icon name="stats" />
+              </span>
+              Core
+            </h3>
+            <ul>
+              {reportSummary.coreSignals.map((item) => (
+                <li key={item}>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+          <article className="report-summary-card">
+            <h3>
+              <span className="semantic-icon blue" aria-hidden="true">
+                <Icon name="shield-alert" />
+              </span>
+              Guardrail
+            </h3>
+            <ul>
+              {reportSummary.guardrailSignals.map((item) => (
+                <li key={item}>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        </div>
       </section>
 
         <section className="section report-shell report-source-panel">
@@ -156,8 +188,15 @@ function buildReportSummary(detail: DetailForReport) {
   const topGapMap = topVariant
     ? detail.evaluate.gapMaps.find((gapMap) => gapMap.jd_id === topVariant.jdId)
     : detail.evaluate.gapMaps[0];
+  const topScorecard = topVariant
+    ? detail.evaluate.scorecards.find((scorecard) => scorecard.jd_id === topVariant.jdId && scorecard.variant_id === topVariant.variantId)
+    : detail.evaluate.scorecards[0];
   const gapItems = Array.isArray(topGapMap?.items) ? topGapMap.items : [];
   const strategyReason = topStrategy?.reason_summary ? `。${formatUserText(topStrategy.reason_summary)}` : "";
+  const finalScore = topScorecard?.final_overall_score ?? topScorecard?.overall_score ?? topVariant?.overallScore;
+  const riskScore = topScorecard?.risk_score ?? topScorecard?.gap_risk_score;
+  const guardrailFlags = toRawStringArray(topScorecard?.guardrail_flags);
+  const gateReasons = toRawStringArray(topScorecard?.gate_reasons);
 
   return {
     topTitle: topVariant?.title ?? "暂无推荐岗位",
@@ -191,7 +230,27 @@ function buildReportSummary(detail: DetailForReport) {
       ]),
       ...toSummaryItems(topExplanation?.risk_flags, "风险标记"),
     ]),
+    coreSignals: [
+      `final score: ${formatOptionalPercent(finalScore)}`,
+      `risk score: ${formatOptionalPercent(riskScore)}`,
+      `decision source: ${topScorecard?.final_decision_source || "unknown"}`,
+    ],
+    guardrailSignals: [
+      `gate status: ${topScorecard?.gate_status || "unknown"}`,
+      ...(guardrailFlags.length ? guardrailFlags.map((flag) => `guardrail flag: ${flag}`) : ["guardrail flag: none"]),
+      ...gateReasons.map((reason) => `gate reason: ${reason}`),
+    ],
   };
+}
+
+
+function toRawStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}
+
+
+function formatOptionalPercent(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value * 100)}%` : "unknown";
 }
 
 
