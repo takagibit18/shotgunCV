@@ -132,6 +132,7 @@ def evaluate_retriever_layer(
         "quality_gate": quality_gate,
         "metrics": metrics,
         "case_type_metrics": _case_type_metrics(metrics["queries"], query_specs, k_values),
+        "golden_layer_metrics": _golden_layer_metrics(metrics["queries"], query_specs, k_values),
         "no_answer_behavior": _no_answer_behavior(
             retriever,
             samples,
@@ -177,6 +178,7 @@ def evaluate_generator_layer(
         "retriever_gate": _retriever_gate_summary(retriever_gate, sample_reports),
         "aggregate": _aggregate_generator_samples(sample_reports),
         "case_type_metrics": _generator_case_type_metrics(sample_reports),
+        "golden_layer_metrics": _generator_golden_layer_metrics(sample_reports),
         "samples": sample_reports,
     }
     _write_json(output_path, report)
@@ -209,6 +211,7 @@ def _sample_to_query_spec(sample: dict[str, Any]) -> dict[str, Any]:
         "query_id": sample["question_id"],
         "query": sample["question"],
         "case_type": sample.get("case_type"),
+        "golden_layer": _sample_golden_layer(sample),
         "expected_chunks": [_document_label(document) for document in expected_docs],
         "expected_documents": expected_docs,
         "filter_scope": _filter_scope(jd_id=jd_id, source_type=source_type),
@@ -219,6 +222,15 @@ def _sample_to_query_spec(sample: dict[str, Any]) -> dict[str, Any]:
     if source_type:
         spec["source_type"] = source_type
     return spec
+
+
+def _sample_golden_layer(sample: dict[str, Any]) -> str:
+    metadata = sample.get("metadata")
+    if isinstance(metadata, dict):
+        layer = str(metadata.get("golden_layer") or "").strip()
+        if layer:
+            return layer
+    return "unknown"
 
 
 def _extract_jd_id(expected_documents: list[dict[str, Any]]) -> str | None:
@@ -307,6 +319,22 @@ def _case_type_metrics(
     }
 
 
+def _golden_layer_metrics(
+    query_reports: list[dict[str, Any]], query_specs: list[dict[str, Any]], k_values: list[int]
+) -> dict[str, Any]:
+    layer_by_query = {str(spec["query_id"]): str(spec.get("golden_layer") or "unknown") for spec in query_specs}
+    by_layer: dict[str, list[dict[str, Any]]] = {}
+    for query in query_reports:
+        by_layer.setdefault(layer_by_query.get(str(query.get("query_id")), "unknown"), []).append(query)
+    return {
+        layer: {
+            "query_count": len(queries),
+            "aggregate": _aggregate_retriever_queries(queries, k_values),
+        }
+        for layer, queries in sorted(by_layer.items())
+    }
+
+
 def _aggregate_retriever_queries(query_reports: list[dict[str, Any]], k_values: list[int]) -> dict[str, Any]:
     if not query_reports:
         return {
@@ -314,6 +342,10 @@ def _aggregate_retriever_queries(query_reports: list[dict[str, Any]], k_values: 
             "recall_at_k": {str(k): 0.0 for k in k_values},
             "ndcg_at_k": {str(k): 0.0 for k in k_values},
             "mrr": 0.0,
+            "weighted_recall_at_k": {str(k): 0.0 for k in k_values},
+            "weighted_ndcg_at_k": {str(k): 0.0 for k in k_values},
+            "all_expected_hit_rate": 0.0,
+            "all_primary_hit_rate": 0.0,
         }
     return {
         "precision_at_k": {
@@ -326,6 +358,20 @@ def _aggregate_retriever_queries(query_reports: list[dict[str, Any]], k_values: 
             str(k): mean(float(item["metrics"]["ndcg_at_k"][str(k)]) for item in query_reports) for k in k_values
         },
         "mrr": mean(float(item["metrics"]["mrr"]) for item in query_reports),
+        "weighted_recall_at_k": {
+            str(k): mean(float(item["weighted_metrics"]["weighted_recall_at_k"][str(k)]) for item in query_reports)
+            for k in k_values
+        },
+        "weighted_ndcg_at_k": {
+            str(k): mean(float(item["weighted_metrics"]["weighted_ndcg_at_k"][str(k)]) for item in query_reports)
+            for k in k_values
+        },
+        "all_expected_hit_rate": mean(
+            1.0 if item["evidence_coverage"]["all_expected_hit"] else 0.0 for item in query_reports
+        ),
+        "all_primary_hit_rate": mean(
+            1.0 if item["evidence_coverage"]["all_primary_hit"] else 0.0 for item in query_reports
+        ),
     }
 
 
@@ -466,6 +512,7 @@ def _evaluate_generator_sample(
     return {
         "question_id": sample["question_id"],
         "case_type": sample.get("case_type"),
+        "golden_layer": _sample_golden_layer(sample),
         "answer_chars": len(answer),
         "blocked_by_retriever_gate": blocked_by_gate,
         "retriever_gate_status": (retriever_gate_record or {}).get("gate_status"),
@@ -507,6 +554,16 @@ def _generator_case_type_metrics(samples: list[dict[str, Any]]) -> dict[str, Any
     return {
         case_type: {"sample_count": len(items), "aggregate": _aggregate_generator_samples(items)}
         for case_type, items in sorted(by_case_type.items())
+    }
+
+
+def _generator_golden_layer_metrics(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    by_layer: dict[str, list[dict[str, Any]]] = {}
+    for item in samples:
+        by_layer.setdefault(str(item.get("golden_layer") or "unknown"), []).append(item)
+    return {
+        layer: {"sample_count": len(items), "aggregate": _aggregate_generator_samples(items)}
+        for layer, items in sorted(by_layer.items())
     }
 
 

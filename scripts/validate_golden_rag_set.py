@@ -10,6 +10,12 @@ from typing import Any
 
 SCHEMA_VERSION = "rag-golden-v1"
 REQUIRED_CASE_TYPES = {"common_question", "multi_document", "no_answer", "stale_or_conflicting"}
+SUPPORTED_GOLDEN_LAYERS = {
+    "core_high_info",
+    "low_info_stress",
+    "ocr_regression",
+    "non_target_negative",
+}
 REQUIRED_SAMPLE_FIELDS = {
     "question_id",
     "question",
@@ -20,6 +26,13 @@ REQUIRED_SAMPLE_FIELDS = {
     "forbidden_claims",
     "answer_policy",
     "metadata",
+}
+REQUIRED_METADATA_FIELDS = {
+    "bucket",
+    "jd_count",
+    "input_media_types",
+    "candidate_scope",
+    "golden_layer",
 }
 _MOJIBAKE_MARKERS = ("锛", "鏄", "鐨", "杩", "妫", "绱", "€", "�")
 _CONTENT_TOKEN_RE = re.compile(r"[a-z][a-z0-9+#.-]*|[0-9]+|[\u4e00-\u9fff]{2,}", re.IGNORECASE)
@@ -66,6 +79,7 @@ def validate_golden_set(golden_file: Path, *, run_dir: Path | None = None) -> di
     duplicate_ids: set[str] = set()
     case_type_counts: Counter[str] = Counter()
     source_type_counts: Counter[str] = Counter()
+    golden_layer_counts: Counter[str] = Counter()
     retriever_labels: set[str] = set()
     for index, sample in enumerate(samples, start=1):
         if not isinstance(sample, dict):
@@ -80,6 +94,11 @@ def validate_golden_set(golden_file: Path, *, run_dir: Path | None = None) -> di
         case_type = str(sample.get("case_type") or "")
         if case_type:
             case_type_counts[case_type] += 1
+        metadata = sample.get("metadata")
+        if isinstance(metadata, dict):
+            golden_layer = str(metadata.get("golden_layer") or "").strip()
+            if golden_layer:
+                golden_layer_counts[golden_layer] += 1
         for document in sample.get("expected_documents") or []:
             if not isinstance(document, dict):
                 continue
@@ -101,6 +120,7 @@ def validate_golden_set(golden_file: Path, *, run_dir: Path | None = None) -> di
         sample_count=len(samples),
         case_type_counts=dict(sorted(case_type_counts.items())),
         source_type_counts=dict(sorted(source_type_counts.items())),
+        golden_layer_counts=dict(sorted(golden_layer_counts.items())),
         retriever_label_count=len(retriever_labels),
         errors=errors,
     )
@@ -140,9 +160,12 @@ def _validate_sample(sample: dict[str, Any], index: int, errors: list[str]) -> N
     if not isinstance(metadata, dict):
         errors.append(f"{question_id} metadata must be an object.")
     else:
-        for field in ["bucket", "jd_count", "input_media_types", "candidate_scope"]:
+        for field in sorted(REQUIRED_METADATA_FIELDS):
             if field not in metadata:
                 errors.append(f"{question_id} metadata missing {field}.")
+        golden_layer = str(metadata.get("golden_layer") or "").strip()
+        if golden_layer and golden_layer not in SUPPORTED_GOLDEN_LAYERS:
+            errors.append(f"{question_id} metadata has unsupported golden_layer: {golden_layer}.")
 
 
 def _validate_document(question_id: str, document_index: int, document: Any, errors: list[str]) -> None:
@@ -323,6 +346,7 @@ def _report(
     sample_count: int = 0,
     case_type_counts: dict[str, int] | None = None,
     source_type_counts: dict[str, int] | None = None,
+    golden_layer_counts: dict[str, int] | None = None,
     retriever_label_count: int = 0,
     errors: list[str],
 ) -> dict[str, Any]:
@@ -333,6 +357,7 @@ def _report(
         "errors": errors,
         "case_type_counts": case_type_counts or {},
         "source_type_counts": source_type_counts or {},
+        "golden_layer_counts": golden_layer_counts or {},
         "retriever_label_count": retriever_label_count,
     }
 
