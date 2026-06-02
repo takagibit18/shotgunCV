@@ -442,3 +442,100 @@ P2 后剩余问题：
 1. P1 query realign 后 `all_primary_hit` 低于 P0，后续仍需要 role-aware retrieval/reranking。
 2. static query expansion 仍弱于普通 BM25，不应作为默认配置。
 3. 当前 label 更细、更严格；解释 MRR 时必须同时看 coverage 和 no-answer gate 状态。
+
+---
+
+## 2026-06-02 P0 Reranker MRR 观测闭环
+
+分支：`codex/p0-reranker-mrr-closure`
+
+观测目标：
+
+验证“当前 MRR 短板是否主要由纯 BM25、缺少 reranker 导致”，并判断直接接入 `BAAI/bge-reranker-v2-m3` 是否能作为 P0 修复路径。
+
+复用 run：
+
+`baseline/runs-formal-20260601/baseline-formal-r3-full-raw-library-clean-20260601`
+
+输出目录：
+
+`baseline/p0-reranker-mrr-closure-20260602/`
+
+### P0 观测基线
+
+BM25 基线复现结果：
+
+| 配置 | MRR | P@1 | R@10 | weighted R@10 | all expected hit | all primary hit | top1 | top3 | top10 | miss |
+|------|----:|----:|-----:|--------------:|-----------------:|----------------:|-----:|-----:|------:|-----:|
+| BM25 baseline | 0.474 | 0.240 | 0.920 | 0.910 | 0.84 | 0.88 | 6 | 15 | 25 | 0 |
+
+first relevant rank 分布：
+
+```text
+rank 1: 6
+rank 2: 6
+rank 3: 3
+rank 4: 3
+rank 5: 1
+rank 6: 3
+rank 7: 2
+rank 9: 1
+```
+
+结论：当前 MRR 短板不是召回失败。25 条 answerable query 至少都有一个相关文档进入 top10，问题集中在排序：只有 6/25 的首个相关文档位于 top1，15/25 位于 top3。
+
+### Reranker 对照
+
+实验配置：
+
+- first stage：BM25
+- reranker：`BAAI/bge-reranker-v2-m3`
+- 对照 first-stage limit：10、20
+- `first-stage=50` 曾单独启动，但运行超过 3 分钟后被人工中断，未生成完整报告；本轮不将其纳入结论。
+
+| 配置 | MRR | P@1 | R@10 | weighted R@10 | all expected hit | all primary hit | top1 | top3 | top10 | miss |
+|------|----:|----:|-----:|--------------:|-----------------:|----------------:|-----:|-----:|------:|-----:|
+| BM25 baseline | 0.474 | 0.240 | 0.920 | 0.910 | 0.84 | 0.88 | 6 | 15 | 25 | 0 |
+| BM25@10 -> reranker | 0.415 | 0.200 | 0.920 | 0.910 | 0.84 | 0.88 | 5 | 14 | 25 | 0 |
+| BM25@20 -> reranker | 0.387 | 0.200 | 0.820 | 0.800 | 0.76 | 0.76 | 5 | 12 | 22 | 3 |
+
+no-answer gate 在 reranker 路径下仍为 passed，说明退化集中在 answerable 排序与覆盖，不是 no-answer 误判。
+
+### 负向样本观察
+
+直接 reranker 会把一些 BM25 已经排得较靠前的 expected label 往后推：
+
+- `rag-golden-001`: BM25 rank 3 -> reranker top10 miss。
+- `rag-golden-006`: BM25 rank 3 -> reranker rank 7。
+- `rag-golden-012`: BM25 rank 2 -> reranker rank 7。
+- `rag-golden-016`: BM25 rank 6 -> reranker top10 miss。
+- `rag-golden-027`: BM25 rank 1 -> reranker top10 miss。
+
+这些样本说明：当前 cross-encoder 并没有稳定识别 golden label 所需的精确 artifact，反而偏向更泛的 `jd_description`、`jd_input`、同 JD 下其他 requirement，或其他 ranking explanation。
+
+### P0 结论
+
+“MRR 短板来自排序而非召回”这一判断成立；但“直接加 reranker 就能修复”这一假设在当前 golden 上不成立。
+
+当前 P0 结论：
+
+1. 纯 BM25 的确是 MRR 短板的一部分，因为它能把相关文档召回到 top10，却不能稳定排到 top1/top3。
+2. 直接使用 `BAAI/bge-reranker-v2-m3` 作为替换式 reranker 会退化 MRR、P@1、R@10、all-primary-hit。
+3. first-stage limit 越大，纯 reranker 过度重排风险越高：BM25@20 明显差于 BM25@10。
+4. 下一步不应直接把 reranker 设为默认路径，而应做融合式 reranking：
+   - 保留 BM25 原始排序/分数作为强先验；
+   - reranker 只作为附加分，而不是完全覆盖 BM25 分数；
+   - 对 `requirement_evidence`、`gap_map`、`ranking_explanation` 引入 role/source-aware 权重；
+   - 优先观测 common_question MRR，因为它是当前 MRR 的最大拖累项。
+
+### 复现命令
+
+```powershell
+.\.venv\Scripts\python.exe scripts\validate_golden_rag_set.py fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601
+
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --output baseline\p0-reranker-mrr-closure-20260602\bm25-baseline.json --retriever-mode bm25
+
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --output baseline\p0-reranker-mrr-closure-20260602\reranker-bm25-fs10.json --retriever-mode bm25 --reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 10
+
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --output baseline\p0-reranker-mrr-closure-20260602\reranker-bm25-fs20.json --retriever-mode bm25 --reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 20
+```
