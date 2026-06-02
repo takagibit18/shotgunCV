@@ -87,6 +87,30 @@ def test_evaluate_retriever_layer_can_select_hybrid_retriever(tmp_path: Path) ->
     assert report["metrics"]["query_count"] == 25
 
 
+def test_evaluate_retriever_layer_can_filter_headline_golden_layer(tmp_path: Path) -> None:
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    for sample in payload["samples"][0:10]:  # type: ignore[index]
+        sample["metadata"]["golden_layer"] = "low_info_stress"
+    _write_json(golden_path, payload)
+    run_dir = _write_run_with_expected_documents(tmp_path / "run", payload)
+
+    report = evaluate_retriever_layer(
+        run_dir=run_dir,
+        golden_file=golden_path,
+        output_path=tmp_path / "retriever.json",
+        k_values=[1, 3],
+        embedding_model=_KeywordEmbeddingModel(),
+        golden_layers=["core_high_info"],
+    )
+
+    assert report["golden_layer_filter"] == ["core_high_info"]
+    assert report["sample_count"] == 20
+    assert report["answerable_sample_count"] == 15
+    assert set(report["golden_layer_metrics"]) == {"core_high_info"}
+    assert all(query["query_id"] >= "rag-golden-011" for query in report["metrics"]["queries"])
+
+
 def test_sample_to_query_spec_does_not_apply_jd_filter_to_mixed_scope_docs() -> None:
     spec = _sample_to_query_spec(
         {
@@ -197,6 +221,30 @@ def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Pa
     assert report["aggregate"]["forbidden_claim_violation_count"] == 0
     assert report["aggregate"]["faithfulness"] > 0.9
     assert set(report["case_type_metrics"]) == {"common_question", "multi_document", "no_answer", "stale_or_conflicting"}
+
+
+def test_evaluate_generator_layer_can_filter_headline_golden_layer(tmp_path: Path) -> None:
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    for sample in payload["samples"][0:10]:  # type: ignore[index]
+        sample["metadata"]["golden_layer"] = "low_info_stress"
+    _write_json(golden_path, payload)
+    answers_path = tmp_path / "answers.json"
+    _write_json(answers_path, _answers_payload(payload))
+    run_dir = _write_run_with_expected_documents(tmp_path / "run", payload)
+
+    report = evaluate_generator_layer(
+        golden_file=golden_path,
+        answers_file=answers_path,
+        output_path=tmp_path / "generator.json",
+        run_dir=run_dir,
+        golden_layers=["core_high_info"],
+    )
+
+    assert report["golden_layer_filter"] == ["core_high_info"]
+    assert report["sample_count"] == 20
+    assert set(report["golden_layer_metrics"]) == {"core_high_info"}
+    assert all(sample["question_id"] >= "rag-golden-011" for sample in report["samples"])
 
 
 def test_evaluate_generator_layer_blocks_no_answer_when_retriever_abstained(tmp_path: Path) -> None:

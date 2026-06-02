@@ -63,11 +63,12 @@ def evaluate_retriever_layer(
     query_expansion: str = "none",
     reranker_model: str | None = None,
     first_stage_limit: int = 50,
+    golden_layers: list[str] | None = None,
 ) -> dict[str, Any]:
     from shotguncv_core.rag.retrieval import InMemoryVectorRetriever, expand_query
 
     payload = _load_valid_golden(golden_file)
-    samples = _samples(payload)
+    samples = _filter_samples_by_golden_layer(_samples(payload), golden_layers)
     batch = build_projection_batch(run_dir)
     first_stage, retriever_type = _build_retriever(
         batch.retrieval_chunks,
@@ -119,6 +120,7 @@ def evaluate_retriever_layer(
         "run_dir": str(run_dir),
         "golden_file": str(golden_file),
         "golden_schema_version": payload["schema_version"],
+        "golden_layer_filter": _normalized_golden_layers(golden_layers),
         "retriever_mode": retriever_mode,
         "retriever_type": retriever_type,
         "reranker_model": reranker_model,
@@ -151,9 +153,10 @@ def evaluate_generator_layer(
     output_path: Path,
     run_dir: Path | None = None,
     retriever_report_file: Path | None = None,
+    golden_layers: list[str] | None = None,
 ) -> dict[str, Any]:
     payload = _load_valid_golden(golden_file)
-    samples = _samples(payload)
+    samples = _filter_samples_by_golden_layer(_samples(payload), golden_layers)
     answers = _load_answers(answers_file)
     chunks = build_projection_batch(run_dir).retrieval_chunks if run_dir else []
     retriever_gate = _load_retriever_gate(retriever_report_file)
@@ -173,6 +176,7 @@ def evaluate_generator_layer(
         "run_dir": str(run_dir) if run_dir else None,
         "retriever_report_file": str(retriever_report_file) if retriever_report_file else None,
         "golden_schema_version": payload["schema_version"],
+        "golden_layer_filter": _normalized_golden_layers(golden_layers),
         "sample_count": len(samples),
         "answered_sample_count": sum(1 for item in sample_reports if item["answer_chars"] > 0),
         "retriever_gate": _retriever_gate_summary(retriever_gate, sample_reports),
@@ -200,6 +204,19 @@ def _samples(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(samples, list):
         raise ValueError("Golden set requires a samples list.")
     return [sample for sample in samples if isinstance(sample, dict)]
+
+
+def _normalized_golden_layers(golden_layers: list[str] | None) -> list[str]:
+    return sorted({str(layer).strip() for layer in golden_layers or [] if str(layer).strip()})
+
+
+def _filter_samples_by_golden_layer(
+    samples: list[dict[str, Any]], golden_layers: list[str] | None
+) -> list[dict[str, Any]]:
+    allowed = set(_normalized_golden_layers(golden_layers))
+    if not allowed:
+        return samples
+    return [sample for sample in samples if _sample_golden_layer(sample) in allowed]
 
 
 def _sample_to_query_spec(sample: dict[str, Any]) -> dict[str, Any]:
@@ -729,6 +746,12 @@ def main() -> int:
         default=50,
         help="Number of candidates from first-stage retrieval to feed into reranker.",
     )
+    parser.add_argument(
+        "--golden-layer",
+        action="append",
+        default=None,
+        help="Evaluate only samples whose metadata.golden_layer matches this value. Repeat for multiple layers.",
+    )
     args = parser.parse_args()
     if args.layer == "retriever":
         if not args.run_dir:
@@ -745,6 +768,7 @@ def main() -> int:
             query_expansion=args.query_expansion,
             reranker_model=args.reranker,
             first_stage_limit=args.first_stage_limit,
+            golden_layers=args.golden_layer,
         )
         print(json.dumps({"output": str(args.output), "aggregate": report["metrics"]["aggregate"]}, ensure_ascii=False, indent=2))
         return 0
@@ -756,6 +780,7 @@ def main() -> int:
         output_path=args.output,
         run_dir=args.run_dir,
         retriever_report_file=args.retriever_report,
+        golden_layers=args.golden_layer,
     )
     print(json.dumps({"output": str(args.output), "aggregate": report["aggregate"]}, ensure_ascii=False, indent=2))
     return 0
