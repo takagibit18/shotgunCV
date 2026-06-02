@@ -139,3 +139,40 @@ BM25 retriever 分层指标：
 3. realign 后先跑 validator 的 artifact audit，再跑 retriever layer。
 4. 记录整体指标和 `core_high_info` 指标；主结论只引用 core。
 5. OCR 样本必须等重采集或 vision extraction 质量达标后，才能从 `ocr_regression` 晋级 core。
+
+---
+
+## 2026-06-02 分层闭环观测
+
+分支：
+
+`codex/golden-layering-closure`
+
+本轮新增能力：
+
+- `scripts/evaluate_rag_layers.py --golden-layer <layer>` 支持只评估指定 `metadata.golden_layer`。
+- 主 RAG 质量使用 `--golden-layer core_high_info` 生成 headline report。
+- 其他层继续作为 guardrail 单独输出，不并入 headline metric。
+
+复用 clean baseline：
+
+`baseline/runs-formal-20260601/baseline-formal-r3-full-raw-library-clean-20260601`
+
+输出目录：
+
+`baseline/golden-layering-closure-20260602/`
+
+| 口径 | samples | answerable | MRR | P@1 | R@10 | weighted R@10 | all primary | all expected | no-answer gate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| overall | 30 | 25 | 0.474 | 0.240 | 0.920 | 0.910 | 0.880 | 0.840 | passed |
+| `core_high_info` | 9 | 9 | 0.553 | 0.333 | 0.889 | 0.889 | 0.889 | 0.778 | passed |
+| `low_info_stress` | 5 | 5 | 0.450 | 0.200 | 0.900 | 0.867 | 0.800 | 0.800 | passed |
+| `ocr_regression` | 6 | 6 | 0.625 | 0.333 | 0.917 | 0.905 | 0.833 | 0.833 | passed |
+| `non_target_negative` | 10 | 5 | 0.174 | 0.000 | 1.000 | 1.000 | 1.000 | 1.000 | passed |
+
+解释：
+
+- headline metric 应采用 `core_high_info`，当前 BM25 core-only MRR 为 0.553，而整体 MRR 为 0.474。
+- `non_target_negative` 的 answerable 子集 MRR 低，不应解释为主 retriever 劣化；该层关键 guardrail 是 no-answer gate，本轮 abstention rate 为 1.0。
+- `ocr_regression` 的 MRR 较高，主要来自 gap/ranking artifact 和 query hint 可检索，不代表 raw OCR 质量已经达到 core 准入。
+- 后续调参时，只有 core 指标提升且 guardrail 不明显劣化，才应视为有效提升。
