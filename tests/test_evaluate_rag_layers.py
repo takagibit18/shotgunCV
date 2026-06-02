@@ -33,6 +33,7 @@ def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None
     assert report["no_answer_behavior"]["abstention_rate"] == 1.0
     assert all(item["abstained"] for item in report["no_answer_behavior"]["queries"])
     assert all(item["effective_result_count"] == 0 for item in report["no_answer_behavior"]["queries"])
+    assert {item["filter_scope"] for item in report["no_answer_behavior"]["queries"]} == {"candidate_evidence"}
     assert set(report["case_type_metrics"]) == {"common_question", "multi_document", "stale_or_conflicting"}
 
 
