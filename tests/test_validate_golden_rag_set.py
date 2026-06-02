@@ -35,7 +35,22 @@ def test_validate_golden_set_rejects_incomplete_distribution(tmp_path: Path) -> 
     report = validate_golden_set(golden_path)
 
     assert report["status"] == "failed"
-    assert "Golden set must contain 30-50 samples." in report["errors"]
+    assert "Golden set must contain 30-60 samples." in report["errors"]
+
+
+def test_validate_golden_set_accepts_sixty_sample_robustness_set(tmp_path: Path) -> None:
+    payload = _golden_payload()
+    payload["samples"] = [
+        *payload["samples"],
+        *_extra_samples(start_index=31, count=30),
+    ]
+    golden_path = tmp_path / "golden_rag.json"
+    _write_json(golden_path, payload)
+
+    report = validate_golden_set(golden_path)
+
+    assert report["sample_count"] == 60
+    assert report["status"] == "passed"
 
 
 def test_validate_golden_set_rejects_invalid_no_answer_docs(tmp_path: Path) -> None:
@@ -172,6 +187,38 @@ def _golden_payload() -> dict[str, object]:
         "dataset_id": "rag-golden-v1-20260526",
         "samples": samples,
     }
+
+
+def _extra_samples(start_index: int, count: int) -> list[dict[str, object]]:
+    samples = []
+    for index in range(start_index, start_index + count):
+        samples.append(
+            {
+                "question_id": f"rag-golden-{index:03d}",
+                "question": f"What robustness evidence supports sample {index}?",
+                "case_type": "common_question",
+                "expected_documents": [
+                    {
+                        "source_type": "requirement_evidence",
+                        "source_id": f"jd-{index:03d}-req-001",
+                        "label": f"jd-{index:03d}-req-001",
+                        "role": "primary",
+                    }
+                ],
+                "golden_answer": "Answer from current artifacts only.",
+                "must_cover_points": ["Use cited evidence.", "State uncertainty when evidence is absent."],
+                "forbidden_claims": ["Do not invent missing employer outcomes."],
+                "answer_policy": "Use only cited run artifacts; say the current knowledge base cannot confirm when evidence is absent.",
+                "metadata": {
+                    "bucket": "full_raw_library_text_pdf_image",
+                    "jd_count": 27,
+                    "input_media_types": ["text", "pdf", "image"],
+                    "candidate_scope": "candidate-profile-global",
+                    "golden_layer": "core_high_info",
+                },
+            }
+        )
+    return samples
 
 
 def _write_json(path: Path, payload: object) -> None:

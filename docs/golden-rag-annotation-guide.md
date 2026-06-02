@@ -4,7 +4,7 @@
 
 This guide defines the first manual `rag-golden-v1` dataset for layered RAG evaluation. The set is shared by retriever, generator, and end-to-end checks.
 
-The first version must contain 30-50 samples and cover four case types:
+The first version must contain 30-60 samples and cover four case types:
 
 - `common_question`: answerable from one or a small number of clear artifacts.
 - `multi_document`: requires combining multiple source types, JDs, or artifacts.
