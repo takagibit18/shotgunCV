@@ -256,9 +256,9 @@ def _summarize_decision_context(state: _ReviewGraphState) -> _ReviewGraphState:
         elif gate_status == "needs_review":
             evidence_status = "insufficient"
             reason = "preflight gate needs_review: hard-gate evidence missing"
-        elif verified_count + inferred_count == 0:
+        elif verified_count == 0:
             evidence_status = "insufficient"
-            reason = "no verified or inferred requirements"
+            reason = "no verified candidate evidence; inferred evidence is insufficient for automatic apply guidance"
         else:
             evidence_status = "sufficient"
             reason = f"{verified_count} verified, {inferred_count} inferred"

@@ -6,7 +6,13 @@ import math
 import re
 from pathlib import Path
 
-from scripts.evaluate_rag_layers import _sample_to_query_spec, evaluate_generator_layer, evaluate_retriever_layer
+from scripts.evaluate_rag_layers import (
+    _sample_to_query_spec,
+    evaluate_generator_layer,
+    evaluate_retriever_layer,
+    report_case_type_counts,
+    report_layer_counts,
+)
 
 
 def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None:
@@ -45,6 +51,26 @@ def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None
     assert set(report["case_type_metrics"]) == {"common_question", "multi_document", "stale_or_conflicting"}
 
 
+def test_real_cv_v2_golden_fixture_is_sixty_sample_layered_report() -> None:
+    payload = json.loads(Path("fixtures/golden_rag_questions.json").read_text(encoding="utf-8"))
+    samples = payload["samples"]
+
+    assert payload["dataset_id"] == "rag-golden-v2-20260602-real-cv"
+    assert len(samples) == 60
+    assert report_layer_counts(samples) == {
+        "core_high_info": 38,
+        "low_info_stress": 6,
+        "non_target_negative": 9,
+        "ocr_regression": 7,
+    }
+    assert report_case_type_counts(samples) == {
+        "common_question": 34,
+        "multi_document": 11,
+        "no_answer": 9,
+        "stale_or_conflicting": 6,
+    }
+
+
 def test_evaluate_retriever_layer_fails_no_answer_gate_when_score_crosses_threshold(tmp_path: Path) -> None:
     golden_path = tmp_path / "golden.json"
     payload = _golden_payload()
@@ -65,6 +91,9 @@ def test_evaluate_retriever_layer_fails_no_answer_gate_when_score_crosses_thresh
     assert gate["blocks_generator"] is True
     assert report["no_answer_behavior"]["abstention_rate"] == 0.0
     assert all(not item["abstained"] for item in report["no_answer_behavior"]["queries"])
+    assert report["no_answer_behavior"]["false_positive_audit"]["false_positive_count"] == 5
+    assert report["no_answer_behavior"]["false_positive_audit"]["needs_manual_audit"] is True
+    assert report["no_answer_behavior"]["false_positive_audit"]["top_false_positive_examples"][0]["gate_status"] == "needs_review"
 
 
 def test_evaluate_retriever_layer_can_select_hybrid_retriever(tmp_path: Path) -> None:

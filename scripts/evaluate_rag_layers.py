@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from statistics import mean
 from typing import Any
+from collections import Counter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +129,7 @@ def evaluate_retriever_layer(
         "query_expansion": query_expansion,
         "chunk_count": len(batch.retrieval_chunks),
         "sample_count": len(samples),
+        "sample_report": _sample_report(samples),
         "answerable_sample_count": len(query_specs),
         "no_answer_sample_count": len(samples) - len(query_specs),
         "label_coverage": coverage,
@@ -204,6 +206,23 @@ def _samples(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(samples, list):
         raise ValueError("Golden set requires a samples list.")
     return [sample for sample in samples if isinstance(sample, dict)]
+
+
+def report_layer_counts(samples: list[dict[str, Any]]) -> dict[str, int]:
+    return dict(sorted(Counter(_sample_golden_layer(sample) for sample in samples).items()))
+
+
+def report_case_type_counts(samples: list[dict[str, Any]]) -> dict[str, int]:
+    return dict(sorted(Counter(str(sample.get("case_type") or "unknown") for sample in samples).items()))
+
+
+def _sample_report(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "sample_count": len(samples),
+        "case_type_counts": report_case_type_counts(samples),
+        "golden_layer_counts": report_layer_counts(samples),
+        "default_headline_layers": ["core_high_info", "non_target_negative"],
+    }
 
 
 def _normalized_golden_layers(golden_layers: list[str] | None) -> list[str]:
@@ -423,6 +442,7 @@ def _no_answer_behavior(
     non_empty = sum(1 for item in reports if item["retrieved_count"] > 0)
     abstained_count = sum(1 for item in reports if item["abstained"])
     leaked_count = len(reports) - abstained_count
+    false_positive_examples = [item for item in reports if not item["abstained"]]
     return {
         "query_count": len(reports),
         "non_empty_result_count": non_empty,
@@ -435,6 +455,15 @@ def _no_answer_behavior(
             "max_allowed_non_abstained": 0,
             "non_abstained_count": leaked_count,
             "blocks_generator": leaked_count > 0,
+        },
+        "false_positive_audit": {
+            "false_positive_count": leaked_count,
+            "needs_manual_audit": leaked_count > 0,
+            "audit_scope": "candidate_evidence",
+            "threshold_explanation": (
+                f"No-answer samples must abstain unless top candidate_evidence score is below {score_threshold}."
+            ),
+            "top_false_positive_examples": false_positive_examples[:5],
         },
         "queries": reports,
     }
