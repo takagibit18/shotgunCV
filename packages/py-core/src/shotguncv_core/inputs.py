@@ -163,19 +163,25 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
     sidecar = _find_sidecar(path)
     try:
         if options.ocr_provider != "disabled":
-            ocr_text = _extract_image_text_with_ocr(path, options.ocr_languages).strip()
+            raw_ocr_text = _extract_image_text_with_ocr(path, options.ocr_languages)
+            ocr_text = _normalize_extracted_text_for_ingest(raw_ocr_text)
             if ocr_text:
-                return InputDocument(
-                    source_type="file",
-                    source_value=str(path),
-                    media_type=media_type,
-                    text=ocr_text,
-                    extraction_status="ocr",
-                    extraction_provider=options.ocr_provider,
-                    original_name=path.name,
-                    size_bytes=path.stat().st_size,
-                )
-            ocr_error = "OCR returned empty text."
+                quality_warning = _image_ocr_text_quality_warning(raw_ocr_text, ocr_text)
+                if quality_warning is not None:
+                    ocr_error = f"OCR text quality is too low: {quality_warning}"
+                else:
+                    return InputDocument(
+                        source_type="file",
+                        source_value=str(path),
+                        media_type=media_type,
+                        text=ocr_text,
+                        extraction_status="ocr",
+                        extraction_provider=options.ocr_provider,
+                        original_name=path.name,
+                        size_bytes=path.stat().st_size,
+                    )
+            else:
+                ocr_error = "OCR returned empty text."
         else:
             ocr_error = "OCR provider is disabled."
     except Exception as exc:
@@ -183,7 +189,7 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
 
     if options.vision_enabled and options.vision_provider != "disabled":
         try:
-            vision_text = _extract_image_text_with_vision(path, options, ocr_error).strip()
+            vision_text = _normalize_extracted_text_for_ingest(_extract_image_text_with_vision(path, options, ocr_error))
             if vision_text:
                 return InputDocument(
                     source_type="file",
@@ -216,6 +222,87 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
         )
 
     raise InputExtractionError(_format_image_extraction_error(path, ocr_error, vision_error))
+
+
+def _normalize_extracted_text_for_ingest(text: str) -> str:
+    normalized_lines: list[str] = []
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = _collapse_ocr_spaced_tokens(line)
+        line = re.sub(r"[ \t]{2,}", " ", line).strip()
+        if _looks_like_symbol_noise_line(line):
+            continue
+        normalized_lines.append(line)
+    return "\n".join(normalized_lines).strip()
+
+
+def _collapse_ocr_spaced_tokens(line: str) -> str:
+    previous = None
+    current = line
+    while previous != current:
+        previous = current
+        current = re.sub(r"([\u4e00-\u9fff])\s+([\u4e00-\u9fff])", r"\1\2", current)
+    return re.sub(
+        r"(?<![A-Za-z])(?:[A-Za-z]\s+){2,}[A-Za-z](?![A-Za-z])",
+        lambda match: re.sub(r"\s+", "", match.group(0)),
+        current,
+    )
+
+
+def _looks_like_symbol_noise_line(line: str) -> bool:
+    visible_chars = [char for char in line if not char.isspace()]
+    if not visible_chars:
+        return True
+    content_chars = [char for char in visible_chars if char.isalnum() or "\u4e00" <= char <= "\u9fff"]
+    return len(content_chars) == 0 or (len(visible_chars) >= 4 and len(content_chars) / len(visible_chars) < 0.35)
+
+
+def _image_ocr_text_quality_warning(raw_text: str, clean_text: str) -> str | None:
+    visible_chars = sum(1 for char in clean_text if char.isprintable() and not char.isspace())
+    content_chars = sum(1 for char in clean_text if char.isalnum() or "\u4e00" <= char <= "\u9fff")
+    raw_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    symbol_noise_lines = sum(1 for line in raw_lines if _looks_like_symbol_noise_line(line))
+    if visible_chars < 8 or content_chars < 8:
+        return f"too little usable text ({visible_chars} visible chars)."
+    if _looks_like_label_only_ocr_text(clean_text):
+        return "only labels or section headings were extracted."
+    if raw_lines and symbol_noise_lines / max(1, len(raw_lines)) > 0.35:
+        return "too many symbol-noise lines."
+    if content_chars / max(1, visible_chars) < 0.55:
+        return "too much non-content symbol noise."
+    return None
+
+
+def _looks_like_label_only_ocr_text(text: str) -> bool:
+    lines = [line.strip().strip(":：-") for line in text.splitlines() if line.strip()]
+    if len(lines) < 3:
+        return False
+    label_terms = {
+        "岗位职责",
+        "任职要求",
+        "职位标签",
+        "教育",
+        "学历",
+        "福利",
+        "薪资",
+        "地点",
+        "技能",
+        "职责",
+        "要求",
+        "responsibilities",
+        "requirements",
+        "education",
+        "benefits",
+        "skills",
+    }
+    label_like = 0
+    for line in lines:
+        lowered = line.lower()
+        if lowered in label_terms or (len(line) <= 4 and not re.search(r"[A-Za-z0-9]", line)):
+            label_like += 1
+    return label_like / len(lines) >= 0.8
 
 
 def _text_media_type(suffix: str) -> str:

@@ -1195,6 +1195,7 @@ def _record_analyze_quality(
     requirement_gate_failed = any(
         requirement_checks[key] > 0
         for key in [
+            "zero_requirement_matrix_jd_count",
             "matrix_low_quality_requirement_count",
             "invalid_evidence_ref_count",
             "duplicate_evidence_ref_count",
@@ -1240,6 +1241,23 @@ def _requirement_matrix_quality_checks(
     ]
     low_quality_requirements = [item for item in raw_requirements if _is_low_quality_requirement(item)]
     matrix_low_quality_requirements = [item.requirement_text for item in requirement_matrix if _is_low_quality_requirement(item.requirement_text)]
+    matrix_jd_ids = {item.jd_id for item in requirement_matrix}
+    zero_requirement_matrix_jd_ids = [
+        jd.jd_id
+        for jd in jd_profiles
+        if jd.jd_id not in matrix_jd_ids
+        and any(
+            _normalize_jd_requirement_item(raw_item)
+            for source in [
+                jd.must_have_requirements,
+                jd.requirements,
+                jd.responsibilities,
+                jd.nice_to_have_requirements,
+                jd.bonuses,
+            ]
+            for raw_item in source
+        )
+    ]
     invalid_ref_items: list[str] = []
     duplicate_ref_items: list[str] = []
     verified_without_valid_refs: list[str] = []
@@ -1255,6 +1273,8 @@ def _requirement_matrix_quality_checks(
     return {
         "raw_requirement_count": len(raw_requirements),
         "matrix_requirement_count": len(requirement_matrix),
+        "zero_requirement_matrix_jd_count": len(zero_requirement_matrix_jd_ids),
+        "zero_requirement_matrix_jd_examples": zero_requirement_matrix_jd_ids[:5],
         "filtered_low_quality_raw_requirement_count": len(low_quality_requirements),
         "filtered_low_quality_raw_requirement_examples": low_quality_requirements[:5],
         "matrix_low_quality_requirement_count": len(matrix_low_quality_requirements),

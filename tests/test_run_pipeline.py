@@ -676,6 +676,57 @@ def test_analyze_quality_gate_reports_requirement_matrix_pollution(tmp_path: Pat
     assert gate["checks"]["verified_without_valid_refs_count"] == 1
 
 
+def test_analyze_quality_gate_blocks_zero_requirement_matrix_for_extracted_jd(tmp_path: Path) -> None:
+    candidate = CandidateProfile(
+        candidate_id="cand-001",
+        base_resume_path="fixtures/candidates/base_resume.md",
+        experiences=["Built LangGraph RAG review pipeline with retrieval metrics."],
+        projects=[],
+        skills=["Python", "LangGraph"],
+        industry_tags=[],
+        strengths=[],
+        constraints=[],
+        preferences=[],
+    )
+    jd = JDProfile(
+        jd_id="jd-027",
+        title="AI Platform Engineer",
+        company="ThetaWave",
+        cluster="ai-platform",
+        responsibilities=["岗位职责", "职位标签"],
+        requirements=["任职要求", "教育", "福利"],
+        keywords=[],
+        seniority="mid",
+        bonuses=[],
+        risk_signals=[],
+        source_type="image/png",
+        source_value="jd.png",
+    )
+
+    _record_analyze_quality(
+        tmp_path,
+        {
+            "jd_inputs": [{"content": "岗位职责\n职位标签\n教育\n福利"}],
+            "candidate_resume_text": "Built LangGraph RAG review pipeline with retrieval metrics.",
+        },
+        candidate,
+        [jd],
+        [],
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    gate = next(event for event in events if event.get("gate") == "requirement_matrix_quality")
+
+    assert gate["status"] == "failed"
+    assert gate["action"] == "block_golden_export"
+    assert gate["checks"]["zero_requirement_matrix_jd_count"] == 1
+    assert gate["checks"]["zero_requirement_matrix_jd_examples"] == ["jd-027"]
+
+
 def test_evaluate_run_keeps_stable_order_across_repeated_runs(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     config_path = _write_deterministic_config(tmp_path)

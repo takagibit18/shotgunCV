@@ -199,6 +199,80 @@ def test_image_ocr_success_records_provider(monkeypatch: pytest.MonkeyPatch, tmp
     assert documents[0].extraction_error == ""
 
 
+def test_image_ocr_text_is_cleaned_before_ingest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "jd.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: (
+            "岗 位 职 责\n"
+            "- 负 责 L L M 应 用 开 发 ， 建 设 R A G 评 估 流 程\n"
+            "@@@ ###\n"
+            "任 职 要 求\n"
+            "- 熟 悉 P y t h o n 和 LangGraph"
+        ),
+    )
+
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert "岗位职责" in documents[0].text
+    assert "负责 LLM 应用开发" in documents[0].text
+    assert "RAG 评估流程" in documents[0].text
+    assert "Python 和 LangGraph" in documents[0].text
+    assert "@@@ ###" not in documents[0].text
+
+
+def test_low_quality_image_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "jd.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "岗 位 职 责\n职 位 标 签\n教 育\n福 利\n@@@ ###",
+    )
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_vision",
+        lambda path, options, ocr_error: "岗位职责\n- 负责 LLM 应用开发\n任职要求\n- 熟悉 Python 和 RAG",
+    )
+
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=True))
+
+    assert documents[0].text.startswith("岗位职责")
+    assert documents[0].extraction_status == "vision"
+    assert documents[0].extraction_provider == "openai_vision"
+    assert "OCR text quality is too low" in documents[0].extraction_error
+
+
+def test_low_quality_image_ocr_without_vision_is_unparseable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "jd.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "岗 位 职 责\n职 位 标 签\n教 育\n福 利\n@@@ ###",
+    )
+
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].text == ""
+    assert documents[0].extraction_status == "unparseable"
+    assert "OCR text quality is too low" in documents[0].extraction_error
+
+
+def test_image_ocr_quality_ignores_blank_raw_lines(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "jd.png"
+    image_path.write_bytes(b"image")
+    monkeypatch.setattr(
+        "shotguncv_core.inputs._extract_image_text_with_ocr",
+        lambda path, languages: "\n\n岗位职责\n\n- 负责 Agent 框架开发\n\n任职要求\n- 熟悉 Python 和 RAG\n\n",
+    )
+
+    documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
+
+    assert documents[0].extraction_status == "ocr"
+    assert "负责 Agent 框架开发" in documents[0].text
+
+
 def test_image_empty_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     image_path = tmp_path / "jd.png"
     image_path.write_bytes(b"image")
