@@ -13,6 +13,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from scripts.validate_golden_rag_set import validate_golden_set  # noqa: E402
+
 
 ALIGNMENT_METHOD = "bm25_keyword_rewrite"
 CHANGELOG_SCHEMA = "rag-golden-realignment-changelog-v1"
@@ -83,6 +85,9 @@ def realign_golden_set(
     today: str | None = None,
     max_keywords: int = 6,
 ) -> dict[str, Any]:
+    validation = validate_golden_set(golden_file, run_dir=run_dir)
+    if validation["status"] != "passed":
+        raise ValueError(f"Golden set artifact audit failed before realign: {validation['errors']}")
     payload = json.loads(golden_file.read_text(encoding="utf-8-sig"))
     audit_payload = json.loads(audit_report_file.read_text(encoding="utf-8-sig"))
     samples = payload.get("samples")

@@ -169,3 +169,155 @@ Commands run:
 .\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --retriever-mode bm25 --reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 20 --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 --output baseline\eval-p0-p1-20260531\reranker-bm25-fs20.json
 .\.venv\Scripts\python.exe scripts\audit_golden_rag_zero_hits.py --run-dir baseline\runs-formal-20260520\baseline-formal-r3-full-raw-library-20260520 --golden-file fixtures\golden_rag_questions.json --retriever-report baseline\eval-p0-p1-20260531\bm25-static.json --output baseline\eval-p0-p1-20260531\bm25-static-zero-hit-audit.json
 ```
+
+---
+
+## 2026-06-01 Current-Version Clean Baseline and Golden Realign
+
+Branch: `codex/goldenset_enhancement`
+
+HEAD at recording time: `4a76722`
+
+Clean baseline run:
+
+`baseline/runs-formal-20260601/baseline-formal-r3-full-raw-library-clean-20260601`
+
+Realign outputs:
+
+`baseline/golden-realignment-20260601/`
+
+### What Changed In This Version
+
+1. Analyze-stage requirement quality gate was hardened.
+   - Filters label-only requirements such as `Responsibilities:`, `Requirements:`, `Relevance bucket`, and `Source signals`.
+   - Tracks low-quality raw requirements separately from final matrix quality.
+   - Fails only when polluted requirements or invalid refs survive into `requirement_matrix.json`.
+
+2. Resume metadata evidence filtering was expanded.
+   - Rejects `Source: ...`, local paths, relative file paths, URL-only refs, and file-path-like evidence.
+   - Candidate profile is sanitized before analyze artifacts are written, so path metadata does not leak into generate/evaluate/RAG chunks.
+
+3. Requirement evidence matching was tightened.
+   - Verification no longer relies on a single token hit.
+   - Evidence refs are deduped and must be non-metadata.
+   - Verified requirements without usable refs are blocked by the quality audit.
+
+4. Golden validation and realign were guarded by artifact audit.
+   - `validate_golden_rag_set.py --run-dir ...` now checks expected requirement artifacts against the current run.
+   - `realign_golden_rag_set.py` refuses to rewrite a golden set if the referenced run artifacts are already dirty.
+
+5. RAG projection now includes ranking explanations.
+   - `evaluate/ranking_explanations.json` is projected as `ranking_explanation` chunks.
+   - This makes labels such as `jd-022:ranking` retrievable instead of permanently missing from the corpus.
+
+6. Current golden set was realigned against the clean 2026-06-01 baseline artifacts.
+   - Removed or rebound stale expected labels that pointed to requirements filtered out by the new quality gate.
+   - Rewrote 1 query for BM25 vocabulary alignment.
+
+### Clean Artifact Quality
+
+Analyze quality gate:
+
+| Check | Value |
+|------|------:|
+| raw requirements | 598 |
+| final matrix requirements | 299 |
+| filtered low-quality raw requirements | 219 |
+| low-quality requirements surviving in matrix | 0 |
+| invalid evidence refs | 0 |
+| duplicate evidence refs | 0 |
+| verified without usable refs | 0 |
+
+RAG corpus projection:
+
+| Chunk type | Count |
+|-----------|------:|
+| total chunks | 461 |
+| requirement_evidence chunks | 299 |
+| ranking_explanation chunks | 27 |
+
+Golden artifact audit:
+
+| Check | Value |
+|------|------:|
+| sample count | 30 |
+| retriever labels | 34 |
+| label coverage | 34/34 |
+| zero-hit queries after realign | 0 |
+
+Expected document distribution:
+
+| Source type | Count |
+|-------------|------:|
+| requirement_evidence | 21 |
+| gap_map | 6 |
+| jd_description | 4 |
+| candidate_evidence | 2 |
+| ranking_explanation | 1 |
+| run_artifact | 1 |
+
+Case distribution:
+
+| Case type | Count |
+|-----------|------:|
+| common_question | 12 |
+| multi_document | 8 |
+| no_answer | 5 |
+| stale_or_conflicting | 5 |
+
+### Retriever Metrics
+
+| Config | MRR | R@10 | weighted R@10 | all expected hit | all primary hit |
+|--------|----:|-----:|--------------:|-----------------:|----------------:|
+| BM25 before realign | 0.467 | 0.840 | 0.863 | 0.72 | 0.92 |
+| BM25 after realign | 0.481 | 0.880 | 0.903 | 0.76 | 0.96 |
+| BM25 + static after realign | 0.481 | 0.820 | 0.836 | 0.72 | 0.88 |
+
+Case-type R@10 after BM25 realign:
+
+| Case type | R@10 |
+|-----------|-----:|
+| common_question | 1.000 |
+| multi_document | 0.813 |
+| stale_or_conflicting | 0.700 |
+
+No-answer behavior after BM25 realign:
+
+| Check | Value |
+|------|------:|
+| no-answer queries | 5 |
+| abstained | 3 |
+| abstention rate | 0.60 |
+| non-abstained no-answer queries | 2 |
+| quality gate | failed |
+
+### Interpretation
+
+The golden set is now usable for metric interpretation because artifact coverage is complete and zero-hit caused by stale labels has been removed. The metric movement is small but credible: BM25 R@10 improved from `0.84` to `0.88`, weighted R@10 from `0.863` to `0.903`, and all-primary-hit from `0.92` to `0.96`.
+
+The remaining quality gaps are no longer primarily golden pollution. They are:
+
+1. BM25 ranking weakness: many expected labels appear in top-10 but not top-1/top-3, keeping MRR modest.
+2. Multi-document and stale/conflicting cases remain harder than common single-evidence questions.
+3. No-answer handling is still weak: 2/5 no-answer queries return non-abstained results.
+4. Static query expansion is not currently a good default; it lowers R@10 and all-primary-hit in this clean run.
+
+### Verification Commands
+
+```powershell
+.\.venv\Scripts\python.exe scripts\validate_golden_rag_set.py fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601
+
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --output baseline\golden-realignment-20260601\before-bm25.json --retriever-mode bm25
+
+.\.venv\Scripts\python.exe scripts\audit_golden_rag_zero_hits.py --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --golden-file fixtures\golden_rag_questions.json --retriever-report baseline\golden-realignment-20260601\before-bm25.json --output baseline\golden-realignment-20260601\before-zero-hit-audit.json
+
+.\.venv\Scripts\python.exe scripts\realign_golden_rag_set.py --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --audit-report baseline\golden-realignment-20260601\before-zero-hit-audit.json --changelog baseline\golden-realignment-20260601\changes.json --date 2026-06-01
+
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --output baseline\golden-realignment-20260601\after-bm25.json --retriever-mode bm25
+
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --golden-file fixtures\golden_rag_questions.json --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --output baseline\golden-realignment-20260601\after-bm25-static.json --retriever-mode bm25 --query-expansion static
+
+.\.venv\Scripts\python.exe scripts\audit_golden_rag_zero_hits.py --run-dir baseline\runs-formal-20260601\baseline-formal-r3-full-raw-library-clean-20260601 --golden-file fixtures\golden_rag_questions.json --retriever-report baseline\golden-realignment-20260601\after-bm25.json --output baseline\golden-realignment-20260601\after-zero-hit-audit.json
+
+.\.venv\Scripts\python.exe -m pytest tests\test_run_pipeline.py tests\test_validate_golden_rag_set.py tests\test_realign_golden_rag_set.py tests\test_audit_golden_rag_zero_hits.py tests\test_evaluate_rag_layers.py tests\test_db_rag_review.py -q
+```

@@ -78,6 +78,7 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
     requirements = _read_json(run_dir / "analyze" / "requirement_matrix.json") or []
     gap_maps = _read_json(run_dir / "evaluate" / "gap_maps.json") or []
     variants = _read_json(run_dir / "generate" / "resume_variants.json") or []
+    ranking_explanations = _read_json(run_dir / "evaluate" / "ranking_explanations.json") or []
 
     jd_context = _build_jd_context_map(jd_profiles)
 
@@ -191,7 +192,33 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
                     jd_id=(variant.get("target_jd_ids") or [None])[0],
                     run_id=run_id,
                     artifact_path="generate/resume_variants.json",
-                    provenance_summary=f"Resume variant {variant.get('variant_id')}.",
+                provenance_summary=f"Resume variant {variant.get('variant_id')}.",
+            )
+        )
+
+    for explanation in ranking_explanations:
+        jd_id = str(explanation.get("jd_id") or "")
+        text_parts = [
+            str(explanation.get("decision_summary") or ""),
+            *[str(item) for item in explanation.get("positive_signals", [])],
+            *[str(item) for item in explanation.get("risk_flags", [])],
+            *[str(item) for item in explanation.get("evidence_refs", [])],
+        ]
+        dimension_reasons = explanation.get("dimension_reasons") or {}
+        if isinstance(dimension_reasons, dict):
+            text_parts.extend(str(value) for value in dimension_reasons.values())
+        text = "\n".join(part for part in text_parts if str(part).strip())
+        if text.strip():
+            documents.append(
+                _document(
+                    text,
+                    source_type="ranking_explanation",
+                    source_id=f"{jd_id}:ranking",
+                    candidate_id=candidate_id,
+                    jd_id=jd_id,
+                    run_id=run_id,
+                    artifact_path="evaluate/ranking_explanations.json",
+                    provenance_summary=f"Ranking explanation for {jd_id}.",
                 )
             )
 
