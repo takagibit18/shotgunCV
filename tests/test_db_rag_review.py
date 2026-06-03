@@ -124,6 +124,62 @@ def test_retriever_preserves_metadata_with_injected_embedding(tmp_path: Path) ->
     assert "provenance_summary" in results[0].metadata
 
 
+def test_ocr_jd_artifacts_include_aliases_and_normalized_keywords(tmp_path: Path) -> None:
+    from shotguncv_core.db.indexer import build_projection_batch
+
+    run_dir = tmp_path / "ocr-run"
+    (run_dir / "ingest").mkdir(parents=True)
+    (run_dir / "analyze").mkdir()
+    (run_dir / "evaluate").mkdir()
+    _write_json(run_dir / "ingest" / "manifest.json", {"candidate_id": "cand-001", "jd_inputs": []})
+    _write_json(run_dir / "analyze" / "candidate_profile.json", {"candidate_id": "cand-001"})
+    _write_json(
+        run_dir / "analyze" / "jd_profiles.json",
+        [
+            {
+                "jd_id": "jd-025",
+                "title": "我们希望你具备 (Requirements)",
+                "company": "",
+                "responsibilities": ["了解 Mivus、Qdrant、FAISS Se Bai", "GitLab Cl 等 CVCD 基础流程"],
+                "requirements": ["对 AI Agent 和开发者工具有真实兴趣"],
+                "must_have_requirements": ["对 AI Agent 和开发者工具有真实兴趣"],
+                "keywords": ["llm", "python"],
+                "source_type": "file",
+                "source_value": "baseline/jd_corpus_supplement_20260520/清华实习.png",
+            }
+        ],
+    )
+    _write_json(
+        run_dir / "analyze" / "requirement_matrix.json",
+        [
+            {
+                "jd_id": "jd-025",
+                "requirement_id": "jd-025-req-014",
+                "requirement_text": "了解 Mivus、Qdrant、FAISS Se Bai",
+                "evidence_status": "missing",
+                "evidence_refs": [],
+            },
+            {
+                "jd_id": "jd-025",
+                "requirement_id": "jd-025-req-018",
+                "requirement_text": "GitLab Cl 等 CVCD 基础流程",
+                "evidence_status": "missing",
+                "evidence_refs": [],
+            },
+        ],
+    )
+    _write_json(run_dir / "evaluate" / "gap_maps.json", [])
+
+    chunks = build_projection_batch(run_dir).retrieval_chunks
+    ocr_chunks = [chunk for chunk in chunks if (chunk["metadata"].get("source_id") or "").startswith("jd-025")]
+
+    assert ocr_chunks
+    assert any("milvus" in chunk["text"].lower() for chunk in ocr_chunks)
+    assert any("ci/cd" in chunk["text"].lower() for chunk in ocr_chunks)
+    assert any("developer tools" in chunk["text"].lower() for chunk in ocr_chunks)
+    assert any("milvus" in chunk["metadata"].get("normalized_keywords", []) for chunk in ocr_chunks)
+
+
 def test_embedding_defaults_to_bge_m3_dimension() -> None:
     from shotguncv_core.db.schema import EMBEDDING_DIMENSIONS
     from shotguncv_core.rag.embeddings import DEFAULT_EMBEDDING_MODEL
@@ -242,3 +298,7 @@ def _write_deterministic_config(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return config_path
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

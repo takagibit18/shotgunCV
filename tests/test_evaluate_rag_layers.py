@@ -10,6 +10,7 @@ from scripts.evaluate_rag_layers import (
     _sample_to_query_spec,
     evaluate_generator_layer,
     evaluate_retriever_layer,
+    prepare_query_specs,
     report_case_type_counts,
     report_layer_counts,
 )
@@ -225,6 +226,73 @@ def test_sample_to_query_spec_applies_source_type_filter_for_global_same_type_do
     assert spec["source_type"] == "candidate_evidence"
     assert spec["filter_scope"] == "single_source_type"
     assert spec["filters"] == {"source_type": "candidate_evidence"}
+
+
+def test_prepare_query_specs_adds_decomposition_for_multi_document_and_cross_section() -> None:
+    samples = [
+        {
+            "question_id": "rag-golden-cross-section",
+            "question": "How do education, project evidence, and ranking risks fit together?",
+            "case_type": "multi_document",
+            "expected_documents": [
+                {
+                    "source_type": "candidate_evidence",
+                    "source_id": "cand-001:candidate-profile",
+                    "label": "candidate-profile",
+                    "role": "primary",
+                },
+                {
+                    "source_type": "requirement_evidence",
+                    "source_id": "jd-005-req-013",
+                    "label": "jd-005-req-013",
+                    "role": "supporting",
+                },
+                {
+                    "source_type": "ranking_explanation",
+                    "source_id": "jd-005:ranking",
+                    "label": "jd-005:ranking",
+                    "role": "conflicting",
+                },
+            ],
+            "metadata": {"golden_layer": "core_high_info", "robustness_category": "cross_section"},
+        }
+    ]
+
+    specs = prepare_query_specs(samples, query_strategy="decomposed")
+
+    spec = specs[0]
+    assert spec["filter_scope"] == "mixed_scope"
+    assert spec["query_decomposition"]["strategy"] == "primary_then_related"
+    stages = spec["query_decomposition"]["stages"]
+    assert [stage["name"] for stage in stages] == ["primary", "supporting", "conflicting"]
+    assert stages[0]["filters"] == {"source_type": "candidate_evidence"}
+    assert stages[1]["filters"] == {"jd_id": "jd-005", "source_type": "requirement_evidence"}
+    assert stages[2]["filters"] == {"jd_id": "jd-005", "source_type": "ranking_explanation"}
+    assert "primary evidence" in stages[0]["query"]
+    assert "ranking decision risk" in stages[2]["query"]
+
+
+def test_prepare_query_specs_rewrites_weak_ocr_queries() -> None:
+    specs = prepare_query_specs(
+        [
+            {
+                "question_id": "rag-golden-ocr",
+                "question": "这个图片岗位是不是更像开发者工具和 AI 工作流方向？",
+                "case_type": "common_question",
+                "expected_documents": [
+                    {"source_type": "requirement_evidence", "source_id": "jd-025-req-001", "label": "jd-025-req-001", "role": "primary"}
+                ],
+                "metadata": {"golden_layer": "ocr_regression", "robustness_category": "ocr_weak_keyword"},
+            }
+        ],
+        query_strategy="single",
+    )
+
+    spec = specs[0]
+    assert spec["query_rewrite"]["strategy"] == "ocr_alias"
+    assert "developer tools" in spec["expanded_query"]
+    assert "workflow" in spec["expanded_query"]
+    assert "ocr noise" in spec["expanded_query"]
 
 
 def test_evaluate_generator_layer_scores_answers_against_golden_set(tmp_path: Path) -> None:

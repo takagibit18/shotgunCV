@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,11 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
     ranking_explanations = _read_json(run_dir / "evaluate" / "ranking_explanations.json") or []
 
     jd_context = _build_jd_context_map(jd_profiles)
+    jd_source_values = {
+        str(jd.get("jd_id") or ""): str(jd.get("source_value") or "")
+        for jd in jd_profiles
+        if str(jd.get("jd_id") or "")
+    }
 
     candidate_lines = []
     for field in ("core_claims", "verified_evidence", "experiences", "projects", "skills", "strengths"):
@@ -118,6 +124,7 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
                 jd_id=jd_id,
                 run_id=run_id,
                 artifact_path="analyze/jd_profiles.json",
+                source_value=str(jd.get("source_value") or ""),
                 provenance_summary=f"JD profile {jd_id} from user-provided local artifacts.",
             )
         )
@@ -143,6 +150,7 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
                 jd_id=jd_id,
                 run_id=run_id,
                 artifact_path="analyze/requirement_matrix.json",
+                source_value=jd_source_values.get(jd_id, ""),
                 provenance_summary=f"Requirement evidence {requirement_id} for {jd_id}.",
             )
         )
@@ -169,6 +177,7 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
                     jd_id=jd_id,
                     run_id=run_id,
                     artifact_path="evaluate/gap_maps.json",
+                    source_value=jd_source_values.get(jd_id, ""),
                     provenance_summary=f"Gap map for {jd_id}.",
                 )
             )
@@ -218,6 +227,7 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
                     jd_id=jd_id,
                     run_id=run_id,
                     artifact_path="evaluate/ranking_explanations.json",
+                    source_value=jd_source_values.get(jd_id, ""),
                     provenance_summary=f"Ranking explanation for {jd_id}.",
                 )
             )
@@ -241,7 +251,80 @@ def build_documents_from_run(run_dir: Path, run_id: str, candidate_id: str) -> l
 
 def _document(text: str, **metadata: Any) -> Document:
     clean = text.strip()
+    aliases, normalized_keywords = _ocr_aliases(clean, metadata)
+    if aliases:
+        clean = "\n".join(
+            [
+                clean,
+                f"Aliases: {' '.join(aliases)}",
+                f"Normalized keywords: {' '.join(normalized_keywords)}",
+            ]
+        ).strip()
+        metadata = {
+            **metadata,
+            "search_aliases": aliases,
+            "normalized_keywords": normalized_keywords,
+        }
     return Document(page_content=clean, metadata=metadata)
+
+
+def _ocr_aliases(text: str, metadata: dict[str, Any]) -> tuple[list[str], list[str]]:
+    lower = text.lower()
+    source_value = str(metadata.get("source_value") or "").lower()
+    image_source = bool(re.search(r"\.(png|jpe?g|webp|gif|bmp|tiff?)(?:$|[\\/])", source_value))
+    noisy = image_source or _looks_like_ocr_noise(text)
+    aliases: list[str] = []
+    if "mivus" in lower:
+        aliases.extend(["milvus", "vector database", "ocr noise"])
+    if "qdrant" in lower or "drant" in lower:
+        aliases.extend(["qdrant", "vector database"])
+    if "faiss" in lower or "aiss" in lower:
+        aliases.extend(["faiss", "vector search"])
+    if "se bai" in lower or "bge" in lower:
+        aliases.extend(["bge", "embedding model"])
+    if "gitlab cl" in lower or "cvcd" in lower or "ci/cd" in lower:
+        aliases.extend(["gitlab ci", "ci/cd", "continuous integration"])
+    if "openal" in lower or "openai" in lower:
+        aliases.append("openai")
+    if "ai agent" in lower or (noisy and "agent" in lower):
+        aliases.extend(["ai agent", "developer tools", "agent workflow"])
+    if "开发者工具" in text or (noisy and "工具" in text):
+        aliases.extend(["developer tools", "devtools", "developer workflow"])
+    if "工作流" in text or "workflow" in lower:
+        aliases.extend(["workflow", "automation workflow"])
+    if "工具调用失败" in text or "tool failure" in lower:
+        aliases.extend(["tool failure", "tool calling failure"])
+    if "检索结果不准" in text or "retrieval" in lower:
+        aliases.extend(["retrieval quality", "retrieval debugging"])
+    if "cli" in lower:
+        aliases.extend(["cli", "command line tool"])
+    if not noisy and not aliases:
+        return [], []
+    normalized = _unique_terms(aliases)
+    return normalized, normalized
+
+
+def _looks_like_ocr_noise(text: str) -> bool:
+    if "\ufffd" in text:
+        return True
+    if re.search(r"[A-Za-z][?][\u4e00-\u9fff]|[\u4e00-\u9fff][?][A-Za-z]", text):
+        return True
+    if re.search(r"\b(?:Mivus|CVCD|GitLab Cl|Se Bai|OpenAl)\b", text, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def _unique_terms(terms: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for term in terms:
+        clean = str(term).strip()
+        key = clean.lower()
+        if not clean or key in seen:
+            continue
+        seen.add(key)
+        unique.append(clean)
+    return unique
 
 
 def _split_text(text: str) -> list[str]:

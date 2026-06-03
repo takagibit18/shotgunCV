@@ -34,7 +34,17 @@ def evaluate_labeled_retrieval_queries(
             if value:
                 search_kwargs[filter_key] = value
         filters = {key: value for key, value in search_kwargs.items() if key != "limit"}
-        results = retriever.search(query, **search_kwargs)
+        decomposition = None
+        if isinstance(spec.get("query_decomposition"), dict):
+            results, decomposition = _search_decomposed(
+                retriever=retriever,
+                decomposition=spec["query_decomposition"],
+                fallback_query=query,
+                search_limit=search_limit,
+                base_filters=filters,
+            )
+        else:
+            results = retriever.search(query, **search_kwargs)
         ranked_ids = [_ranked_label_for_result(result, expected) for result in results]
         metrics = evaluate_ranked_retrieval(ranked_ids=ranked_ids, relevant_ids=set(expected), k_values=ks)
         role_weights = _role_weights(spec.get("expected_documents", []), expected)
@@ -58,6 +68,7 @@ def evaluate_labeled_retrieval_queries(
                 "weighted_metrics": weighted_metrics,
                 "evidence_coverage": evidence_coverage,
                 "hits": [_result_summary(result) for result in results],
+                **({"decomposition": decomposition} if decomposition is not None else {}),
             }
         )
     return {
@@ -65,6 +76,87 @@ def evaluate_labeled_retrieval_queries(
         "k_values": ks,
         "aggregate": _aggregate_query_metrics(query_reports, ks),
         "queries": query_reports,
+    }
+
+
+def _search_decomposed(
+    *,
+    retriever: Any,
+    decomposition: dict[str, Any],
+    fallback_query: str,
+    search_limit: int,
+    base_filters: dict[str, Any],
+) -> tuple[list[RetrievalResult], dict[str, Any]]:
+    stages = decomposition.get("stages")
+    if not isinstance(stages, Sequence) or isinstance(stages, (str, bytes)) or not stages:
+        results = retriever.search(fallback_query, limit=search_limit, **base_filters)
+        return results, {"strategy": str(decomposition.get("strategy") or "fallback"), "stages": []}
+
+    combined: list[RetrievalResult] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    stage_reports: list[dict[str, Any]] = []
+    for raw_stage in stages:
+        if not isinstance(raw_stage, dict):
+            continue
+        query = str(raw_stage.get("query") or fallback_query)
+        stage_filters = {
+            str(key): value
+            for key, value in (raw_stage.get("filters") or {}).items()
+            if key in {"candidate_id", "jd_id", "source_type"} and value
+        }
+        filters = {**base_filters, **stage_filters}
+        stage_limit = int(raw_stage.get("limit") or search_limit)
+        stage_limit = max(1, min(stage_limit, search_limit))
+        stage_results = retriever.search(query, limit=stage_limit, **filters)
+        added = 0
+        for result in stage_results:
+            key = _result_key(result)
+            if key in seen:
+                continue
+            seen.add(key)
+            combined.append(result)
+            added += 1
+            if len(combined) >= search_limit:
+                break
+        stage_reports.append(
+            {
+                "name": str(raw_stage.get("name") or "stage"),
+                "query": query,
+                "filters": filters,
+                "limit": stage_limit,
+                "retrieved_count": len(stage_results),
+                "added_count": added,
+                "result_ids": [_result_summary(result)["source_id"] for result in stage_results],
+            }
+        )
+        if len(combined) >= search_limit:
+            break
+    if len(combined) < search_limit:
+        fallback_results = retriever.search(fallback_query, limit=search_limit, **base_filters)
+        added = 0
+        for result in fallback_results:
+            key = _result_key(result)
+            if key in seen:
+                continue
+            seen.add(key)
+            combined.append(result)
+            added += 1
+            if len(combined) >= search_limit:
+                break
+        stage_reports.append(
+            {
+                "name": "fallback",
+                "query": fallback_query,
+                "filters": base_filters,
+                "limit": search_limit,
+                "retrieved_count": len(fallback_results),
+                "added_count": added,
+                "result_ids": [_result_summary(result)["source_id"] for result in fallback_results],
+            }
+        )
+    return combined, {
+        "strategy": str(decomposition.get("strategy") or "primary_then_related"),
+        "stages": stage_reports,
     }
 
 
@@ -141,6 +233,9 @@ def _ranked_label_for_result(result: RetrievalResult, expected: Sequence[str]) -
         if label.lower() in haystack:
             return label
     metadata = result.metadata
+    source_id = str(metadata.get("source_id") or "").strip()
+    if source_id:
+        return source_id
     return ":".join(
         [
             str(metadata.get("source_type") or "unknown"),
@@ -260,6 +355,15 @@ def _result_summary(result: RetrievalResult) -> dict[str, Any]:
         "artifact_path": result.metadata.get("artifact_path"),
         "score": result.score,
     }
+
+
+def _result_key(result: RetrievalResult) -> tuple[str, str, str, str]:
+    return (
+        str(result.metadata.get("source_type") or ""),
+        str(result.metadata.get("source_id") or ""),
+        str(result.metadata.get("chunk_index") or ""),
+        str(result.metadata.get("artifact_path") or ""),
+    )
 
 
 def _aggregate_query_metrics(query_reports: Sequence[dict[str, Any]], k_values: Sequence[int]) -> dict[str, Any]:

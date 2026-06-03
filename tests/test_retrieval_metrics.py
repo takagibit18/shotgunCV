@@ -140,6 +140,117 @@ def test_evaluate_labeled_retrieval_queries_reports_weighted_multi_document_cove
     assert report["aggregate"]["weighted_recall_at_k"]["3"] == 1.0
 
 
+def test_evaluate_labeled_retrieval_queries_decomposes_multi_document_searches() -> None:
+    retriever = _FakeRetriever(
+        {
+            "multi doc primary evidence": [
+                _result("primary-doc", "analyze/requirement_matrix.json", 0.9),
+                _result("unrelated-primary", "analyze/requirement_matrix.json", 0.8),
+            ],
+            "multi doc supporting gap evidence": [
+                _result("supporting-gap", "evaluate/gap_maps.json", 0.95),
+            ],
+        }
+    )
+
+    report = evaluate_labeled_retrieval_queries(
+        retriever=retriever,
+        query_specs=[
+            {
+                "query_id": "rag-golden-decomposed",
+                "query": "multi doc",
+                "case_type": "multi_document",
+                "expected_chunks": ["primary-doc", "supporting-gap"],
+                "expected_documents": [
+                    {"label": "primary-doc", "role": "primary", "source_type": "requirement_evidence", "source_id": "jd-001-req-001"},
+                    {"label": "supporting-gap", "role": "supporting", "source_type": "gap_map", "source_id": "jd-001:gap-map"},
+                ],
+                "query_decomposition": {
+                    "strategy": "primary_then_related",
+                    "stages": [
+                        {
+                            "name": "primary",
+                            "query": "multi doc primary evidence",
+                            "filters": {"source_type": "requirement_evidence"},
+                            "limit": 2,
+                        },
+                        {
+                            "name": "supporting",
+                            "query": "multi doc supporting gap evidence",
+                            "filters": {"source_type": "gap_map"},
+                            "limit": 1,
+                        },
+                    ],
+                },
+            }
+        ],
+        k_values=[1, 3],
+    )
+
+    query = report["queries"][0]
+    assert query["decomposition"]["strategy"] == "primary_then_related"
+    assert [stage["name"] for stage in query["decomposition"]["stages"]] == ["primary", "supporting"]
+    assert query["ranked_ids"] == ["primary-doc", "unrelated-primary", "supporting-gap"]
+    assert query["evidence_coverage"]["all_primary_hit"] is True
+    assert query["evidence_coverage"]["all_expected_hit"] is True
+    assert report["aggregate"]["all_primary_hit_rate"] == 1.0
+    assert report["aggregate"]["all_expected_hit_rate"] == 1.0
+    assert retriever.calls == [
+        {"query": "multi doc primary evidence", "limit": 2, "filters": {"source_type": "requirement_evidence"}},
+        {"query": "multi doc supporting gap evidence", "limit": 1, "filters": {"source_type": "gap_map"}},
+    ]
+
+
+def test_decomposed_search_falls_back_to_fill_remaining_results() -> None:
+    retriever = _FakeRetriever(
+        {
+            "multi doc primary evidence": [
+                _result("primary-doc", "analyze/requirement_matrix.json", 0.9),
+            ],
+            "multi doc": [
+                _result("primary-doc", "analyze/requirement_matrix.json", 0.9),
+                _result("supporting-doc", "analyze/requirement_matrix.json", 0.8),
+            ],
+        }
+    )
+
+    report = evaluate_labeled_retrieval_queries(
+        retriever=retriever,
+        query_specs=[
+            {
+                "query_id": "rag-golden-decomposed-fallback",
+                "query": "multi doc",
+                "expected_chunks": ["primary-doc", "supporting-doc"],
+                "expected_documents": [
+                    {"label": "primary-doc", "role": "primary", "source_type": "requirement_evidence"},
+                    {"label": "supporting-doc", "role": "supporting", "source_type": "requirement_evidence"},
+                ],
+                "query_decomposition": {
+                    "strategy": "primary_then_related",
+                    "stages": [
+                        {
+                            "name": "primary",
+                            "query": "multi doc primary evidence",
+                            "filters": {"source_type": "requirement_evidence"},
+                            "limit": 1,
+                        }
+                    ],
+                },
+            }
+        ],
+        k_values=[1, 3],
+    )
+
+    query = report["queries"][0]
+    assert [stage["name"] for stage in query["decomposition"]["stages"]] == ["primary", "fallback"]
+    assert query["ranked_ids"] == ["primary-doc", "supporting-doc"]
+    assert query["evidence_coverage"]["all_expected_hit"] is True
+    assert retriever.calls == [
+        {"query": "multi doc primary evidence", "limit": 1, "filters": {"source_type": "requirement_evidence"}},
+        {"query": "multi doc", "limit": 3, "filters": {}},
+    ]
+
+
 class _FakeRetriever:
     def __init__(self, results_by_query: dict[str, list[RetrievalResult]]) -> None:
         self.results_by_query = results_by_query
