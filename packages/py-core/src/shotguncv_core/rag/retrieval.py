@@ -326,6 +326,8 @@ def build_smart_query_plan(
     if claim_signal["triggered"]:
         reasons.extend(claim_signal["reasons"])
     routes: list[dict[str, Any]] = []
+    if rewrite["terms"] or complex_reasons or risk_reasons or (enable_support_gate and claim_signal["triggered"]):
+        routes.append({"name": "hybrid_anchor", "query": query, "retriever_mode": "hybrid", "limit": min(5, limit)})
     if rewrite["terms"]:
         routes.append({"name": "rewrite", "query": rewrite["expanded_query"], "retriever_mode": "hybrid", "limit": limit})
     if complex_reasons:
@@ -344,9 +346,9 @@ def build_smart_query_plan(
             },
         )
     if not routes:
-        routes.append({"name": "broad", "query": query, "retriever_mode": "bm25", "limit": limit})
+        routes.append({"name": "broad", "query": query, "retriever_mode": "hybrid", "limit": limit})
     else:
-        routes.append({"name": "broad_fallback", "query": query, "retriever_mode": "bm25", "limit": min(broad_limit, max(limit, 10))})
+        routes.append({"name": "broad_fallback", "query": query, "retriever_mode": "hybrid", "limit": min(broad_limit, max(limit, 10))})
     return {
         "strategy": "smart_router",
         "original_query": query,
@@ -417,12 +419,19 @@ def detect_no_answer_strong_claim(query: str) -> dict[str, Any]:
 
 def _context_routes(query: str, broad_hits: list[RetrievalResult], *, limit: int) -> list[dict[str, Any]]:
     routes = [
-        {"name": "candidate_context", "query": f"{query}\ncandidate evidence project education skills", "retriever_mode": "bm25", "filters": {"source_type": "candidate_evidence"}, "limit": min(4, limit)},
-        {"name": "requirement_context", "query": f"{query}\njd requirement evidence status", "retriever_mode": "bm25", "filters": {"source_type": "requirement_evidence"}, "limit": min(4, limit)},
+        {"name": "candidate_context", "query": f"{query}\ncandidate evidence project education skills", "retriever_mode": "hybrid", "filters": {"source_type": "candidate_evidence"}, "limit": min(3, limit)},
+        {"name": "requirement_context", "query": f"{query}\njd requirement evidence status", "retriever_mode": "hybrid", "filters": {"source_type": "requirement_evidence"}, "limit": min(4, limit)},
     ]
-    jd_id = _top_jd_id(broad_hits)
-    if jd_id:
-        routes.append({"name": "jd_context", "query": query, "retriever_mode": "bm25", "filters": {"jd_id": jd_id}, "limit": min(4, limit)})
+    for jd_id in _top_jd_ids(broad_hits, max_count=3):
+        routes.append(
+            {
+                "name": "jd_context",
+                "query": f"{query}\njd requirement evidence status",
+                "retriever_mode": "hybrid",
+                "filters": {"jd_id": jd_id, "source_type": "requirement_evidence"},
+                "limit": min(3, limit),
+            }
+        )
     return routes
 
 
@@ -430,14 +439,20 @@ def _risk_routes(query: str, broad_hits: list[RetrievalResult], *, limit: int) -
     jd_id = _top_jd_id(broad_hits)
     base_filters = {"jd_id": jd_id} if jd_id else {}
     return [
+        {"name": "risk_primary_context", "query": f"{query}\njd requirement evidence status primary evidence", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "requirement_evidence"}, "limit": min(4, limit)},
         {"name": "gap_context", "query": f"{query}\ngap missing weak point gap_map risk", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "gap_map"}, "limit": min(3, limit)},
         {"name": "ranking_context", "query": f"{query}\nranking decision risk flags ranking_explanation", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "ranking_explanation"}, "limit": min(3, limit)},
     ]
 
 
 def _top_jd_id(hits: list[RetrievalResult]) -> str | None:
+    jd_ids = _top_jd_ids(hits, max_count=1)
+    return jd_ids[0] if jd_ids else None
+
+
+def _top_jd_ids(hits: list[RetrievalResult], *, max_count: int) -> list[str]:
     jd_ids = [str(hit.metadata.get("jd_id") or "") for hit in hits[:10] if hit.metadata.get("jd_id")]
-    return Counter(jd_ids).most_common(1)[0][0] if jd_ids else None
+    return [jd_id for jd_id, _ in Counter(jd_ids).most_common(max_count)]
 
 
 def _unique_terms(terms: list[str]) -> list[str]:

@@ -58,6 +58,9 @@ def evaluate_labeled_retrieval_queries(
         query_reports.append(
             {
                 "query_id": spec.get("query_id"),
+                "case_type": spec.get("case_type"),
+                "golden_layer": spec.get("golden_layer"),
+                "robustness_category": spec.get("robustness_category"),
                 "jd_id": spec.get("jd_id"),
                 "filter_scope": spec.get("filter_scope"),
                 "filters": filters,

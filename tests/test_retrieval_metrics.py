@@ -252,6 +252,30 @@ def test_decomposed_search_falls_back_to_fill_remaining_results() -> None:
     ]
 
 
+def test_query_report_preserves_slice_metadata_for_observability() -> None:
+    retriever = _FakeRetriever({"risk query": [_result("doc-a", "artifact.json", 0.9)]})
+
+    report = evaluate_labeled_retrieval_queries(
+        retriever=retriever,
+        query_specs=[
+            {
+                "query_id": "slice-001",
+                "query": "risk query",
+                "case_type": "multi_document",
+                "golden_layer": "core_high_info",
+                "robustness_category": "cross_section",
+                "expected_chunks": ["doc-a"],
+            }
+        ],
+        k_values=[1],
+    )
+
+    query = report["queries"][0]
+    assert query["case_type"] == "multi_document"
+    assert query["golden_layer"] == "core_high_info"
+    assert query["robustness_category"] == "cross_section"
+
+
 def test_build_smart_query_plan_is_oracle_free_and_explainable() -> None:
     broad_hits = [
         _result("candidate-profile", "analyze/candidate_profile.json", 0.9, source_type="candidate_evidence"),
@@ -272,9 +296,51 @@ def test_build_smart_query_plan_is_oracle_free_and_explainable() -> None:
     assert "semantic_alias_pattern" in plan["reasons"]
     assert "risk_gap_intent" in plan["reasons"]
     assert "LangGraph" in plan["rewrite_terms"]
+    assert plan["routes"][0]["name"] == "hybrid_anchor"
     assert "gap_context" in plan["decomposition_stages"]
     assert plan["routes"][-1]["name"] == "broad_fallback"
     assert all("expected_documents" not in route for route in plan["routes"])
+
+
+def test_smart_query_plan_keeps_multiple_jd_contexts_for_complex_queries() -> None:
+    broad_hits = [
+        _result("jd-021-req-001", "analyze/requirement_matrix.json", 0.9, source_type="requirement_evidence", jd_id="jd-021"),
+        _result("jd-021-req-002", "analyze/requirement_matrix.json", 0.8, source_type="requirement_evidence", jd_id="jd-021"),
+        _result("jd-015-req-014", "analyze/requirement_matrix.json", 0.7, source_type="requirement_evidence", jd_id="jd-015"),
+        _result("jd-019-req-002", "analyze/requirement_matrix.json", 0.6, source_type="requirement_evidence", jd_id="jd-019"),
+    ]
+
+    plan = build_smart_query_plan(
+        "分别对比这些岗位的风险和证据",
+        broad_hits=broad_hits,
+        hybrid_hits=broad_hits,
+        limit=10,
+    )
+
+    jd_contexts = [route for route in plan["routes"] if route["name"] == "jd_context"]
+    assert plan["routes"][0]["limit"] == 5
+    assert [route["filters"]["jd_id"] for route in jd_contexts] == ["jd-021", "jd-015", "jd-019"]
+    assert all(route["retriever_mode"] == "hybrid" for route in jd_contexts)
+
+
+def test_smart_query_plan_uses_hybrid_for_default_and_fallback_routes() -> None:
+    plan = build_smart_query_plan(
+        "plain precise requirement query",
+        broad_hits=[],
+        hybrid_hits=[],
+        limit=10,
+    )
+
+    assert plan["routes"] == [{"name": "broad", "query": "plain precise requirement query", "retriever_mode": "hybrid", "limit": 10}]
+
+    routed_plan = build_smart_query_plan(
+        "有没有工具链风险",
+        broad_hits=[],
+        hybrid_hits=[],
+        limit=10,
+    )
+    assert routed_plan["routes"][-1]["name"] == "broad_fallback"
+    assert routed_plan["routes"][-1]["retriever_mode"] == "hybrid"
 
 
 def test_smart_router_report_includes_query_plan_observability() -> None:
@@ -312,6 +378,7 @@ def test_smart_router_report_includes_query_plan_observability() -> None:
     assert query["query_plan"]["oracle_free"] is True
     assert query["query_plan"]["broad_observation"]["hit_count"] == 4
     route_names = [route["name"] for route in query["query_plan"]["routes"]]
+    assert route_names[0] == "hybrid_anchor"
     assert "rewrite" in route_names
     assert route_names[-1] == "broad_fallback"
 
