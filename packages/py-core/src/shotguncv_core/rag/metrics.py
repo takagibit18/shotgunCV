@@ -73,6 +73,7 @@ def evaluate_labeled_retrieval_queries(
                 "evidence_coverage": evidence_coverage,
                 "hits": [_result_summary(result) for result in results],
                 **({"query_plan": query_plan} if query_plan is not None else {}),
+                **({"route_ablation": _route_level_ablation(query_plan, expected)} if query_plan is not None else {}),
                 **({"decomposition": decomposition} if decomposition is not None else {}),
             }
         )
@@ -376,6 +377,42 @@ def _consume_query_plan(retriever: Any) -> dict[str, Any] | None:
     if isinstance(plan, dict):
         return plan
     return None
+
+
+def _route_level_ablation(query_plan: dict[str, Any], expected: Sequence[str]) -> dict[str, Any]:
+    route_reports = query_plan.get("route_reports")
+    if not isinstance(route_reports, Sequence) or isinstance(route_reports, (str, bytes)):
+        return {"expected_label_stages": {str(label): None for label in expected}, "stage_expected_hits": {}}
+    expected_label_stages: dict[str, str | None] = {str(label): None for label in expected}
+    stage_expected_hits: dict[str, list[str]] = {}
+    for raw_route in route_reports:
+        if not isinstance(raw_route, dict):
+            continue
+        stage_name = str(raw_route.get("name") or "route")
+        added_results = raw_route.get("added_results")
+        if not isinstance(added_results, Sequence) or isinstance(added_results, (str, bytes)):
+            continue
+        for label in expected_label_stages:
+            if expected_label_stages[label] is not None:
+                continue
+            if any(_summary_matches_label(summary, label) for summary in added_results if isinstance(summary, dict)):
+                expected_label_stages[label] = stage_name
+                stage_expected_hits.setdefault(stage_name, []).append(label)
+    return {
+        "expected_label_stages": expected_label_stages,
+        "stage_expected_hits": stage_expected_hits,
+    }
+
+
+def _summary_matches_label(summary: dict[str, Any], label: str) -> bool:
+    haystack = "\n".join(
+        [
+            str(summary.get("source_id") or ""),
+            str(summary.get("artifact_path") or ""),
+            str(summary.get("provenance_summary") or ""),
+        ]
+    ).lower()
+    return label.lower() in haystack
 
 
 def _aggregate_query_metrics(query_reports: Sequence[dict[str, Any]], k_values: Sequence[int]) -> dict[str, Any]:

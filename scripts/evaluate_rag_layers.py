@@ -24,6 +24,8 @@ from shotguncv_core.rag.retrieval import InMemoryBM25Retriever, InMemoryHybridRe
 
 
 NO_ANSWER_SCORE_THRESHOLD = 0.8
+DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+DEFAULT_FIRST_STAGE_LIMIT = 20
 
 _JD_ID_RE = re.compile(r"jd-\d+")
 
@@ -44,9 +46,11 @@ class _TwoStageRetriever:
         self._first_stage = first_stage
         self._reranker = reranker
         self._first_stage_limit = first_stage_limit
+        self.last_query_plan: dict[str, Any] | None = None
 
     def search(self, query: str, *, limit: int = 10, **filters: Any) -> Any:
         coarse = self._first_stage.search(query, limit=self._first_stage_limit, **filters)
+        self.last_query_plan = getattr(self._first_stage, "last_query_plan", None)
         return self._reranker.rerank(query, coarse, top_k=limit)
 
 
@@ -62,8 +66,8 @@ def evaluate_retriever_layer(
     vector_weight: float = 0.75,
     bm25_weight: float = 0.25,
     query_expansion: str = "none",
-    reranker_model: str | None = None,
-    first_stage_limit: int = 50,
+    reranker_model: str | None = DEFAULT_RERANKER_MODEL,
+    first_stage_limit: int = DEFAULT_FIRST_STAGE_LIMIT,
     golden_layers: list[str] | None = None,
     query_strategy: str = "single",
     router_broad_limit: int = 20,
@@ -103,6 +107,7 @@ def evaluate_retriever_layer(
                 dense_retriever=expansion_dense,
             )
 
+    retriever = first_stage
     if query_strategy == "smart":
         retriever = SmartRouterRetriever.from_chunks(
             batch.retrieval_chunks,
@@ -114,14 +119,12 @@ def evaluate_retriever_layer(
         )
         retriever_type = f"SmartRouterRetriever({retriever_type}, broad_limit={router_broad_limit})"
     # Build two-stage retriever if reranker is requested
-    elif reranker_model:
+    if reranker_model:
         from shotguncv_core.rag.reranking import CrossEncoderReranker
 
         reranker = CrossEncoderReranker(reranker_model)
-        retriever = _TwoStageRetriever(first_stage, reranker, first_stage_limit=first_stage_limit)
+        retriever = _TwoStageRetriever(retriever, reranker, first_stage_limit=first_stage_limit)
         retriever_type = f"{retriever_type} + {reranker_model} (first-stage={first_stage_limit})"
-    else:
-        retriever = first_stage
 
     coverage = _label_coverage(batch.retrieval_chunks, query_specs)
     quality_gate = _quality_gate(coverage)
@@ -1118,13 +1121,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--reranker",
-        default=None,
+        default=DEFAULT_RERANKER_MODEL,
         help="Cross-encoder model for two-stage retrieval (e.g. BAAI/bge-reranker-v2-m3).",
     )
+    parser.add_argument("--no-reranker", action="store_true", help="Disable the default cross-encoder reranker.")
     parser.add_argument(
         "--first-stage-limit",
         type=int,
-        default=50,
+        default=DEFAULT_FIRST_STAGE_LIMIT,
         help="Number of candidates from first-stage retrieval to feed into reranker.",
     )
     parser.add_argument(
@@ -1155,7 +1159,7 @@ def main() -> int:
             vector_weight=args.vector_weight,
             bm25_weight=args.bm25_weight,
             query_expansion=args.query_expansion,
-            reranker_model=args.reranker,
+            reranker_model=None if args.no_reranker else args.reranker,
             first_stage_limit=args.first_stage_limit,
             golden_layers=args.golden_layer,
             query_strategy=args.query_strategy,

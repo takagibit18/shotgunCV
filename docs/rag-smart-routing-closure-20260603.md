@@ -366,3 +366,226 @@ Could not cache non-existence of file. Will ignore error and continue.
 - JD candidate selection 不只看频率，还看 score gap 和 source type balance。
 - 增加 route-level ablation report，记录每个 expected label 是由哪个 stage 加入的。
 - 强化 support gate，区分 lexical overlap 和真正 entailment，尤其是 strong no-answer claims。
+
+## Route Enhancement 逐项测试 - 2026-06-03
+
+本轮在 `route_enhancement` 分支继续做五项最小增强，仍保持真实路由 oracle-free：不使用 `case_type`、`robustness_category` 或 `expected_documents` 生成 route plan。
+
+### 新增测试覆盖
+
+新增/扩展 `tests/test_retrieval_metrics.py`，覆盖以下行为：
+
+- `route_quota_profile`：当 broad hits 呈现 candidate + requirement/ranking/gap 混合时，识别为 `cross_section_like`，并调整 candidate / requirement / JD context quota。
+- supporting evidence terms：`gap_context` query 必须包含 `supporting evidence`、`missing requirement` 等更强 supporting terms；`ranking_context` 必须包含 `decision summary`、`negative signal` 等 ranking terms。
+- JD candidate selection：不再只按频率选择 JD，测试覆盖“低分高频 JD 不应压过高分且 source type 更平衡的 JD”。
+- route-level ablation：每条 query report 记录 `route_ablation.expected_label_stages`，标明每个 expected label 首次由哪个 stage 加入。
+- support gate：strong no-answer claim 区分 `overlap_only` 和 `supported_candidate`。仅词面重叠时阻断 generator；证据直接包含 claim 类别时才放行。
+
+### 实现变化
+
+`SmartRouterRetriever` 现在会在 `query_plan.route_reports` 中记录每个 route 的：
+
+- `retrieved_count`
+- `added_count`
+- `results`
+- `added_results`
+
+`evaluate_labeled_retrieval_queries()` 根据 `route_reports.added_results` 和 expected labels 生成：
+
+```json
+{
+  "route_ablation": {
+    "expected_label_stages": {
+      "jd-xxx": "hybrid_anchor"
+    },
+    "stage_expected_hits": {
+      "hybrid_anchor": ["jd-xxx"]
+    }
+  }
+}
+```
+
+JD 选择从频率排序升级为组合分数：
+
+- frequency
+- best score
+- score sum
+- source type balance
+
+route quota profile 当前包括：
+
+- `default`
+- `complex_like`
+- `multi_document_like`
+- `cross_section_like`
+- `risk_gap_like`
+
+strong claim support gate 当前输出：
+
+- `supported_candidate`
+- `overlap_only`
+- `abstained`
+- `not_triggered`
+
+其中 `overlap_only` 和 `abstained` 都会设置 `blocked_generator=true`。
+
+### 真实 smart 观测
+
+刷新报告：
+
+```powershell
+baseline\smart-routing-20260603\smart-router-rule-based.json
+```
+
+整体指标没有回退：
+
+| Route | MRR | Recall@10 | All Expected | All Primary | no-answer FP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Smart router non-oracle | 0.658224 | 0.892157 | 0.823529 | 0.901961 | 0 |
+
+新增观测落盘情况：
+
+```text
+query_count: 51
+with_route_ablation: 51
+with_route_reports: 51
+```
+
+quota profile 分布：
+
+| profile | query count |
+| --- | ---: |
+| default | 34 |
+| complex_like | 7 |
+| multi_document_like | 7 |
+| risk_gap_like | 3 |
+
+no-answer support gate：
+
+```text
+triggered_count: 6
+trigger_rate: 0.666667
+blocked_generator_count: 6
+blocked_generator_rate: 0.666667
+```
+
+### 分片观察
+
+本轮增强后，关键分片如下：
+
+| Slice | Count | MRR | Recall@10 | All Expected | All Primary |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| multi_document | 11 | 0.496212 | 0.636364 | 0.363636 | 0.636364 |
+| stale_or_conflicting | 6 | 0.672222 | 0.916667 | 0.833333 | 1.000000 |
+| cross_section | 3 | 0.444444 | 0.500000 | 0.000000 | 1.000000 |
+| fuzzy_colloquial | 4 | 0.593750 | 0.875000 | 0.750000 | 0.750000 |
+| similar_concept_interference | 3 | 0.611111 | 1.000000 | 1.000000 | 1.000000 |
+
+解释：
+
+- `multi_document` 已经保持比 hybrid 更好的 primary coverage，但完整 supporting coverage 仍不足。
+- `cross_section` 的 All Primary 已到 1.0，但 All Expected 仍为 0，说明 supporting side 仍没有进入 top-10。
+- 真实评测中暂未触发 `cross_section_like` profile。原因是当前 profile 只依赖 observable broad hits，不读取 golden slice；这符合 oracle-free 约束，但也说明 cross-section 检测还需要更强的非标注信号。
+
+### 当前剩余风险
+
+- `cross_section_like` 目前有单测覆盖，但真实数据没有触发，需要后续从 query 文本和 broad hit source balance 中设计更强 detector。
+- supporting evidence terms 已增强，但 `gap_map` / `ranking_explanation` 的完整召回仍未达到 oracle 上限。
+- support gate 现在更保守，no-answer 更安全；后续需要确认 answerable strong-claim query 不会被误阻断。
+
+## Reranker 默认启用记录 - 2026-06-03
+
+本轮在 smart routing 闭环后继续验证 reranker。最初运行命令中虽然传入了：
+
+```powershell
+--reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 50
+```
+
+但评估脚本实际没有启用到 reranker。原因是 `evaluate_retriever_layer()` 中 `query_strategy == "smart"` 分支先构造了 `SmartRouterRetriever`，后面的 reranker 包装逻辑写在 `elif reranker_model`，导致 smart 分支和 reranker 分支互斥。因此上一轮“数值完全相同”不是 reranker 无提升，而是参数没有生效。
+
+### 修复
+
+修复点在 `scripts/evaluate_rag_layers.py`：
+
+- 先构造 first-stage retriever。
+- 如果 `query_strategy=smart`，用 `SmartRouterRetriever` 替换 first-stage。
+- 如果存在 `reranker_model`，再统一包一层 `_TwoStageRetriever`。
+- `_TwoStageRetriever` 透传内部 retriever 的 `last_query_plan`，避免 smart route 的 `query_plan`、`route_ablation` 和 no-answer support gate 观测被包装器吞掉。
+
+新增测试：
+
+- `test_evaluate_retriever_layer_wraps_smart_router_with_reranker`
+- `test_evaluate_retriever_layer_enables_default_reranker`
+
+### 真实评估结果
+
+真实启用路径：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --retriever-mode hybrid --vector-weight 0.7 --bm25-weight 0.3 --query-strategy smart --router-broad-limit 20 --enable-support-gate --reranker BAAI/bge-reranker-v2-m3 --first-stage-limit 20 --golden-file fixtures\golden_rag_questions.json --run-dir baseline\real-cv-golden-rebuild-20260602 --output baseline\smart-routing-20260603\smart-router-reranker-bge-v2-m3-top20.json
+```
+
+对照报告：
+
+- rule-based smart：`baseline\smart-routing-20260603\smart-router-rule-based.json`
+- smart + reranker：`baseline\smart-routing-20260603\smart-router-reranker-bge-v2-m3-top20.json`
+
+| 指标 | rule-based smart | smart + reranker | 变化 |
+| --- | ---: | ---: | ---: |
+| MRR | 0.658224 | 0.744444 | +0.086220 |
+| Precision@1 | 0.529412 | 0.647059 | +0.117647 |
+| NDCG@10 | 0.699398 | 0.748662 | +0.049264 |
+| All Primary | 0.901961 | 0.921569 | +0.019608 |
+| Recall@10 | 0.893557 | 0.890289 | -0.003268 |
+| All Expected | 0.823529 | 0.803922 | -0.019608 |
+
+query 级变化：
+
+- 23 个 answerable query 的排序发生变化。
+- 17 个 query 的 MRR 上升。
+- 6 个 query 的 MRR 下降。
+- `All Primary` 净增 1 个命中。
+- `All Expected` 净少 1 个命中。
+
+### 结论
+
+reranker 对当前 smart routing 是正向收益，尤其提升首位排序质量：
+
+- MRR 明显上升。
+- Precision@1 明显上升。
+- All Primary 小幅上升。
+
+代价是 supporting evidence 覆盖轻微下降。也就是说，reranker 更擅长把 primary evidence 推到前面，但可能把一部分 supporting evidence 挤出 top-10。因此默认启用是合理的，但后续还要继续优化 supporting evidence 保留策略，尤其是 `gap_map`、`ranking_explanation`、multi-document 和 cross-section query。
+
+### 默认策略变更
+
+从本记录开始，retriever layer 默认启用：
+
+```text
+reranker_model: BAAI/bge-reranker-v2-m3
+first_stage_limit: 20
+```
+
+CLI 默认同样启用 reranker。如果要复现非 reranker 对照，需要显式传：
+
+```powershell
+--no-reranker
+```
+
+选择 `first_stage_limit=20` 的原因：
+
+- 与当前 `router_broad_limit=20` 对齐。
+- 本轮真实评估在 top-20 候选上完成，指标有明确正向收益。
+- `first_stage_limit=50` 运行时间过长，并且历史记录显示更宽候选会放大 reranker 对同质化 chunk 的过度重排风险。
+
+### 本轮验证
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_evaluate_rag_layers.py tests\test_retrieval_metrics.py
+```
+
+结果：
+
+```text
+33 passed
+```

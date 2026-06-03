@@ -323,6 +323,58 @@ def test_smart_query_plan_keeps_multiple_jd_contexts_for_complex_queries() -> No
     assert all(route["retriever_mode"] == "hybrid" for route in jd_contexts)
 
 
+def test_smart_query_plan_tunes_quota_for_cross_section_like_hits() -> None:
+    broad_hits = [
+        _result("candidate-profile", "analyze/candidate_profile.json", 0.9, source_type="candidate_evidence"),
+        _result("jd-018-req-003", "analyze/requirement_matrix.json", 0.8, source_type="requirement_evidence", jd_id="jd-018"),
+        _result("jd-018:ranking", "evaluate/ranking_explanations.json", 0.7, source_type="ranking_explanation", jd_id="jd-018"),
+        _result("jd-027-req-007", "analyze/requirement_matrix.json", 0.6, source_type="requirement_evidence", jd_id="jd-027"),
+    ]
+
+    plan = build_smart_query_plan(
+        "compare candidate background with job evidence",
+        broad_hits=broad_hits,
+        hybrid_hits=broad_hits,
+        limit=10,
+    )
+
+    routes = {route["name"]: route for route in plan["routes"]}
+    assert plan["route_quota_profile"] == "cross_section_like"
+    assert routes["candidate_context"]["limit"] == 2
+    assert routes["requirement_context"]["limit"] == 5
+    assert all(route["limit"] == 4 for route in plan["routes"] if route["name"] == "jd_context")
+
+
+def test_smart_query_plan_uses_stronger_gap_and_ranking_terms() -> None:
+    broad_hits = [
+        _result("jd-019:gap", "evaluate/gap_maps.json", 0.9, source_type="gap_map", jd_id="jd-019"),
+        _result("jd-019:ranking", "evaluate/ranking_explanations.json", 0.8, source_type="ranking_explanation", jd_id="jd-019"),
+    ]
+
+    plan = build_smart_query_plan("risk evidence", broad_hits=broad_hits, hybrid_hits=broad_hits, limit=10)
+    routes = {route["name"]: route for route in plan["routes"]}
+
+    assert "supporting evidence" in routes["gap_context"]["query"]
+    assert "missing requirement" in routes["gap_context"]["query"]
+    assert "decision summary" in routes["ranking_context"]["query"]
+    assert "negative signal" in routes["ranking_context"]["query"]
+
+
+def test_jd_candidate_selection_uses_score_and_source_balance_not_frequency_only() -> None:
+    broad_hits = [
+        _result("jd-021-req-001", "analyze/requirement_matrix.json", 0.31, source_type="requirement_evidence", jd_id="jd-021"),
+        _result("jd-021-req-002", "analyze/requirement_matrix.json", 0.3, source_type="requirement_evidence", jd_id="jd-021"),
+        _result("jd-015-req-014", "analyze/requirement_matrix.json", 0.95, source_type="requirement_evidence", jd_id="jd-015"),
+        _result("jd-015:gap", "evaluate/gap_maps.json", 0.9, source_type="gap_map", jd_id="jd-015"),
+        _result("jd-019-req-002", "analyze/requirement_matrix.json", 0.8, source_type="requirement_evidence", jd_id="jd-019"),
+    ]
+
+    plan = build_smart_query_plan("compare evidence", broad_hits=broad_hits, hybrid_hits=broad_hits, limit=10)
+
+    jd_contexts = [route for route in plan["routes"] if route["name"] == "jd_context"]
+    assert [route["filters"]["jd_id"] for route in jd_contexts][:2] == ["jd-015", "jd-019"]
+
+
 def test_smart_query_plan_uses_hybrid_for_default_and_fallback_routes() -> None:
     plan = build_smart_query_plan(
         "plain precise requirement query",
@@ -341,6 +393,40 @@ def test_smart_query_plan_uses_hybrid_for_default_and_fallback_routes() -> None:
     )
     assert routed_plan["routes"][-1]["name"] == "broad_fallback"
     assert routed_plan["routes"][-1]["retriever_mode"] == "hybrid"
+
+
+def test_query_report_records_route_level_ablation_for_expected_labels() -> None:
+    retriever = _PlanRetriever(
+        [
+            _result("doc-a", "artifact-a.json", 0.9),
+            _result("doc-b", "artifact-b.json", 0.8),
+        ],
+        {
+            "strategy": "smart_router",
+            "oracle_free": True,
+            "route_reports": [
+                {
+                    "name": "hybrid_anchor",
+                    "added_results": [{"source_id": "doc-a", "artifact_path": "artifact-a.json"}],
+                },
+                {
+                    "name": "gap_context",
+                    "added_results": [{"source_id": "doc-b", "artifact_path": "artifact-b.json"}],
+                },
+            ],
+        },
+    )
+
+    report = evaluate_labeled_retrieval_queries(
+        retriever=retriever,
+        query_specs=[{"query_id": "ablation-001", "query": "query", "expected_chunks": ["doc-a", "doc-b"]}],
+        k_values=[1, 2],
+    )
+
+    assert report["queries"][0]["route_ablation"]["expected_label_stages"] == {
+        "doc-a": "hybrid_anchor",
+        "doc-b": "gap_context",
+    }
 
 
 def test_smart_router_report_includes_query_plan_observability() -> None:
@@ -381,6 +467,45 @@ def test_smart_router_report_includes_query_plan_observability() -> None:
     assert route_names[0] == "hybrid_anchor"
     assert "rewrite" in route_names
     assert route_names[-1] == "broad_fallback"
+    assert query["query_plan"]["route_reports"][0]["name"] == "hybrid_anchor"
+
+
+def test_support_gate_blocks_overlap_only_strong_claims() -> None:
+    chunks = [
+        _chunk("candidate-profile", "candidate_evidence", "Built FastAPI services and backend APIs."),
+    ]
+    retriever = SmartRouterRetriever.from_chunks(
+        chunks,
+        embedding_model=_DeterministicEmbeddingModel(),
+        broad_limit=3,
+        enable_support_gate=True,
+    )
+
+    retriever.search("Does FastAPI prove the candidate is a senior backend architect?", limit=3)
+
+    support_gate = retriever.last_query_plan["support_gate"]  # type: ignore[index]
+    assert support_gate["triggered"] is True
+    assert support_gate["support_status"] == "overlap_only"
+    assert support_gate["blocked_generator"] is True
+
+
+def test_support_gate_allows_direct_evidence_for_strong_claims() -> None:
+    chunks = [
+        _chunk("candidate-profile", "candidate_evidence", "Led model training, fine tuning, and production operations."),
+    ]
+    retriever = SmartRouterRetriever.from_chunks(
+        chunks,
+        embedding_model=_DeterministicEmbeddingModel(),
+        broad_limit=3,
+        enable_support_gate=True,
+    )
+
+    retriever.search("Can we prove model training and fine tuning experience?", limit=3)
+
+    support_gate = retriever.last_query_plan["support_gate"]  # type: ignore[index]
+    assert support_gate["triggered"] is True
+    assert support_gate["support_status"] == "supported_candidate"
+    assert support_gate["blocked_generator"] is False
 
 
 class _FakeRetriever:
@@ -391,6 +516,15 @@ class _FakeRetriever:
     def search(self, query: str, *, limit: int = 5, **filters: object) -> list[RetrievalResult]:
         self.calls.append({"query": query, "limit": limit, "filters": filters})
         return self.results_by_query[query][:limit]
+
+
+class _PlanRetriever:
+    def __init__(self, results: list[RetrievalResult], query_plan: dict[str, object]) -> None:
+        self.results = results
+        self.last_query_plan = query_plan
+
+    def search(self, query: str, *, limit: int = 5, **filters: object) -> list[RetrievalResult]:
+        return self.results[:limit]
 
 
 def _result(
