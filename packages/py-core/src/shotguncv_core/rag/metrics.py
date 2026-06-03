@@ -45,6 +45,7 @@ def evaluate_labeled_retrieval_queries(
             )
         else:
             results = retriever.search(query, **search_kwargs)
+        query_plan = _consume_query_plan(retriever)
         ranked_ids = [_ranked_label_for_result(result, expected) for result in results]
         metrics = evaluate_ranked_retrieval(ranked_ids=ranked_ids, relevant_ids=set(expected), k_values=ks)
         role_weights = _role_weights(spec.get("expected_documents", []), expected)
@@ -57,6 +58,9 @@ def evaluate_labeled_retrieval_queries(
         query_reports.append(
             {
                 "query_id": spec.get("query_id"),
+                "case_type": spec.get("case_type"),
+                "golden_layer": spec.get("golden_layer"),
+                "robustness_category": spec.get("robustness_category"),
                 "jd_id": spec.get("jd_id"),
                 "filter_scope": spec.get("filter_scope"),
                 "filters": filters,
@@ -68,6 +72,7 @@ def evaluate_labeled_retrieval_queries(
                 "weighted_metrics": weighted_metrics,
                 "evidence_coverage": evidence_coverage,
                 "hits": [_result_summary(result) for result in results],
+                **({"query_plan": query_plan} if query_plan is not None else {}),
                 **({"decomposition": decomposition} if decomposition is not None else {}),
             }
         )
@@ -364,6 +369,13 @@ def _result_key(result: RetrievalResult) -> tuple[str, str, str, str]:
         str(result.metadata.get("chunk_index") or ""),
         str(result.metadata.get("artifact_path") or ""),
     )
+
+
+def _consume_query_plan(retriever: Any) -> dict[str, Any] | None:
+    plan = getattr(retriever, "last_query_plan", None)
+    if isinstance(plan, dict):
+        return plan
+    return None
 
 
 def _aggregate_query_metrics(query_reports: Sequence[dict[str, Any]], k_values: Sequence[int]) -> dict[str, Any]:

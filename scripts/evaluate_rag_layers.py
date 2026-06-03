@@ -20,7 +20,7 @@ from scripts.validate_golden_rag_set import validate_golden_set  # noqa: E402
 from shotguncv_core.db.indexer import build_projection_batch  # noqa: E402
 from shotguncv_core.rag.embeddings import EmbeddingModel  # noqa: E402
 from shotguncv_core.rag.metrics import evaluate_labeled_retrieval_queries  # noqa: E402
-from shotguncv_core.rag.retrieval import InMemoryBM25Retriever, InMemoryHybridRetriever, InMemoryVectorRetriever, Retriever  # noqa: E402
+from shotguncv_core.rag.retrieval import InMemoryBM25Retriever, InMemoryHybridRetriever, InMemoryVectorRetriever, Retriever, SmartRouterRetriever  # noqa: E402
 
 
 NO_ANSWER_SCORE_THRESHOLD = 0.8
@@ -66,6 +66,8 @@ def evaluate_retriever_layer(
     first_stage_limit: int = 50,
     golden_layers: list[str] | None = None,
     query_strategy: str = "single",
+    router_broad_limit: int = 20,
+    enable_support_gate: bool = False,
 ) -> dict[str, Any]:
     from shotguncv_core.rag.retrieval import InMemoryVectorRetriever, expand_query
 
@@ -101,8 +103,18 @@ def evaluate_retriever_layer(
                 dense_retriever=expansion_dense,
             )
 
+    if query_strategy == "smart":
+        retriever = SmartRouterRetriever.from_chunks(
+            batch.retrieval_chunks,
+            embedding_model=embedding_model,
+            vector_weight=vector_weight,
+            bm25_weight=bm25_weight,
+            broad_limit=router_broad_limit,
+            enable_support_gate=enable_support_gate,
+        )
+        retriever_type = f"SmartRouterRetriever({retriever_type}, broad_limit={router_broad_limit})"
     # Build two-stage retriever if reranker is requested
-    if reranker_model:
+    elif reranker_model:
         from shotguncv_core.rag.reranking import CrossEncoderReranker
 
         reranker = CrossEncoderReranker(reranker_model)
@@ -133,6 +145,9 @@ def evaluate_retriever_layer(
         "first_stage_limit": first_stage_limit if reranker_model else None,
         "query_expansion": query_expansion,
         "query_strategy": query_strategy,
+        "router_mode": "rule_based" if query_strategy == "smart" else None,
+        "router_broad_limit": router_broad_limit if query_strategy == "smart" else None,
+        "support_gate_enabled": enable_support_gate,
         "chunk_count": len(batch.retrieval_chunks),
         "sample_count": len(samples),
         "sample_report": _sample_report(samples),
@@ -150,7 +165,9 @@ def evaluate_retriever_layer(
             samples,
             k_values,
             score_threshold=no_answer_score_threshold,
+            enable_support_gate=enable_support_gate,
         ),
+        "smart_routing_observability": _smart_routing_observability(metrics["queries"]),
     }
     _write_json(output_path, report)
     return report
@@ -657,6 +674,7 @@ def _no_answer_behavior(
     k_values: list[int],
     *,
     score_threshold: float,
+    enable_support_gate: bool = False,
 ) -> dict[str, Any]:
     limit = max(k_values) if k_values else 10
     reports = []
@@ -664,8 +682,11 @@ def _no_answer_behavior(
         if sample.get("case_type") != "no_answer":
             continue
         results = retriever.search(str(sample["question"]), limit=limit, source_type="candidate_evidence")
+        query_plan = getattr(retriever, "last_query_plan", None)
         top_score = results[0].score if results else None
-        abstained = top_score is None or top_score < score_threshold
+        support_gate = query_plan.get("support_gate") if isinstance(query_plan, dict) else None
+        gate_blocked = bool(enable_support_gate and isinstance(support_gate, dict) and support_gate.get("blocked_generator"))
+        abstained = gate_blocked or top_score is None or top_score < score_threshold
         reports.append(
             {
                 "question_id": sample["question_id"],
@@ -676,6 +697,7 @@ def _no_answer_behavior(
                 "filter_scope": "candidate_evidence",
                 "abstained": abstained,
                 "gate_status": "abstained" if abstained else "needs_review",
+                "support_gate": support_gate,
                 "should_abstain": True,
             }
         )
@@ -683,6 +705,13 @@ def _no_answer_behavior(
     abstained_count = sum(1 for item in reports if item["abstained"])
     leaked_count = len(reports) - abstained_count
     false_positive_examples = [item for item in reports if not item["abstained"]]
+    support_gate_reports = [
+        item.get("support_gate")
+        for item in reports
+        if isinstance(item.get("support_gate"), dict)
+    ]
+    support_gate_triggered = [item for item in support_gate_reports if item.get("triggered")]
+    support_gate_blocked = [item for item in support_gate_triggered if item.get("blocked_generator")]
     return {
         "query_count": len(reports),
         "non_empty_result_count": non_empty,
@@ -705,7 +734,90 @@ def _no_answer_behavior(
             ),
             "top_false_positive_examples": false_positive_examples[:5],
         },
+        "support_gate_summary": {
+            "triggered_count": len(support_gate_triggered),
+            "trigger_rate": (len(support_gate_triggered) / len(reports)) if reports else 0.0,
+            "blocked_generator_count": len(support_gate_blocked),
+            "blocked_generator_rate": (len(support_gate_blocked) / len(reports)) if reports else 0.0,
+        },
         "queries": reports,
+    }
+
+
+def _smart_routing_observability(query_reports: list[dict[str, Any]]) -> dict[str, Any]:
+    plans = [item.get("query_plan") for item in query_reports if isinstance(item.get("query_plan"), dict)]
+    query_count = len(query_reports)
+    if not query_count:
+        return {
+            "oracle_free": True,
+            "rewrite_trigger_rate": 0.0,
+            "decomposition_trigger_rate": 0.0,
+            "support_gate_trigger_rate": 0.0,
+            "route_fallback_rate": 0.0,
+            "route_error_examples": [],
+        }
+    rewrite_count = sum(1 for plan in plans if plan.get("rewrite_terms"))
+    decomposition_count = sum(1 for plan in plans if plan.get("decomposition_stages"))
+    support_count = sum(1 for plan in plans if (plan.get("support_gate") or {}).get("triggered"))
+    fallback_count = sum(1 for plan in plans if plan.get("fallback_used"))
+    losses = [
+        {
+            "query_id": item.get("query_id"),
+            "case_type": item.get("case_type"),
+            "reasons": (item.get("query_plan") or {}).get("reasons"),
+            "missing_labels": item.get("evidence_coverage", {}).get("missing_labels"),
+            "routes": (item.get("query_plan") or {}).get("decomposition_stages"),
+        }
+        for item in query_reports
+        if isinstance(item.get("query_plan"), dict) and item.get("evidence_coverage", {}).get("all_expected_hit") is False
+    ]
+    wins = [
+        {
+            "query_id": item.get("query_id"),
+            "case_type": item.get("case_type"),
+            "reasons": (item.get("query_plan") or {}).get("reasons"),
+            "routes": (item.get("query_plan") or {}).get("decomposition_stages"),
+        }
+        for item in query_reports
+        if isinstance(item.get("query_plan"), dict) and item.get("evidence_coverage", {}).get("all_expected_hit") is True
+    ]
+    route_false_positives = [
+        item
+        for item in losses
+        if item.get("reasons") and not item.get("missing_labels")
+    ]
+    missing_supporting = [
+        item
+        for item in query_reports
+        if isinstance(item.get("query_plan"), dict)
+        and str(item.get("case_type") or "") == "multi_document"
+        and int(item.get("evidence_coverage", {}).get("supporting_hit_count") or 0)
+        < int(item.get("evidence_coverage", {}).get("supporting_expected_count") or 0)
+    ]
+    return {
+        "oracle_free": all(plan.get("oracle_free") is True for plan in plans) if plans else True,
+        "planned_query_count": len(plans),
+        "rewrite_trigger_rate": rewrite_count / query_count,
+        "decomposition_trigger_rate": decomposition_count / query_count,
+        "support_gate_trigger_rate": support_count / query_count,
+        "route_fallback_rate": fallback_count / query_count,
+        "route_error_examples": losses[:5],
+        "smart_router_win_examples": wins[:5],
+        "smart_router_loss_examples": losses[:5],
+        "route_false_positive_examples": route_false_positives[:5],
+        "support_gate_blocked_examples": [
+            {"query_id": item.get("query_id"), "support_gate": (item.get("query_plan") or {}).get("support_gate")}
+            for item in query_reports
+            if ((item.get("query_plan") or {}).get("support_gate") or {}).get("blocked_generator")
+        ][:5],
+        "multi_document_missing_supporting_examples": [
+            {
+                "query_id": item.get("query_id"),
+                "missing_labels": item.get("evidence_coverage", {}).get("missing_labels"),
+                "routes": (item.get("query_plan") or {}).get("decomposition_stages"),
+            }
+            for item in missing_supporting
+        ][:5],
     }
 
 
@@ -1023,10 +1135,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--query-strategy",
-        choices=["single", "decomposed"],
+        choices=["single", "decomposed", "smart"],
         default="single",
-        help="Query planning strategy. Use decomposed to search primary evidence first, then supporting/conflicting/gap/ranking evidence.",
+        help="Query planning strategy. Use smart for non-oracle rule-based routing.",
     )
+    parser.add_argument("--router-broad-limit", type=int, default=20, help="Broad top-k used by smart routing.")
+    parser.add_argument("--enable-support-gate", action="store_true", help="Enable no-answer support/entailment gate.")
     args = parser.parse_args()
     if args.layer == "retriever":
         if not args.run_dir:
@@ -1045,6 +1159,8 @@ def main() -> int:
             first_stage_limit=args.first_stage_limit,
             golden_layers=args.golden_layer,
             query_strategy=args.query_strategy,
+            router_broad_limit=args.router_broad_limit,
+            enable_support_gate=args.enable_support_gate,
         )
         print(json.dumps({"output": str(args.output), "aggregate": report["metrics"]["aggregate"]}, ensure_ascii=False, indent=2))
         return 0

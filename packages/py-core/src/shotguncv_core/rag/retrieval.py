@@ -203,6 +203,298 @@ class InMemoryHybridRetriever:
         return sorted(ranked, key=lambda item: item.score, reverse=True)[:limit]
 
 
+class SmartRouterRetriever:
+    """Rule-based, oracle-free router over BM25 and hybrid retrieval."""
+
+    def __init__(
+        self,
+        chunks: list[dict[str, Any]],
+        *,
+        embedding_model: EmbeddingModel | None = None,
+        vector_weight: float = 0.7,
+        bm25_weight: float = 0.3,
+        broad_limit: int = 20,
+        enable_support_gate: bool = False,
+    ) -> None:
+        self._bm25 = InMemoryBM25Retriever.from_chunks(chunks)
+        self._hybrid = InMemoryHybridRetriever.from_chunks(
+            chunks,
+            embedding_model=embedding_model,
+            vector_weight=vector_weight,
+            bm25_weight=bm25_weight,
+        )
+        self._broad_limit = broad_limit
+        self._enable_support_gate = enable_support_gate
+        self.last_query_plan: dict[str, Any] | None = None
+
+    @classmethod
+    def from_chunks(
+        cls,
+        chunks: list[dict[str, Any]],
+        *,
+        embedding_model: EmbeddingModel | None = None,
+        vector_weight: float = 0.7,
+        bm25_weight: float = 0.3,
+        broad_limit: int = 20,
+        enable_support_gate: bool = False,
+    ) -> "SmartRouterRetriever":
+        return cls(
+            chunks,
+            embedding_model=embedding_model,
+            vector_weight=vector_weight,
+            bm25_weight=bm25_weight,
+            broad_limit=broad_limit,
+            enable_support_gate=enable_support_gate,
+        )
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        candidate_id: str | None = None,
+        jd_id: str | None = None,
+        run_id: str | None = None,
+        source_type: str | None = None,
+    ) -> list[RetrievalResult]:
+        filters = {
+            "candidate_id": candidate_id,
+            "jd_id": jd_id,
+            "run_id": run_id,
+            "source_type": source_type,
+        }
+        clean_filters = {key: value for key, value in filters.items() if value}
+        broad_bm25 = self._bm25.search(query, limit=self._broad_limit, **clean_filters)
+        broad_hybrid = self._hybrid.search(query, limit=self._broad_limit, **clean_filters)
+        plan = build_smart_query_plan(
+            query,
+            broad_hits=broad_bm25,
+            hybrid_hits=broad_hybrid,
+            limit=limit,
+            broad_limit=self._broad_limit,
+            enable_support_gate=self._enable_support_gate,
+            filters=clean_filters,
+        )
+        results = self._execute_plan(plan, limit=limit, filters=clean_filters)
+        self.last_query_plan = {
+            **plan,
+            "broad_observation": _hit_distribution(broad_bm25),
+            "hybrid_observation": _hit_distribution(broad_hybrid),
+            "support_gate": _support_gate_status(query, results, self._enable_support_gate),
+        }
+        return results
+
+    def _execute_plan(
+        self,
+        plan: dict[str, Any],
+        *,
+        limit: int,
+        filters: dict[str, Any],
+    ) -> list[RetrievalResult]:
+        combined: list[RetrievalResult] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for route in plan["routes"]:
+            retriever = self._hybrid if route["retriever_mode"] == "hybrid" else self._bm25
+            route_filters = {**filters, **route.get("filters", {})}
+            route_results = retriever.search(str(route["query"]), limit=int(route["limit"]), **route_filters)
+            for result in route_results:
+                key = _result_key(result)
+                if key in seen:
+                    continue
+                seen.add(key)
+                combined.append(result)
+                if len(combined) >= limit:
+                    return combined
+        return combined
+
+
+def build_smart_query_plan(
+    query: str,
+    *,
+    broad_hits: list[RetrievalResult],
+    hybrid_hits: list[RetrievalResult],
+    limit: int,
+    broad_limit: int = 20,
+    enable_support_gate: bool = False,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    rewrite = rewrite_fuzzy_query(query)
+    complex_reasons = detect_complex_query(query, broad_hits)
+    risk_reasons = detect_risk_query(query, broad_hits)
+    claim_signal = detect_no_answer_strong_claim(query)
+    reasons = [*rewrite["reasons"], *complex_reasons, *risk_reasons]
+    if claim_signal["triggered"]:
+        reasons.extend(claim_signal["reasons"])
+    routes: list[dict[str, Any]] = []
+    if rewrite["terms"] or complex_reasons or risk_reasons or (enable_support_gate and claim_signal["triggered"]):
+        routes.append({"name": "hybrid_anchor", "query": query, "retriever_mode": "hybrid", "limit": min(5, limit)})
+    if rewrite["terms"]:
+        routes.append({"name": "rewrite", "query": rewrite["expanded_query"], "retriever_mode": "hybrid", "limit": limit})
+    if complex_reasons:
+        routes.extend(_context_routes(query, broad_hits, limit=limit))
+    if risk_reasons:
+        routes.extend(_risk_routes(query, broad_hits, limit=limit))
+    if enable_support_gate and claim_signal["triggered"]:
+        routes.insert(
+            0,
+            {
+                "name": "support_gate_candidate",
+                "query": rewrite["expanded_query"],
+                "retriever_mode": "hybrid",
+                "filters": {"source_type": "candidate_evidence"},
+                "limit": min(limit, 5),
+            },
+        )
+    if not routes:
+        routes.append({"name": "broad", "query": query, "retriever_mode": "hybrid", "limit": limit})
+    else:
+        routes.append({"name": "broad_fallback", "query": query, "retriever_mode": "hybrid", "limit": min(broad_limit, max(limit, 10))})
+    return {
+        "strategy": "smart_router",
+        "original_query": query,
+        "expanded_query": rewrite["expanded_query"],
+        "routes": routes,
+        "reasons": _unique_terms(reasons),
+        "rewrite_terms": rewrite["terms"],
+        "decomposition_stages": [route["name"] for route in routes if route["name"] not in {"broad", "rewrite"}],
+        "fallback_used": any(route["name"] in {"broad", "broad_fallback"} for route in routes),
+        "oracle_free": True,
+        "filters": filters or {},
+    }
+
+
+def rewrite_fuzzy_query(query: str) -> dict[str, Any]:
+    query_lower = query.lower()
+    terms: list[str] = []
+    reasons: list[str] = []
+    alias_map = {
+        "工具链": ["LangGraph", "tool calling", "agent workflow", "tool execution", "evaluation"],
+        "搜出来准不准": ["retrieval evaluation", "MRR", "NDCG", "Recall", "Precision", "golden set"],
+        "准不准": ["retrieval evaluation", "MRR", "Recall", "Precision"],
+        "跑起来": ["AI prototype", "demo", "agent project", "automation workflow"],
+        "原型": ["AI prototype", "demo", "agent project"],
+        "别乱跑": ["tool safety", "sandbox", "permission gate", "path safety"],
+        "像不像": ["fit", "evidence", "requirement match"],
+        "会不会": ["capability", "evidence", "experience"],
+        "能不能": ["capability", "evidence", "experience"],
+        "是不是": ["evidence", "fit", "boundary"],
+        "有没有": ["evidence", "experience", "project"],
+    }
+    for pattern, additions in alias_map.items():
+        if pattern in query_lower:
+            terms.extend(additions)
+            reasons.append("semantic_alias_pattern")
+    expanded = query if not terms else f"{query}\n{' '.join(_unique_terms(terms))}"
+    return {"expanded_query": expanded, "terms": _unique_terms(terms), "reasons": _unique_terms(reasons)}
+
+
+def detect_complex_query(query: str, broad_hits: list[RetrievalResult]) -> list[str]:
+    reasons: list[str] = []
+    if any(term in query for term in ["分别", "同时", "以及", "一起", "合并", "对比", "哪些支持", "哪些保守"]):
+        reasons.append("complex_query_connector")
+    if len({str(hit.metadata.get("source_type") or "") for hit in broad_hits[:10] if hit.metadata.get("source_type")}) >= 2:
+        reasons.append("broad_hits_multi_source_type")
+    if len({str(hit.metadata.get("jd_id") or "") for hit in broad_hits[:10] if hit.metadata.get("jd_id")}) >= 2:
+        reasons.append("broad_hits_multi_jd")
+    return reasons
+
+
+def detect_risk_query(query: str, broad_hits: list[RetrievalResult]) -> list[str]:
+    reasons: list[str] = []
+    if any(term in query for term in ["风险", "缺口", "不足", "保守", "不能高置信", "矛盾", "过期", "低置信", "为什么排序"]):
+        reasons.append("risk_gap_intent")
+    source_types = {str(hit.metadata.get("source_type") or "") for hit in broad_hits[:10]}
+    if "gap_map" in source_types:
+        reasons.append("broad_hits_gap_map")
+    if "ranking_explanation" in source_types:
+        reasons.append("broad_hits_ranking_explanation")
+    return reasons
+
+
+def detect_no_answer_strong_claim(query: str) -> dict[str, Any]:
+    terms = ["能否证明", "是否等于", "专家", "资深", "平台工程经验", "模型训练", "微调", "生产运维"]
+    matched = [term for term in terms if term in query]
+    return {"triggered": bool(matched), "claim": query, "matched_terms": matched, "reasons": ["strong_claim_signal"] if matched else []}
+
+
+def _context_routes(query: str, broad_hits: list[RetrievalResult], *, limit: int) -> list[dict[str, Any]]:
+    routes = [
+        {"name": "candidate_context", "query": f"{query}\ncandidate evidence project education skills", "retriever_mode": "hybrid", "filters": {"source_type": "candidate_evidence"}, "limit": min(3, limit)},
+        {"name": "requirement_context", "query": f"{query}\njd requirement evidence status", "retriever_mode": "hybrid", "filters": {"source_type": "requirement_evidence"}, "limit": min(4, limit)},
+    ]
+    for jd_id in _top_jd_ids(broad_hits, max_count=3):
+        routes.append(
+            {
+                "name": "jd_context",
+                "query": f"{query}\njd requirement evidence status",
+                "retriever_mode": "hybrid",
+                "filters": {"jd_id": jd_id, "source_type": "requirement_evidence"},
+                "limit": min(3, limit),
+            }
+        )
+    return routes
+
+
+def _risk_routes(query: str, broad_hits: list[RetrievalResult], *, limit: int) -> list[dict[str, Any]]:
+    jd_id = _top_jd_id(broad_hits)
+    base_filters = {"jd_id": jd_id} if jd_id else {}
+    return [
+        {"name": "risk_primary_context", "query": f"{query}\njd requirement evidence status primary evidence", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "requirement_evidence"}, "limit": min(4, limit)},
+        {"name": "gap_context", "query": f"{query}\ngap missing weak point gap_map risk", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "gap_map"}, "limit": min(3, limit)},
+        {"name": "ranking_context", "query": f"{query}\nranking decision risk flags ranking_explanation", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "ranking_explanation"}, "limit": min(3, limit)},
+    ]
+
+
+def _top_jd_id(hits: list[RetrievalResult]) -> str | None:
+    jd_ids = _top_jd_ids(hits, max_count=1)
+    return jd_ids[0] if jd_ids else None
+
+
+def _top_jd_ids(hits: list[RetrievalResult], *, max_count: int) -> list[str]:
+    jd_ids = [str(hit.metadata.get("jd_id") or "") for hit in hits[:10] if hit.metadata.get("jd_id")]
+    return [jd_id for jd_id, _ in Counter(jd_ids).most_common(max_count)]
+
+
+def _unique_terms(terms: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for term in terms:
+        clean = str(term).strip()
+        key = clean.lower()
+        if not clean or key in seen:
+            continue
+        seen.add(key)
+        unique.append(clean)
+    return unique
+
+
+def _hit_distribution(hits: list[RetrievalResult]) -> dict[str, Any]:
+    scores = [hit.score for hit in hits]
+    return {
+        "hit_count": len(hits),
+        "top_score": scores[0] if scores else None,
+        "score_gap": (scores[0] - scores[1]) if len(scores) > 1 else None,
+        "source_type_counts": dict(Counter(str(hit.metadata.get("source_type") or "unknown") for hit in hits)),
+        "jd_id_counts": dict(Counter(str(hit.metadata.get("jd_id") or "unknown") for hit in hits if hit.metadata.get("jd_id"))),
+    }
+
+
+def _support_gate_status(query: str, results: list[RetrievalResult], enabled: bool) -> dict[str, Any]:
+    signal = detect_no_answer_strong_claim(query)
+    triggered = enabled and signal["triggered"]
+    direct_overlap = bool(set(_tokens(query)) & set(_tokens(" ".join(result.text for result in results[:3]))))
+    status = "not_triggered"
+    if triggered:
+        status = "supported_candidate" if direct_overlap and results else "abstained"
+    return {
+        "triggered": triggered,
+        "claim": signal["claim"] if signal["triggered"] else None,
+        "support_status": status,
+        "reason": "strong_claim_candidate_evidence_check" if triggered else "no_strong_claim_signal",
+        "blocked_generator": triggered and status == "abstained",
+    }
+
+
 class PgVectorRetriever:
     def __init__(self, database_url: str, *, embedding_model: EmbeddingModel | None = None) -> None:
         self.database_url = database_url
