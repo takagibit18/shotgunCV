@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from shotguncv_core.rag.embeddings import deterministic_embedding
 from shotguncv_core.rag.metrics import evaluate_labeled_retrieval_queries, evaluate_ranked_retrieval
-from shotguncv_core.rag.retrieval import RetrievalResult
+from shotguncv_core.rag.retrieval import RetrievalResult, SmartRouterRetriever, build_smart_query_plan
 
 
 def test_evaluate_ranked_retrieval_scores_standard_metrics() -> None:
@@ -251,6 +252,70 @@ def test_decomposed_search_falls_back_to_fill_remaining_results() -> None:
     ]
 
 
+def test_build_smart_query_plan_is_oracle_free_and_explainable() -> None:
+    broad_hits = [
+        _result("candidate-profile", "analyze/candidate_profile.json", 0.9, source_type="candidate_evidence"),
+        _result("jd-005-req-013", "analyze/requirement_matrix.json", 0.8, source_type="requirement_evidence", jd_id="jd-005"),
+        _result("jd-005:ranking", "review/post_run_review.json", 0.7, source_type="ranking_explanation", jd_id="jd-005"),
+    ]
+
+    plan = build_smart_query_plan(
+        "这个人 AI agent 工具链像不像，同时有什么风险？",
+        broad_hits=broad_hits,
+        hybrid_hits=broad_hits,
+        limit=5,
+        enable_support_gate=True,
+    )
+
+    assert plan["strategy"] == "smart_router"
+    assert plan["oracle_free"] is True
+    assert "semantic_alias_pattern" in plan["reasons"]
+    assert "risk_gap_intent" in plan["reasons"]
+    assert "LangGraph" in plan["rewrite_terms"]
+    assert "gap_context" in plan["decomposition_stages"]
+    assert plan["routes"][-1]["name"] == "broad_fallback"
+    assert all("expected_documents" not in route for route in plan["routes"])
+
+
+def test_smart_router_report_includes_query_plan_observability() -> None:
+    chunks = [
+        _chunk("candidate-profile", "candidate_evidence", "Candidate has LangGraph agent workflow evidence."),
+        _chunk("jd-005-req-013", "requirement_evidence", "JD requires tool calling and evaluation.", jd_id="jd-005"),
+        _chunk("jd-005:gap", "gap_map", "Gap map lists weak production operation evidence.", jd_id="jd-005"),
+        _chunk("jd-005:ranking", "ranking_explanation", "Ranking explanation flags risk.", jd_id="jd-005"),
+    ]
+    retriever = SmartRouterRetriever.from_chunks(
+        chunks,
+        embedding_model=_DeterministicEmbeddingModel(),
+        broad_limit=4,
+        enable_support_gate=True,
+    )
+
+    report = evaluate_labeled_retrieval_queries(
+        retriever=retriever,
+        query_specs=[
+            {
+                "query_id": "smart-001",
+                "query": "这个人 AI agent 工具链像不像，同时有什么风险？",
+                "expected_chunks": ["candidate-profile", "jd-005:gap"],
+                "expected_documents": [
+                    {"label": "candidate-profile", "role": "primary"},
+                    {"label": "jd-005:gap", "role": "supporting"},
+                ],
+            }
+        ],
+        k_values=[1, 3],
+    )
+
+    query = report["queries"][0]
+    assert query["query_plan"]["strategy"] == "smart_router"
+    assert query["query_plan"]["oracle_free"] is True
+    assert query["query_plan"]["broad_observation"]["hit_count"] == 4
+    route_names = [route["name"] for route in query["query_plan"]["routes"]]
+    assert "rewrite" in route_names
+    assert route_names[-1] == "broad_fallback"
+
+
 class _FakeRetriever:
     def __init__(self, results_by_query: dict[str, list[RetrievalResult]]) -> None:
         self.results_by_query = results_by_query
@@ -261,14 +326,40 @@ class _FakeRetriever:
         return self.results_by_query[query][:limit]
 
 
-def _result(source_id: str, artifact_path: str, score: float) -> RetrievalResult:
+def _result(
+    source_id: str,
+    artifact_path: str,
+    score: float,
+    *,
+    source_type: str = "candidate_evidence",
+    jd_id: str | None = None,
+) -> RetrievalResult:
     return RetrievalResult(
         text=f"Evidence from {source_id} in {artifact_path}",
         metadata={
-            "source_type": "candidate_evidence",
+            "source_type": source_type,
             "source_id": source_id,
             "artifact_path": artifact_path,
             "provenance_summary": f"provenance {source_id}",
+            **({"jd_id": jd_id} if jd_id else {}),
         },
         score=score,
     )
+
+
+def _chunk(source_id: str, source_type: str, text: str, *, jd_id: str | None = None) -> dict[str, object]:
+    return {
+        "text": text,
+        "metadata": {
+            "source_type": source_type,
+            "source_id": source_id,
+            "artifact_path": "artifact.json",
+            "provenance_summary": source_id,
+            **({"jd_id": jd_id} if jd_id else {}),
+        },
+    }
+
+
+class _DeterministicEmbeddingModel:
+    def embed(self, text: str) -> list[float]:
+        return deterministic_embedding(text)
