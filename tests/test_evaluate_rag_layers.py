@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from scripts.evaluate_rag_layers import (
+    _TwoStageRetriever,
     _sample_to_query_spec,
     evaluate_generator_layer,
     evaluate_retriever_layer,
@@ -14,6 +15,7 @@ from scripts.evaluate_rag_layers import (
     report_case_type_counts,
     report_layer_counts,
 )
+from shotguncv_core.rag.retrieval import RetrievalResult
 
 
 def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None:
@@ -156,6 +158,80 @@ def test_evaluate_retriever_layer_wraps_smart_router_with_reranker(tmp_path: Pat
     assert any("query_plan" in item for item in report["metrics"]["queries"])
 
 
+def test_two_stage_retriever_preserves_route_evidence_after_rerank() -> None:
+    first_stage = _StaticPlanRetriever(
+        [
+            _retrieval_result("wrong-a", "candidate_evidence", 0.99),
+            _retrieval_result("wrong-b", "candidate_evidence", 0.98),
+            _retrieval_result("jd-024:ranking", "ranking_explanation", 0.7, jd_id="jd-024"),
+            _retrieval_result("jd-024-req-010", "requirement_evidence", 0.65, jd_id="jd-024"),
+        ],
+        {
+            "route_reports": [
+                {
+                    "name": "ranking_context",
+                    "added_results": [{"source_id": "jd-024:ranking", "source_type": "ranking_explanation"}],
+                },
+                {
+                    "name": "requirement_cross_jd_context",
+                    "added_results": [{"source_id": "jd-024-req-010", "source_type": "requirement_evidence", "jd_id": "jd-024"}],
+                },
+            ]
+        },
+    )
+    reranker = _StaticReranker(
+        [
+            _retrieval_result("wrong-a", "candidate_evidence", 0.99),
+            _retrieval_result("wrong-b", "candidate_evidence", 0.98),
+            _retrieval_result("wrong-c", "candidate_evidence", 0.97),
+            _retrieval_result("wrong-d", "candidate_evidence", 0.96),
+        ]
+    )
+
+    results = _TwoStageRetriever(first_stage, reranker, first_stage_limit=4).search("query", limit=3)
+
+    ranked_ids = [result.metadata["source_id"] for result in results]
+    assert "jd-024:ranking" in ranked_ids
+    assert "jd-024-req-010" in ranked_ids
+    assert first_stage.last_query_plan["rerank_observation"]["preserved_count"] == 2
+
+
+def test_two_stage_retriever_does_not_replace_preserved_evidence_with_later_candidates() -> None:
+    first_stage = _StaticPlanRetriever(
+        [
+            _retrieval_result("wrong-a", "candidate_evidence", 0.99),
+            _retrieval_result("wrong-b", "candidate_evidence", 0.98),
+            _retrieval_result("jd-015-req-014", "requirement_evidence", 0.7, jd_id="jd-015"),
+            _retrieval_result("jd-006-req-009", "requirement_evidence", 0.65, jd_id="jd-006"),
+        ],
+        {
+            "route_reports": [
+                {
+                    "name": "requirement_cross_jd_context",
+                    "added_results": [
+                        {"source_id": "jd-015-req-014", "source_type": "requirement_evidence", "jd_id": "jd-015"},
+                        {"source_id": "jd-006-req-009", "source_type": "requirement_evidence", "jd_id": "jd-006"},
+                    ],
+                },
+            ]
+        },
+    )
+    reranker = _StaticReranker(
+        [
+            _retrieval_result("wrong-a", "candidate_evidence", 0.99),
+            _retrieval_result("wrong-b", "candidate_evidence", 0.98),
+            _retrieval_result("wrong-c", "candidate_evidence", 0.97),
+        ]
+    )
+
+    results = _TwoStageRetriever(first_stage, reranker, first_stage_limit=4).search("query", limit=3)
+
+    ranked_ids = [result.metadata["source_id"] for result in results]
+    assert "jd-015-req-014" in ranked_ids
+    assert "jd-006-req-009" not in ranked_ids
+    assert first_stage.last_query_plan["rerank_observation"]["preserved_count"] == 1
+
+
 def test_evaluate_retriever_layer_enables_default_reranker(tmp_path: Path, monkeypatch) -> None:
     from scripts import evaluate_rag_layers
     from shotguncv_core.rag import reranking
@@ -184,6 +260,8 @@ def test_evaluate_retriever_layer_enables_default_reranker(tmp_path: Path, monke
     assert report["reranker_model"] == evaluate_rag_layers.DEFAULT_RERANKER_MODEL
     assert report["first_stage_limit"] == evaluate_rag_layers.DEFAULT_FIRST_STAGE_LIMIT
     assert evaluate_rag_layers.DEFAULT_RERANKER_MODEL in report["retriever_type"]
+    assert "timing" in report
+    assert "total_seconds" in report["timing"]
 
 
 def test_evaluate_retriever_layer_can_filter_headline_golden_layer(tmp_path: Path) -> None:
@@ -471,6 +549,41 @@ class _KeywordEmbeddingModel:
 
     def embed_many(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(text) for text in texts]
+
+
+class _StaticPlanRetriever:
+    def __init__(self, results: list[RetrievalResult], query_plan: dict[str, object]) -> None:
+        self.results = results
+        self.last_query_plan = query_plan
+
+    def search(self, query: str, *, limit: int = 10, **filters: object) -> list[RetrievalResult]:
+        return self.results[:limit]
+
+
+class _StaticReranker:
+    def __init__(self, results: list[RetrievalResult]) -> None:
+        self.results = results
+
+    def rerank(self, query: str, results: list[RetrievalResult], *, top_k: int) -> list[RetrievalResult]:
+        return self.results[:top_k]
+
+
+def _retrieval_result(
+    source_id: str,
+    source_type: str,
+    score: float,
+    *,
+    jd_id: str | None = None,
+) -> RetrievalResult:
+    metadata = {
+        "source_id": source_id,
+        "source_type": source_type,
+        "artifact_path": f"{source_type}.json",
+        "chunk_index": source_id,
+    }
+    if jd_id:
+        metadata["jd_id"] = jd_id
+    return RetrievalResult(text=f"Evidence {source_id}", metadata=metadata, score=score)
 
 
 def _golden_payload() -> dict[str, object]:

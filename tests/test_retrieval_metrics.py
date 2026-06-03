@@ -345,6 +345,54 @@ def test_smart_query_plan_tunes_quota_for_cross_section_like_hits() -> None:
     assert all(route["limit"] == 4 for route in plan["routes"] if route["name"] == "jd_context")
 
 
+def test_smart_query_plan_detects_cross_section_intent_from_query_text() -> None:
+    broad_hits = [
+        _result("candidate-profile", "analyze/candidate_profile.json", 0.9, source_type="candidate_evidence"),
+        _result("jd-018-req-003", "analyze/requirement_matrix.json", 0.8, source_type="requirement_evidence", jd_id="jd-018"),
+    ]
+
+    plan = build_smart_query_plan(
+        "Compare the candidate profile across JD evidence and explain overall fit",
+        broad_hits=broad_hits,
+        hybrid_hits=broad_hits,
+        limit=10,
+    )
+
+    assert plan["route_quota_profile"] == "cross_section_like"
+    assert "cross_section_intent" in plan["reasons"]
+
+
+def test_smart_query_plan_adds_cross_jd_requirement_route_for_multi_document() -> None:
+    broad_hits = [
+        _result("jd-006-req-009", "analyze/requirement_matrix.json", 0.9, source_type="requirement_evidence", jd_id="jd-006"),
+        _result("jd-020-req-002", "analyze/requirement_matrix.json", 0.86, source_type="requirement_evidence", jd_id="jd-020"),
+        _result("jd-018-req-003", "analyze/requirement_matrix.json", 0.8, source_type="requirement_evidence", jd_id="jd-018"),
+        _result("candidate-profile", "analyze/candidate_profile.json", 0.7, source_type="candidate_evidence"),
+    ]
+
+    plan = build_smart_query_plan("multi document requirement evidence", broad_hits=broad_hits, hybrid_hits=broad_hits, limit=10)
+
+    routes = [route for route in plan["routes"] if route["name"] == "requirement_cross_jd_context"]
+    assert routes
+    assert "cross JD" in routes[0]["query"]
+    assert routes[0]["filters"] == {"source_type": "requirement_evidence"}
+    assert routes[0]["limit"] >= 6
+
+
+def test_smart_query_plan_routes_ranking_intent_even_without_ranking_broad_hit() -> None:
+    broad_hits = [
+        _result("jd-024-req-010", "analyze/requirement_matrix.json", 0.9, source_type="requirement_evidence", jd_id="jd-024"),
+        _result("candidate-profile", "analyze/candidate_profile.json", 0.8, source_type="candidate_evidence"),
+    ]
+
+    plan = build_smart_query_plan("What ranking decision rationale explains JD-024 fit?", broad_hits=broad_hits, hybrid_hits=broad_hits, limit=10)
+
+    routes = {route["name"]: route for route in plan["routes"]}
+    assert "ranking_context" in routes
+    assert routes["ranking_context"]["filters"]["source_type"] == "ranking_explanation"
+    assert "ranking_intent" in plan["reasons"]
+
+
 def test_smart_query_plan_uses_stronger_gap_and_ranking_terms() -> None:
     broad_hits = [
         _result("jd-019:gap", "evaluate/gap_maps.json", 0.9, source_type="gap_map", jd_id="jd-019"),
