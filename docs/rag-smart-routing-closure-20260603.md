@@ -589,3 +589,208 @@ CLI 默认同样启用 reranker。如果要复现非 reranker 对照，需要显
 ```text
 33 passed
 ```
+
+## Evidence Preservation P0-P1 闭环 - 2026-06-03
+
+分支：`evidence_preservation`
+
+本轮目标是在默认 `smart + reranker` 路径上完成 P0 到 P1 的最小闭环：
+
+- P0：reranker 不能把 route 明确召回的关键 evidence 全部挤出 topK。
+- P1：增强 multi-JD requirement、cross-section intent、ranking intent 的真实路由信号。
+- 观测：报告中记录 reranker 耗时、候选数、search 次数和 preservation 触发数。
+
+### 实现变化
+
+`scripts/evaluate_rag_layers.py`：
+
+- `_TwoStageRetriever` 从“rerank 后直接截断”改为“rerank + route evidence preservation”。
+- reranker 仍负责主排序；preservation 只从 first-stage coarse candidates 中补回 route report 明确加入过的 evidence。
+- preservation 优先级：
+  - `ranking_context`
+  - `gap_context`
+  - `requirement_cross_jd_context`
+  - `jd_context`
+  - `requirement_context`
+  - `candidate_context`
+- `ranking_explanation` 和 `gap_map` 可以强保护。
+- `requirement_evidence` 采用保守策略：每个 query 最多补回 1 条，避免多 requirement preservation 破坏 reranker 的 P@1/MRR 优势。
+- `_TwoStageRetriever` 会把 `rerank_observation` 写回 `last_query_plan`：
+
+```json
+{
+  "rerank_observation": {
+    "candidate_count": 20,
+    "reranked_count": 20,
+    "preserved_count": 1,
+    "preserved_results": []
+  }
+}
+```
+
+`packages/py-core/src/shotguncv_core/rag/retrieval.py`：
+
+- `detect_complex_query()` 增加英文 cross-section intent：
+  - `compare`
+  - `across`
+  - `overall fit`
+  - `candidate profile`
+  - `job evidence`
+  - `jd evidence`
+- `detect_risk_query()` 增加英文 risk/ranking intent：
+  - `risk`
+  - `gap`
+  - `missing`
+  - `weakness`
+  - `ranking`
+  - `decision`
+  - `rationale`
+  - `final score`
+- multi-document / cross-section profile 新增 `requirement_cross_jd_context` route：
+
+```text
+cross JD matching requirement supporting evidence must have responsibility requirement coverage
+```
+
+`scripts/evaluate_rag_layers.py` 报告新增 `timing`：
+
+```json
+{
+  "total_seconds": 385.6581414000011,
+  "retrieval_eval_seconds": 359.32303200000024,
+  "no_answer_eval_seconds": 12.341234800000166,
+  "reranker_seconds": 219.94944799999575,
+  "reranker_search_count": 60,
+  "reranker_candidate_count": 821,
+  "preserved_result_count": 13
+}
+```
+
+### 新增测试
+
+新增/扩展测试覆盖：
+
+- `test_two_stage_retriever_preserves_route_evidence_after_rerank`
+- `test_two_stage_retriever_does_not_replace_preserved_evidence_with_later_candidates`
+- `test_smart_query_plan_detects_cross_section_intent_from_query_text`
+- `test_smart_query_plan_adds_cross_jd_requirement_route_for_multi_document`
+- `test_smart_query_plan_routes_ranking_intent_even_without_ranking_broad_hit`
+
+验证命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_evaluate_rag_layers.py tests\test_retrieval_metrics.py
+```
+
+结果：
+
+```text
+38 passed
+```
+
+### 真实评估
+
+评估命令使用默认 reranker，不显式传 `--reranker`，以验证默认链路：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_rag_layers.py --layer retriever --retriever-mode hybrid --vector-weight 0.7 --bm25-weight 0.3 --query-strategy smart --router-broad-limit 20 --enable-support-gate --golden-file fixtures\golden_rag_questions.json --run-dir baseline\real-cv-golden-rebuild-20260602 --output baseline\smart-routing-20260603\smart-router-reranker-preservation-top20.json
+```
+
+输出报告：
+
+```text
+baseline\smart-routing-20260603\smart-router-reranker-preservation-top20.json
+```
+
+### 指标对比
+
+| 指标 | smart rule-based | smart + reranker | preservation | preservation vs reranker |
+| --- | ---: | ---: | ---: | ---: |
+| MRR | 0.658224 | 0.744444 | 0.744935 | +0.000490 |
+| P@1 | 0.529412 | 0.647059 | 0.647059 | +0.000000 |
+| NDCG@10 | 0.699398 | 0.748662 | 0.748980 | +0.000317 |
+| Recall@10 | 0.893557 | 0.890289 | 0.890289 | +0.000000 |
+| All Expected | 0.823529 | 0.803922 | 0.803922 | +0.000000 |
+| All Primary | 0.901961 | 0.921569 | 0.921569 | +0.000000 |
+
+分片变化：
+
+| Slice | preservation MRR | vs reranker | preservation All Expected | vs reranker |
+| --- | ---: | ---: | ---: | ---: |
+| common_question | 0.817402 | +0.000000 | 0.941176 | +0.000000 |
+| multi_document | 0.556061 | +0.002273 | 0.454545 | +0.000000 |
+| stale_or_conflicting | 0.680556 | +0.000000 | 0.666667 | +0.000000 |
+
+### Preservation 观测
+
+最终保守策略：
+
+```text
+reranker_search_count: 60
+reranker_candidate_count: 821
+preserved_result_count: 13
+preserved_query_count: 12
+```
+
+route quota profile 分布：
+
+| profile | query count |
+| --- | ---: |
+| default | 34 |
+| complex_like | 7 |
+| multi_document_like | 7 |
+| risk_gap_like | 3 |
+
+说明：
+
+- preservation 已真实触发，但没有提升 All Expected。
+- P@1 和 All Primary 没有回退，说明保守策略没有破坏 reranker 的核心收益。
+- multi_document MRR 小幅提升，说明少量 evidence 补回有正向排序影响。
+
+### 中途踩坑
+
+第一版 preservation 对 `requirement_evidence` 过度积极：同一个 query 会连续补多个不同 JD 的 requirement。真实评估发现：
+
+- `preserved_result_count` 达到 42。
+- All Expected 没有提升。
+- MRR / P@1 反而下降。
+
+原因是多 requirement 补位会把 reranker 已排好的强相关候选挤掉，而且这些被补回的 requirement 多数不是 golden 缺失 label。于是改成：
+
+- ranking/gap 强保护。
+- requirement 每个 query 最多补 1 条。
+- 已保护的候选不能被后续 preservation 再替换掉。
+
+### 当前结论
+
+P0 闭环已完成：reranker 默认路径现在有 evidence preservation，且不会吞掉 smart route 的 query plan / ablation 观测。
+
+P1 闭环已完成：cross-section、ranking intent、multi-JD requirement route 已有测试覆盖，并进入真实评估路径。
+
+但 All Expected 没有被拉升，说明当前剩余瓶颈不是“reranker 把正确 supporting evidence 挤出 top10”这么简单，而是：
+
+- 缺失 requirement 很多根本没有进入 first-stage top20。
+- 或者 route 加入的是同类但非目标 requirement。
+- `cross_section_like` 在真实报告中仍未触发，当前真实 profile 仍是 `default / complex_like / multi_document_like / risk_gap_like`。
+
+### 下一步方向
+
+不要继续扩大 preservation 强度。下一步应转向：
+
+1. 提升 first-stage recall：
+   - 针对 missing requirement 做 query-term audit。
+   - 对 multi-document query 提高 first-stage 或 route-local recall，而不是提高最终 preservation。
+
+2. 强化 cross-section detector：
+   - 当前真实数据没有触发 `cross_section_like`。
+   - 需要从 broad hit source entropy、JD entropy、query 语义信号组合判断。
+
+3. route-local reranker / fusion：
+   - 先在每个 route 内部 rerank，再做 route-aware merge。
+   - 避免全局 reranker 一次性比较不同 source_type 的异质证据。
+
+4. 性能优化：
+   - 当前总耗时约 386 秒，其中 reranker 约 220 秒。
+   - 需要缓存 `(query, chunk_id)` reranker score。
+   - no-answer support gate 可跳过不必要的 reranker。
+   - 后续报告应继续保留 timing 字段。

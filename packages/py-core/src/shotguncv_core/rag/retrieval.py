@@ -416,6 +416,9 @@ def rewrite_fuzzy_query(query: str) -> dict[str, Any]:
 
 def detect_complex_query(query: str, broad_hits: list[RetrievalResult]) -> list[str]:
     reasons: list[str] = []
+    query_lower = query.lower()
+    if any(term in query_lower for term in ["compare", "across", "overall fit", "candidate profile", "job evidence", "jd evidence"]):
+        reasons.append("cross_section_intent")
     if any(term in query for term in ["分别", "同时", "以及", "一起", "合并", "对比", "哪些支持", "哪些保守"]):
         reasons.append("complex_query_connector")
     if len({str(hit.metadata.get("source_type") or "") for hit in broad_hits[:10] if hit.metadata.get("source_type")}) >= 2:
@@ -427,6 +430,11 @@ def detect_complex_query(query: str, broad_hits: list[RetrievalResult]) -> list[
 
 def detect_risk_query(query: str, broad_hits: list[RetrievalResult]) -> list[str]:
     reasons: list[str] = []
+    query_lower = query.lower()
+    if any(term in query_lower for term in ["risk", "gap", "missing", "weakness", "insufficient"]):
+        reasons.append("risk_gap_intent")
+    if any(term in query_lower for term in ["ranking", "rank", "decision", "rationale", "final score", "fit score"]):
+        reasons.append("ranking_intent")
     if any(term in query for term in ["风险", "缺口", "不足", "保守", "不能高置信", "矛盾", "过期", "低置信", "为什么排序"]):
         reasons.append("risk_gap_intent")
     source_types = {str(hit.metadata.get("source_type") or "") for hit in broad_hits[:10]}
@@ -475,6 +483,16 @@ def _context_routes(
         {"name": "candidate_context", "query": f"{query}\ncandidate evidence project education skills", "retriever_mode": "hybrid", "filters": {"source_type": "candidate_evidence"}, "limit": quotas["candidate_context"]},
         {"name": "requirement_context", "query": f"{query}\njd requirement evidence status supporting evidence requirement match", "retriever_mode": "hybrid", "filters": {"source_type": "requirement_evidence"}, "limit": quotas["requirement_context"]},
     ]
+    if quota_profile in {"multi_document_like", "cross_section_like"}:
+        routes.append(
+            {
+                "name": "requirement_cross_jd_context",
+                "query": f"{query}\ncross JD matching requirement supporting evidence must have responsibility requirement coverage",
+                "retriever_mode": "hybrid",
+                "filters": {"source_type": "requirement_evidence"},
+                "limit": quotas["requirement_cross_jd_context"],
+            }
+        )
     for jd_id in _top_jd_ids(broad_hits, max_count=3):
         routes.append(
             {
@@ -558,15 +576,16 @@ def _route_quotas(profile: str, *, limit: int) -> dict[str, int]:
     base = {
         "candidate_context": 3,
         "requirement_context": 4,
+        "requirement_cross_jd_context": 5,
         "jd_context": 3,
         "risk_primary_context": 4,
         "gap_context": 3,
         "ranking_context": 3,
     }
     if profile == "cross_section_like":
-        base.update({"candidate_context": 2, "requirement_context": 5, "jd_context": 4})
+        base.update({"candidate_context": 2, "requirement_context": 5, "requirement_cross_jd_context": 6, "jd_context": 4})
     if profile == "multi_document_like":
-        base.update({"candidate_context": 2, "requirement_context": 6, "jd_context": 4})
+        base.update({"candidate_context": 2, "requirement_context": 6, "requirement_cross_jd_context": 7, "jd_context": 4})
     if profile == "risk_gap_like":
         base.update({"risk_primary_context": 5, "gap_context": 4, "ranking_context": 4})
     return {key: max(1, min(limit, value)) for key, value in base.items()}

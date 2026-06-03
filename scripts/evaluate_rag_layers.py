@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -41,17 +42,177 @@ class _TwoStageRetriever:
         self,
         first_stage: Any,
         reranker: Any,
-        first_stage_limit: int = 50,
+        first_stage_limit: int = DEFAULT_FIRST_STAGE_LIMIT,
     ) -> None:
         self._first_stage = first_stage
         self._reranker = reranker
         self._first_stage_limit = first_stage_limit
         self.last_query_plan: dict[str, Any] | None = None
+        self.search_count = 0
+        self.rerank_candidate_count = 0
+        self.rerank_elapsed_seconds = 0.0
+        self.preserved_result_count = 0
 
     def search(self, query: str, *, limit: int = 10, **filters: Any) -> Any:
         coarse = self._first_stage.search(query, limit=self._first_stage_limit, **filters)
+        self.search_count += 1
+        self.rerank_candidate_count += len(coarse)
         self.last_query_plan = getattr(self._first_stage, "last_query_plan", None)
-        return self._reranker.rerank(query, coarse, top_k=limit)
+        rerank_started = time.perf_counter()
+        reranked = self._reranker.rerank(query, coarse, top_k=max(limit, self._first_stage_limit))
+        self.rerank_elapsed_seconds += time.perf_counter() - rerank_started
+        final, observation = _preserve_route_evidence(reranked, coarse, self.last_query_plan, limit=limit)
+        self.preserved_result_count += int(observation["preserved_count"])
+        if isinstance(self.last_query_plan, dict):
+            self.last_query_plan["rerank_observation"] = observation
+        return final
+
+
+def _preserve_route_evidence(
+    reranked: list[Any],
+    coarse: list[Any],
+    query_plan: dict[str, Any] | None,
+    *,
+    limit: int,
+) -> tuple[list[Any], dict[str, Any]]:
+    selected = list(reranked[:limit])
+    selected_keys = {_retrieval_key(result) for result in selected}
+    preserved_keys: set[tuple[str, str, str, str]] = set()
+    protected_source_types = {"ranking_explanation", "gap_map", "requirement_evidence", "candidate_evidence"}
+    preserved: list[Any] = []
+    replacement_reasons: list[dict[str, Any]] = []
+    candidates_by_key = {_retrieval_key(result): result for result in coarse}
+    preserved_requirement_count = 0
+
+    for summary in _preservation_summaries(query_plan):
+        source_type = str(summary.get("source_type") or "")
+        if source_type not in protected_source_types:
+            continue
+        if source_type == "requirement_evidence" and preserved_requirement_count >= 1:
+            continue
+        key = _summary_key(summary)
+        if key in selected_keys:
+            continue
+        candidate = candidates_by_key.get(key) or _find_matching_candidate(summary, coarse)
+        if candidate is None:
+            continue
+        if not _needs_preservation(candidate, selected):
+            continue
+        replace_index = _replacement_index(selected, protected_keys=preserved_keys)
+        if replace_index is None:
+            continue
+        removed = selected[replace_index]
+        selected[replace_index] = candidate
+        selected_keys.discard(_retrieval_key(removed))
+        candidate_key = _retrieval_key(candidate)
+        selected_keys.add(candidate_key)
+        preserved_keys.add(candidate_key)
+        preserved.append(candidate)
+        if source_type == "requirement_evidence":
+            preserved_requirement_count += 1
+        replacement_reasons.append(
+            {
+                "source_id": candidate.metadata.get("source_id"),
+                "source_type": candidate.metadata.get("source_type"),
+                "jd_id": candidate.metadata.get("jd_id"),
+                "replaced_source_id": removed.metadata.get("source_id"),
+            }
+        )
+    return selected[:limit], {
+        "candidate_count": len(coarse),
+        "reranked_count": len(reranked),
+        "preserved_count": len(preserved),
+        "preserved_results": replacement_reasons,
+    }
+
+
+def _preservation_summaries(query_plan: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(query_plan, dict):
+        return []
+    route_reports = query_plan.get("route_reports")
+    if not isinstance(route_reports, list):
+        return []
+    priority = {
+        "ranking_context": 0,
+        "gap_context": 1,
+        "requirement_cross_jd_context": 2,
+        "jd_context": 3,
+        "requirement_context": 4,
+        "candidate_context": 5,
+    }
+    ordered = sorted(
+        [route for route in route_reports if isinstance(route, dict)],
+        key=lambda route: priority.get(str(route.get("name") or ""), 9),
+    )
+    summaries: list[dict[str, Any]] = []
+    for route in ordered:
+        added = route.get("added_results")
+        if not isinstance(added, list):
+            continue
+        for summary in added:
+            if isinstance(summary, dict):
+                summaries.append(summary)
+    return summaries
+
+
+def _needs_preservation(candidate: Any, selected: list[Any]) -> bool:
+    source_type = str(candidate.metadata.get("source_type") or "")
+    jd_id = str(candidate.metadata.get("jd_id") or "")
+    if source_type in {"ranking_explanation", "gap_map"}:
+        return not any(str(result.metadata.get("source_type") or "") == source_type for result in selected)
+    if source_type == "requirement_evidence" and jd_id:
+        return not any(
+            str(result.metadata.get("source_type") or "") == "requirement_evidence"
+            and str(result.metadata.get("jd_id") or "") == jd_id
+            for result in selected
+        )
+    if source_type == "candidate_evidence":
+        return not any(str(result.metadata.get("source_type") or "") == "candidate_evidence" for result in selected)
+    return False
+
+
+def _replacement_index(selected: list[Any], *, protected_keys: set[tuple[str, str, str, str]]) -> int | None:
+    if not selected:
+        return None
+    for index in range(len(selected) - 1, -1, -1):
+        if _retrieval_key(selected[index]) in protected_keys:
+            continue
+        source_type = str(selected[index].metadata.get("source_type") or "")
+        if source_type not in {"ranking_explanation", "gap_map"}:
+            return index
+    for index in range(len(selected) - 1, -1, -1):
+        if _retrieval_key(selected[index]) not in protected_keys:
+            return index
+    return None
+
+
+def _find_matching_candidate(summary: dict[str, Any], candidates: list[Any]) -> Any | None:
+    summary_source_id = str(summary.get("source_id") or "")
+    summary_artifact = str(summary.get("artifact_path") or "")
+    for candidate in candidates:
+        if summary_source_id and str(candidate.metadata.get("source_id") or "") == summary_source_id:
+            return candidate
+        if summary_artifact and str(candidate.metadata.get("artifact_path") or "") == summary_artifact:
+            return candidate
+    return None
+
+
+def _retrieval_key(result: Any) -> tuple[str, str, str, str]:
+    return (
+        str(result.metadata.get("source_type") or ""),
+        str(result.metadata.get("source_id") or ""),
+        str(result.metadata.get("chunk_index") or ""),
+        str(result.metadata.get("artifact_path") or ""),
+    )
+
+
+def _summary_key(summary: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(summary.get("source_type") or ""),
+        str(summary.get("source_id") or ""),
+        str(summary.get("chunk_index") or ""),
+        str(summary.get("artifact_path") or ""),
+    )
 
 
 def evaluate_retriever_layer(
@@ -75,6 +236,7 @@ def evaluate_retriever_layer(
 ) -> dict[str, Any]:
     from shotguncv_core.rag.retrieval import InMemoryVectorRetriever, expand_query
 
+    started_at = time.perf_counter()
     payload = _load_valid_golden(golden_file)
     samples = _filter_samples_by_golden_layer(_samples(payload), golden_layers)
     batch = build_projection_batch(run_dir)
@@ -134,7 +296,19 @@ def evaluate_retriever_layer(
             f"{coverage['matched_label_count']}/{coverage['expected_label_count']} labels matched; "
             f"missing={coverage['missing_expected_chunks']}"
         )
+    retrieval_started_at = time.perf_counter()
     metrics = evaluate_labeled_retrieval_queries(retriever=retriever, query_specs=query_specs, k_values=k_values)
+    retrieval_elapsed = time.perf_counter() - retrieval_started_at
+    no_answer_started_at = time.perf_counter()
+    no_answer_behavior = _no_answer_behavior(
+        retriever,
+        samples,
+        k_values,
+        score_threshold=no_answer_score_threshold,
+        enable_support_gate=enable_support_gate,
+    )
+    no_answer_elapsed = time.perf_counter() - no_answer_started_at
+    total_elapsed = time.perf_counter() - started_at
     report = {
         "schema_version": "rag-retriever-layer-metrics-v1",
         "run_id": run_dir.name,
@@ -163,14 +337,17 @@ def evaluate_retriever_layer(
         "golden_layer_metrics": _golden_layer_metrics(metrics["queries"], query_specs, k_values),
         "robustness_category_metrics": _robustness_category_metrics(metrics["queries"], query_specs, k_values),
         "ocr_behavior": _ocr_behavior(metrics["queries"], query_specs),
-        "no_answer_behavior": _no_answer_behavior(
-            retriever,
-            samples,
-            k_values,
-            score_threshold=no_answer_score_threshold,
-            enable_support_gate=enable_support_gate,
-        ),
+        "no_answer_behavior": no_answer_behavior,
         "smart_routing_observability": _smart_routing_observability(metrics["queries"]),
+        "timing": {
+            "total_seconds": total_elapsed,
+            "retrieval_eval_seconds": retrieval_elapsed,
+            "no_answer_eval_seconds": no_answer_elapsed,
+            "reranker_seconds": float(getattr(retriever, "rerank_elapsed_seconds", 0.0)),
+            "reranker_search_count": int(getattr(retriever, "search_count", 0)),
+            "reranker_candidate_count": int(getattr(retriever, "rerank_candidate_count", 0)),
+            "preserved_result_count": int(getattr(retriever, "preserved_result_count", 0)),
+        },
     }
     _write_json(output_path, report)
     return report
