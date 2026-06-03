@@ -28,6 +28,7 @@ def test_evaluate_retriever_layer_uses_rag_golden_schema(tmp_path: Path) -> None
         output_path=tmp_path / "retriever.json",
         k_values=[1, 3],
         embedding_model=_KeywordEmbeddingModel(),
+        reranker_model=None,
     )
 
     assert report["schema_version"] == "rag-retriever-layer-metrics-v1"
@@ -85,6 +86,7 @@ def test_evaluate_retriever_layer_fails_no_answer_gate_when_score_crosses_thresh
         k_values=[1, 3],
         embedding_model=_KeywordEmbeddingModel(),
         no_answer_score_threshold=0.1,
+        reranker_model=None,
     )
 
     gate = report["no_answer_behavior"]["quality_gate"]
@@ -110,11 +112,78 @@ def test_evaluate_retriever_layer_can_select_hybrid_retriever(tmp_path: Path) ->
         k_values=[1, 3],
         embedding_model=_KeywordEmbeddingModel(),
         retriever_mode="hybrid",
+        reranker_model=None,
     )
 
     assert report["retriever_mode"] == "hybrid"
     assert report["retriever_type"] == "InMemoryHybridRetriever"
     assert report["metrics"]["query_count"] == 25
+
+
+def test_evaluate_retriever_layer_wraps_smart_router_with_reranker(tmp_path: Path, monkeypatch) -> None:
+    from shotguncv_core.rag import reranking
+
+    class FakeReranker:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def rerank(self, query: str, results: list[object], *, top_k: int) -> list[object]:
+            return results[:top_k]
+
+    monkeypatch.setattr(reranking, "CrossEncoderReranker", FakeReranker)
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    _write_json(golden_path, payload)
+    run_dir = _write_run_with_expected_documents(tmp_path / "run", payload)
+
+    report = evaluate_retriever_layer(
+        run_dir=run_dir,
+        golden_file=golden_path,
+        output_path=tmp_path / "retriever.json",
+        k_values=[1, 3],
+        embedding_model=_KeywordEmbeddingModel(),
+        retriever_mode="hybrid",
+        query_strategy="smart",
+        reranker_model="fake-reranker",
+        first_stage_limit=7,
+    )
+
+    assert report["query_strategy"] == "smart"
+    assert report["reranker_model"] == "fake-reranker"
+    assert report["first_stage_limit"] == 7
+    assert "SmartRouterRetriever" in report["retriever_type"]
+    assert "fake-reranker" in report["retriever_type"]
+    assert any("query_plan" in item for item in report["metrics"]["queries"])
+
+
+def test_evaluate_retriever_layer_enables_default_reranker(tmp_path: Path, monkeypatch) -> None:
+    from scripts import evaluate_rag_layers
+    from shotguncv_core.rag import reranking
+
+    class FakeReranker:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def rerank(self, query: str, results: list[object], *, top_k: int) -> list[object]:
+            return results[:top_k]
+
+    monkeypatch.setattr(reranking, "CrossEncoderReranker", FakeReranker)
+    golden_path = tmp_path / "golden.json"
+    payload = _golden_payload()
+    _write_json(golden_path, payload)
+    run_dir = _write_run_with_expected_documents(tmp_path / "run", payload)
+
+    report = evaluate_retriever_layer(
+        run_dir=run_dir,
+        golden_file=golden_path,
+        output_path=tmp_path / "retriever.json",
+        k_values=[1, 3],
+        embedding_model=_KeywordEmbeddingModel(),
+    )
+
+    assert report["reranker_model"] == evaluate_rag_layers.DEFAULT_RERANKER_MODEL
+    assert report["first_stage_limit"] == evaluate_rag_layers.DEFAULT_FIRST_STAGE_LIMIT
+    assert evaluate_rag_layers.DEFAULT_RERANKER_MODEL in report["retriever_type"]
 
 
 def test_evaluate_retriever_layer_can_filter_headline_golden_layer(tmp_path: Path) -> None:
@@ -132,6 +201,7 @@ def test_evaluate_retriever_layer_can_filter_headline_golden_layer(tmp_path: Pat
         k_values=[1, 3],
         embedding_model=_KeywordEmbeddingModel(),
         golden_layers=["core_high_info"],
+        reranker_model=None,
     )
 
     assert report["golden_layer_filter"] == ["core_high_info"]

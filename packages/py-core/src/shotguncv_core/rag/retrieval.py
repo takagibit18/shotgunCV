@@ -275,11 +275,12 @@ class SmartRouterRetriever:
             enable_support_gate=self._enable_support_gate,
             filters=clean_filters,
         )
-        results = self._execute_plan(plan, limit=limit, filters=clean_filters)
+        results, route_reports = self._execute_plan(plan, limit=limit, filters=clean_filters)
         self.last_query_plan = {
             **plan,
             "broad_observation": _hit_distribution(broad_bm25),
             "hybrid_observation": _hit_distribution(broad_hybrid),
+            "route_reports": route_reports,
             "support_gate": _support_gate_status(query, results, self._enable_support_gate),
         }
         return results
@@ -290,22 +291,40 @@ class SmartRouterRetriever:
         *,
         limit: int,
         filters: dict[str, Any],
-    ) -> list[RetrievalResult]:
+    ) -> tuple[list[RetrievalResult], list[dict[str, Any]]]:
         combined: list[RetrievalResult] = []
         seen: set[tuple[str, str, str, str]] = set()
+        route_reports: list[dict[str, Any]] = []
         for route in plan["routes"]:
             retriever = self._hybrid if route["retriever_mode"] == "hybrid" else self._bm25
             route_filters = {**filters, **route.get("filters", {})}
             route_results = retriever.search(str(route["query"]), limit=int(route["limit"]), **route_filters)
+            added_results: list[RetrievalResult] = []
             for result in route_results:
                 key = _result_key(result)
                 if key in seen:
                     continue
                 seen.add(key)
                 combined.append(result)
+                added_results.append(result)
                 if len(combined) >= limit:
-                    return combined
-        return combined
+                    break
+            route_reports.append(
+                {
+                    "name": str(route.get("name") or "route"),
+                    "query": str(route.get("query") or ""),
+                    "retriever_mode": str(route.get("retriever_mode") or ""),
+                    "filters": route_filters,
+                    "limit": int(route["limit"]),
+                    "retrieved_count": len(route_results),
+                    "added_count": len(added_results),
+                    "results": [_result_summary(result) for result in route_results],
+                    "added_results": [_result_summary(result) for result in added_results],
+                }
+            )
+            if len(combined) >= limit:
+                return combined, route_reports
+        return combined, route_reports
 
 
 def build_smart_query_plan(
@@ -322,6 +341,12 @@ def build_smart_query_plan(
     complex_reasons = detect_complex_query(query, broad_hits)
     risk_reasons = detect_risk_query(query, broad_hits)
     claim_signal = detect_no_answer_strong_claim(query)
+    route_quota_profile = _route_quota_profile(
+        query,
+        broad_hits,
+        complex_reasons=complex_reasons,
+        risk_reasons=risk_reasons,
+    )
     reasons = [*rewrite["reasons"], *complex_reasons, *risk_reasons]
     if claim_signal["triggered"]:
         reasons.extend(claim_signal["reasons"])
@@ -331,9 +356,9 @@ def build_smart_query_plan(
     if rewrite["terms"]:
         routes.append({"name": "rewrite", "query": rewrite["expanded_query"], "retriever_mode": "hybrid", "limit": limit})
     if complex_reasons:
-        routes.extend(_context_routes(query, broad_hits, limit=limit))
+        routes.extend(_context_routes(query, broad_hits, limit=limit, quota_profile=route_quota_profile))
     if risk_reasons:
-        routes.extend(_risk_routes(query, broad_hits, limit=limit))
+        routes.extend(_risk_routes(query, broad_hits, limit=limit, quota_profile=route_quota_profile))
     if enable_support_gate and claim_signal["triggered"]:
         routes.insert(
             0,
@@ -357,6 +382,7 @@ def build_smart_query_plan(
         "reasons": _unique_terms(reasons),
         "rewrite_terms": rewrite["terms"],
         "decomposition_stages": [route["name"] for route in routes if route["name"] not in {"broad", "rewrite"}],
+        "route_quota_profile": route_quota_profile,
         "fallback_used": any(route["name"] in {"broad", "broad_fallback"} for route in routes),
         "oracle_free": True,
         "filters": filters or {},
@@ -412,36 +438,70 @@ def detect_risk_query(query: str, broad_hits: list[RetrievalResult]) -> list[str
 
 
 def detect_no_answer_strong_claim(query: str) -> dict[str, Any]:
-    terms = ["能否证明", "是否等于", "专家", "资深", "平台工程经验", "模型训练", "微调", "生产运维"]
-    matched = [term for term in terms if term in query]
+    terms = [
+        "能否证明",
+        "是否等于",
+        "专家",
+        "资深",
+        "平台工程经验",
+        "模型训练",
+        "微调",
+        "生产运维",
+        "prove",
+        "equal",
+        "expert",
+        "senior",
+        "architect",
+        "platform engineering",
+        "model training",
+        "fine tuning",
+        "fine-tuning",
+        "production operations",
+    ]
+    query_lower = query.lower()
+    matched = [term for term in terms if term in query_lower]
     return {"triggered": bool(matched), "claim": query, "matched_terms": matched, "reasons": ["strong_claim_signal"] if matched else []}
 
 
-def _context_routes(query: str, broad_hits: list[RetrievalResult], *, limit: int) -> list[dict[str, Any]]:
+def _context_routes(
+    query: str,
+    broad_hits: list[RetrievalResult],
+    *,
+    limit: int,
+    quota_profile: str,
+) -> list[dict[str, Any]]:
+    quotas = _route_quotas(quota_profile, limit=limit)
     routes = [
-        {"name": "candidate_context", "query": f"{query}\ncandidate evidence project education skills", "retriever_mode": "hybrid", "filters": {"source_type": "candidate_evidence"}, "limit": min(3, limit)},
-        {"name": "requirement_context", "query": f"{query}\njd requirement evidence status", "retriever_mode": "hybrid", "filters": {"source_type": "requirement_evidence"}, "limit": min(4, limit)},
+        {"name": "candidate_context", "query": f"{query}\ncandidate evidence project education skills", "retriever_mode": "hybrid", "filters": {"source_type": "candidate_evidence"}, "limit": quotas["candidate_context"]},
+        {"name": "requirement_context", "query": f"{query}\njd requirement evidence status supporting evidence requirement match", "retriever_mode": "hybrid", "filters": {"source_type": "requirement_evidence"}, "limit": quotas["requirement_context"]},
     ]
     for jd_id in _top_jd_ids(broad_hits, max_count=3):
         routes.append(
             {
                 "name": "jd_context",
-                "query": f"{query}\njd requirement evidence status",
+                "query": f"{query}\njd requirement evidence status supporting evidence requirement match",
                 "retriever_mode": "hybrid",
                 "filters": {"jd_id": jd_id, "source_type": "requirement_evidence"},
-                "limit": min(3, limit),
+                "limit": quotas["jd_context"],
             }
         )
     return routes
 
 
-def _risk_routes(query: str, broad_hits: list[RetrievalResult], *, limit: int) -> list[dict[str, Any]]:
+def _risk_routes(
+    query: str,
+    broad_hits: list[RetrievalResult],
+    *,
+    limit: int,
+    quota_profile: str,
+) -> list[dict[str, Any]]:
+    quotas = _route_quotas(quota_profile, limit=limit)
     jd_id = _top_jd_id(broad_hits)
     base_filters = {"jd_id": jd_id} if jd_id else {}
     return [
-        {"name": "risk_primary_context", "query": f"{query}\njd requirement evidence status primary evidence", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "requirement_evidence"}, "limit": min(4, limit)},
-        {"name": "gap_context", "query": f"{query}\ngap missing weak point gap_map risk", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "gap_map"}, "limit": min(3, limit)},
-        {"name": "ranking_context", "query": f"{query}\nranking decision risk flags ranking_explanation", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "ranking_explanation"}, "limit": min(3, limit)},
+        {"name": "risk_primary_context", "query": f"{query}\njd requirement evidence status primary evidence supporting evidence", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "requirement_evidence"}, "limit": quotas["risk_primary_context"]},
+        {"name": "gap_context", "query": f"{query}\ngap missing weak point gap_map risk supporting evidence missing requirement negative evidence coverage gap", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "gap_map"}, "limit": quotas["gap_context"]},
+        {"name": "ranking_context", "query": f"{query}\nranking decision risk flags ranking_explanation decision summary positive signal negative signal conservative decision", "retriever_mode": "hybrid", "filters": {**base_filters, "source_type": "ranking_explanation"}, "limit": quotas["ranking_context"]},
     ]
 
 
@@ -451,8 +511,65 @@ def _top_jd_id(hits: list[RetrievalResult]) -> str | None:
 
 
 def _top_jd_ids(hits: list[RetrievalResult], *, max_count: int) -> list[str]:
-    jd_ids = [str(hit.metadata.get("jd_id") or "") for hit in hits[:10] if hit.metadata.get("jd_id")]
-    return [jd_id for jd_id, _ in Counter(jd_ids).most_common(max_count)]
+    top_hits = [hit for hit in hits[:10] if hit.metadata.get("jd_id")]
+    if not top_hits:
+        return []
+    max_score = max(max(0.0, hit.score) for hit in top_hits) or 1.0
+    by_jd: dict[str, list[RetrievalResult]] = {}
+    for hit in top_hits:
+        by_jd.setdefault(str(hit.metadata.get("jd_id") or ""), []).append(hit)
+    scored: list[tuple[str, float]] = []
+    for jd_id, jd_hits in by_jd.items():
+        frequency = len(jd_hits) / len(top_hits)
+        best_score = max(max(0.0, hit.score) for hit in jd_hits) / max_score
+        score_sum = sum(max(0.0, hit.score) for hit in jd_hits) / (max_score * len(top_hits))
+        source_balance = min(
+            1.0,
+            len({str(hit.metadata.get("source_type") or "") for hit in jd_hits if hit.metadata.get("source_type")}) / 3.0,
+        )
+        scored.append((jd_id, (0.25 * frequency) + (0.35 * best_score) + (0.25 * score_sum) + (0.15 * source_balance)))
+    return [jd_id for jd_id, _ in sorted(scored, key=lambda item: item[1], reverse=True)[:max_count]]
+
+
+def _route_quota_profile(
+    query: str,
+    broad_hits: list[RetrievalResult],
+    *,
+    complex_reasons: list[str],
+    risk_reasons: list[str],
+) -> str:
+    source_types = {str(hit.metadata.get("source_type") or "") for hit in broad_hits[:10]}
+    if "candidate_evidence" in source_types and (
+        "requirement_evidence" in source_types
+        or "ranking_explanation" in source_types
+        or "gap_map" in source_types
+    ):
+        return "cross_section_like"
+    if risk_reasons:
+        return "risk_gap_like"
+    if "broad_hits_multi_jd" in complex_reasons:
+        return "multi_document_like"
+    if complex_reasons:
+        return "complex_like"
+    return "default"
+
+
+def _route_quotas(profile: str, *, limit: int) -> dict[str, int]:
+    base = {
+        "candidate_context": 3,
+        "requirement_context": 4,
+        "jd_context": 3,
+        "risk_primary_context": 4,
+        "gap_context": 3,
+        "ranking_context": 3,
+    }
+    if profile == "cross_section_like":
+        base.update({"candidate_context": 2, "requirement_context": 5, "jd_context": 4})
+    if profile == "multi_document_like":
+        base.update({"candidate_context": 2, "requirement_context": 6, "jd_context": 4})
+    if profile == "risk_gap_like":
+        base.update({"risk_primary_context": 5, "gap_context": 4, "ranking_context": 4})
+    return {key: max(1, min(limit, value)) for key, value in base.items()}
 
 
 def _unique_terms(terms: list[str]) -> list[str]:
@@ -479,20 +596,78 @@ def _hit_distribution(hits: list[RetrievalResult]) -> dict[str, Any]:
     }
 
 
+def _result_summary(result: RetrievalResult) -> dict[str, Any]:
+    return {
+        "source_type": result.metadata.get("source_type"),
+        "source_id": result.metadata.get("source_id"),
+        "artifact_path": result.metadata.get("artifact_path"),
+        "provenance_summary": result.metadata.get("provenance_summary"),
+        "score": result.score,
+    }
+
+
 def _support_gate_status(query: str, results: list[RetrievalResult], enabled: bool) -> dict[str, Any]:
     signal = detect_no_answer_strong_claim(query)
     triggered = enabled and signal["triggered"]
-    direct_overlap = bool(set(_tokens(query)) & set(_tokens(" ".join(result.text for result in results[:3]))))
+    evidence_text = " ".join(result.text for result in results[:3])
+    direct_overlap = bool(set(_tokens(query)) & set(_tokens(evidence_text)))
+    directly_supported = _directly_supports_strong_claim(query, evidence_text)
     status = "not_triggered"
     if triggered:
-        status = "supported_candidate" if direct_overlap and results else "abstained"
+        if directly_supported:
+            status = "supported_candidate"
+        elif direct_overlap and results:
+            status = "overlap_only"
+        else:
+            status = "abstained"
     return {
         "triggered": triggered,
         "claim": signal["claim"] if signal["triggered"] else None,
         "support_status": status,
         "reason": "strong_claim_candidate_evidence_check" if triggered else "no_strong_claim_signal",
-        "blocked_generator": triggered and status == "abstained",
+        "blocked_generator": triggered and status in {"abstained", "overlap_only"},
     }
+
+
+def _directly_supports_strong_claim(query: str, evidence_text: str) -> bool:
+    claim = query.lower()
+    evidence = evidence_text.lower()
+    category_terms = {
+        "senior_expert": {
+            "claim": ["senior", "expert", "architect", "资深", "专家", "架构师"],
+            "evidence": [
+                "senior",
+                "expert",
+                "architect",
+                "principal",
+                "staff engineer",
+                "led architecture",
+                "owned architecture",
+                "架构",
+                "负责人",
+            ],
+        },
+        "model_training": {
+            "claim": ["model training", "fine tuning", "fine-tuning", "模型训练", "微调"],
+            "evidence": ["model training", "fine tuning", "fine-tuning", "trained model", "sft", "lora", "模型训练", "微调"],
+        },
+        "production_ops": {
+            "claim": ["production operations", "production ops", "运维", "生产"],
+            "evidence": ["production operations", "production ops", "on-call", "deployment", "incident", "sre", "运维", "生产"],
+        },
+        "platform_engineering": {
+            "claim": ["platform engineering", "平台工程"],
+            "evidence": ["platform engineering", "developer platform", "internal platform", "平台工程"],
+        },
+    }
+    matched_categories = [
+        values
+        for values in category_terms.values()
+        if any(term in claim for term in values["claim"])
+    ]
+    if not matched_categories:
+        return False
+    return all(any(term in evidence for term in values["evidence"]) for values in matched_categories)
 
 
 class PgVectorRetriever:
