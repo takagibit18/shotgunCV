@@ -29,6 +29,16 @@ const MODEL_FIELDS: Array<{
 export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
   const [config, setConfig] = useState(initialConfig);
   const [values, setValues] = useState<LocalConfigValues>(initialConfig.values);
+  const [advancedValues, setAdvancedValues] = useState<
+    Pick<LocalConfigValues, "openaiBaseUrl" | "openaiModel" | "generatorModel" | "judgeModel" | "visionModel" | "openaiApiKeyEnv">
+  >({
+    openaiBaseUrl: "",
+    openaiModel: "",
+    generatorModel: "",
+    judgeModel: "",
+    visionModel: "",
+    openaiApiKeyEnv: "",
+  });
   const [clearApiKey, setClearApiKey] = useState(false);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle", message: "" });
 
@@ -42,14 +52,9 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus({ kind: "saving", message: "正在保存本地配置..." });
-    const payload: Partial<LocalConfigValues> = {
-      openaiBaseUrl: values.openaiBaseUrl,
-      openaiModel: values.openaiModel,
-      generatorModel: values.generatorModel,
-      judgeModel: values.judgeModel,
-      visionModel: values.visionModel,
-      openaiApiKeyEnv: values.openaiApiKeyEnv,
-    };
+    const payload: Partial<LocalConfigValues> = Object.fromEntries(
+      Object.entries(advancedValues).filter(([, value]) => value.trim().length > 0),
+    ) as Partial<LocalConfigValues>;
     if (clearApiKey) {
       payload.openaiApiKey = "";
     } else if (values.openaiApiKey.trim()) {
@@ -59,7 +64,7 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
   }
 
   async function handleRestore() {
-    setStatus({ kind: "saving", message: "正在恢复默认 .env 结构..." });
+    setStatus({ kind: "saving", message: "正在恢复默认本地配置结构..." });
     await submitConfig("/api/settings/local-config", "POST");
   }
 
@@ -77,6 +82,14 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
       }
       setConfig(body as LocalConfigState);
       setValues((body as LocalConfigState).values);
+      setAdvancedValues({
+        openaiBaseUrl: "",
+        openaiModel: "",
+        generatorModel: "",
+        judgeModel: "",
+        visionModel: "",
+        openaiApiKeyEnv: "",
+      });
       setClearApiKey(false);
       setStatus({ kind: "success", message: "本地配置已保存。" });
     } catch {
@@ -91,14 +104,18 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
     }
   }
 
+  function updateAdvancedValue(key: keyof typeof advancedValues, value: string) {
+    setAdvancedValues((current) => ({ ...current, [key]: value }));
+  }
+
   return (
     <section className="section section-flush settings-local-config">
       <div className="section-heading queue-heading">
         <div>
-          <p className="eyebrow">本地模型配置 · .env 边界</p>
+          <p className="eyebrow">本地模型配置</p>
           <h2>密钥与模型运行参数</h2>
           <p className="section-copy">
-            仅写入项目根目录 .env；Web 不保存到浏览器存储、不写入 run_config.json，也不发起远端模型检查。
+            仅写入项目根目录的本地配置文件；网页不保存到浏览器存储、不写入运行产物，也不发起远端模型检查。
           </p>
         </div>
         <span className={config.apiKey.configured ? "status-chip success icon-chip" : "status-chip warning icon-chip"}>
@@ -109,9 +126,9 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
 
       <form className="local-config-form" onSubmit={handleSubmit}>
         <div className="local-config-status-grid" aria-label="本地配置状态">
-          <StatusCell icon="file" label=".env 文件" value={config.envExists ? "已存在" : "未创建"} tone={config.envExists ? "success" : "warning"} />
+          <StatusCell icon="file" label="配置文件" value={config.envExists ? "已存在" : "未创建"} tone={config.envExists ? "success" : "warning"} />
           <StatusCell icon="edit" label="可写状态" value={config.envWritable ? "可写" : "需检查"} tone={config.envWritable ? "success" : "warning"} />
-          <StatusCell icon="link" label="服务地址主机" value={config.baseUrlHost} tone="info" />
+          <StatusCell icon="link" label="服务地址" value={config.baseUrlHost ? "已配置" : "未配置"} tone="info" />
           <StatusCell
             icon="key"
             label="密钥状态"
@@ -147,19 +164,19 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
 
         <div className="local-config-grid">
           <label className="control-field local-config-field-with-icon">
-            <FieldLabel icon="link" text="OPENAI_BASE_URL" />
+            <FieldLabel icon="link" text="模型服务地址" />
             <input
-              value={values.openaiBaseUrl}
-              placeholder="留空使用 https://api.openai.com/v1"
-              onChange={(event) => updateValue("openaiBaseUrl", event.target.value)}
+              value={advancedValues.openaiBaseUrl}
+              placeholder={config.values.openaiBaseUrl ? "已配置，留空保持当前地址" : "留空使用默认服务地址"}
+              onChange={(event) => updateAdvancedValue("openaiBaseUrl", event.target.value)}
             />
           </label>
           <label className="control-field local-config-field-with-icon">
-            <FieldLabel icon="key" text="OPENAI_API_KEY_ENV" />
+            <FieldLabel icon="key" text="密钥来源名称" />
             <input
-              value={values.openaiApiKeyEnv}
-              placeholder="留空使用 OPENAI_API_KEY"
-              onChange={(event) => updateValue("openaiApiKeyEnv", event.target.value.toUpperCase())}
+              value={advancedValues.openaiApiKeyEnv}
+              placeholder="留空使用默认密钥来源"
+              onChange={(event) => updateAdvancedValue("openaiApiKeyEnv", event.target.value.toUpperCase())}
             />
           </label>
         </div>
@@ -169,9 +186,9 @@ export function LocalConfigPanel({ initialConfig }: LocalConfigPanelProps) {
             <label key={field.key} className="control-field local-config-field-with-icon">
               <FieldLabel icon={field.icon} text={field.label} />
               <input
-                value={values[field.key]}
-                placeholder={field.placeholder}
-                onChange={(event) => updateValue(field.key, event.target.value)}
+                value={advancedValues[field.key]}
+                placeholder={values[field.key] ? "已配置，留空保持当前模型" : field.placeholder}
+                onChange={(event) => updateAdvancedValue(field.key, event.target.value)}
               />
             </label>
           ))}
@@ -234,12 +251,12 @@ function StatusCell({
 
 function buildErrorMessage(code: string | undefined, fallback: string | undefined): string {
   const messages: Record<string, string> = {
-    env_not_found: ".env 文件不存在，请先恢复默认结构。",
-    env_unreadable: ".env 文件不可读，请检查本地权限。",
-    env_unwritable: ".env 文件不可写，请检查本地权限。",
-    invalid_base_url: "OPENAI_BASE_URL 必须是合法的 HTTP(S) URL。",
-    invalid_key_env: "OPENAI_API_KEY_ENV 必须是合法环境变量名。",
-    write_failed: "写入 .env 失败，请检查本地权限。",
+    env_not_found: "本地配置文件不存在，请先恢复默认结构。",
+    env_unreadable: "本地配置文件不可读，请检查本地权限。",
+    env_unwritable: "本地配置文件不可写，请检查本地权限。",
+    invalid_base_url: "模型服务地址必须是合法的网址。",
+    invalid_key_env: "密钥来源名称格式不正确。",
+    write_failed: "写入本地配置失败，请检查本地权限。",
   };
   return (code && messages[code]) || fallback || "本地配置保存失败。";
 }

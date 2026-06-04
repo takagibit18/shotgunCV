@@ -977,6 +977,93 @@ p {
   font-size: 18px;
 }
 
+.dashboard-workbench-grid {
+  align-items: start;
+}
+
+.dashboard-priority-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.dashboard-priority-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-priority-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 68px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.dashboard-priority-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboard-priority-row strong,
+.dashboard-priority-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-priority-row div > span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.rail-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.rail-card-heading p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dashboard-rail-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dashboard-rail-stats span,
+.dashboard-check-list span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dashboard-rail-stats strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.dashboard-check-list {
+  display: grid;
+  gap: 8px;
+}
+
 .activity-list,
 .recommendation-list {
   display: grid;
@@ -3135,6 +3222,10 @@ label.primary-link {
   .resume-card-mobile-actions {
     display: flex;
     gap: 8px;
+  }
+
+  .dashboard-priority-row {
+    grid-template-columns: 1fr;
   }
 }
 

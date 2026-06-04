@@ -32,12 +32,12 @@ export default async function JdImagePreviewPage({ params }: PageProps) {
           返回评估详情
         </Link>
         <div>
-          <p className="eyebrow">JD 图片预览</p>
+          <p className="eyebrow">岗位描述图片预览</p>
           <h1>{preview.label}</h1>
         </div>
       </header>
       <section className="jd-image-canvas" aria-label={`${preview.label} 大图预览`}>
-        <img src={preview.imageDataUrl} alt={`${preview.label} JD 图片预览`} />
+        <img src={preview.imageDataUrl} alt={`${preview.label} 岗位描述图片预览`} />
       </section>
     </main>
   );

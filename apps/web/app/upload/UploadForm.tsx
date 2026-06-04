@@ -485,7 +485,7 @@ export function UploadForm() {
             <span className="mono">{result.uploadManifestPath}</span>
           </p>
           <details className="advanced-command">
-            <summary>高级 / CLI 命令</summary>
+            <summary>高级 / 本地执行命令</summary>
             <pre className="command-block">{result.nextCommand}</pre>
           </details>
         </div>

@@ -24,7 +24,7 @@ export default async function SettingsPage() {
           </div>
           <div>
             <h1 className="page-title">本地设置与环境检查</h1>
-            <p className="hero-copy">环境健康、`.env` 边界和模型参数只反映本地状态；网页不写入本地流程产物。</p>
+            <p className="hero-copy">环境健康、本地配置边界和模型参数只反映本地状态；网页不写入本地流程产物。</p>
           </div>
         </section>
 
@@ -60,7 +60,7 @@ export default async function SettingsPage() {
           <section className="section settings-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">.env 边界</p>
+                <p className="eyebrow">本地配置边界</p>
                 <h2>本地路径</h2>
                 <p className="section-copy">网页读取本地运行目录产物；路径已脱敏，不展示完整本机目录。</p>
               </div>
@@ -78,7 +78,7 @@ export default async function SettingsPage() {
               <div>
               <p className="eyebrow">模型提供商</p>
                 <h2>最新配置快照</h2>
-                <p className="section-copy">来自最近修改且可解析的运行配置，只展示模型提供商与模型摘要。</p>
+                <p className="section-copy">来自最近修改且可解析的运行配置，只展示面向用户的配置状态，不展开模型、密钥或服务地址明细。</p>
               </div>
             </div>
             {overview.latestConfig ? <LatestConfig overview={overview} /> : <EmptyConfig />}
@@ -123,23 +123,23 @@ function LatestConfig({ overview }: { overview: SettingsOverview }) {
       <dl className="settings-list">
         <SummaryRow label="运行批次" value={config.runId} />
         <SummaryRow label="标签" value={config.label || "未命名"} />
-        <SummaryRow label="服务地址主机" value={config.baseUrlHost} />
-        <SummaryRow label="密钥环境变量" value={config.apiKeyEnv} />
-        <SummaryRow label=".env 文件" value={config.envFile || "未指定"} />
+        <SummaryRow label="服务地址" value={config.baseUrlHost ? "已配置" : "未配置"} />
+        <SummaryRow label="密钥状态" value={config.apiKeyEnv ? "已指定本地密钥来源" : "未指定"} />
+        <SummaryRow label="配置文件" value={config.envFile ? "已检测" : "未指定"} />
       </dl>
       <div className="provider-grid">
         {config.providers.map((provider) => (
           <article key={provider.role} className="provider-card">
             <span>{formatRole(provider.role)}</span>
-            <strong>{provider.provider}</strong>
-            <small>{provider.model}</small>
+            <strong>{formatProvider(provider.provider)}</strong>
+            <small>{provider.model ? "已指定模型" : "未指定模型"}</small>
           </article>
         ))}
       </div>
       <dl className="settings-list compact">
-        <SummaryRow label="文字识别提供商" value={config.inputExtraction.ocrProvider} />
-        <SummaryRow label="视觉兜底提供商" value={config.inputExtraction.visionProvider} />
-        <SummaryRow label="视觉兜底模型" value={config.inputExtraction.visionModel || "未指定"} />
+        <SummaryRow label="文字识别" value={formatProvider(config.inputExtraction.ocrProvider)} />
+        <SummaryRow label="视觉兜底" value={formatProvider(config.inputExtraction.visionProvider)} />
+        <SummaryRow label="视觉模型" value={config.inputExtraction.visionModel ? "已指定模型" : "未指定"} />
       </dl>
     </div>
   );
@@ -183,6 +183,17 @@ function formatRole(role: string): string {
     planner: "规划器",
   };
   return labels[role] ?? role;
+}
+
+function formatProvider(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    openai: "云端模型服务",
+    deterministic: "本地规则",
+    local: "本地模型服务",
+    unknown: "未知来源",
+  };
+  return labels[normalized] ?? (provider ? "自定义服务" : "未指定");
 }
 
 function buildCheckClassName(status: SettingsCheck["status"]): string {

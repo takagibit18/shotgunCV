@@ -145,7 +145,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
       {draftStatus === "draft" && dependencyReport && dependencyReport.overall !== "healthy" ? (
         <div className="notice-strip warning">
           <strong>环境不完整</strong>
-          <span>PyMuPDF 未安装或 CLI 依赖不可用，扫描件 PDF 可能解析失败。</span>
+          <span>PDF 解析依赖未安装或本地执行依赖不可用，扫描件 PDF 可能解析失败。</span>
           <a className="secondary-link" href="/settings">
             查看设置
           </a>
