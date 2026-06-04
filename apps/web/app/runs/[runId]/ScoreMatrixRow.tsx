@@ -319,13 +319,13 @@ function JdVisiblePreview({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const title = preview.label || preview.originalName || "JD 详情";
+  const title = preview.label || preview.originalName || "岗位描述详情";
   const imageHref = typeof previewIndex === "number" ? `/runs/${runId}/jd-preview/${previewIndex}` : "";
 
   if (preview.kind === "image" && preview.imageDataUrl) {
     return (
-      <div className="jd-visible-preview image" aria-label={`${title} JD 缩略预览`}>
-        <img src={preview.imageDataUrl} alt={`${title} JD 缩略预览`} />
+      <div className="jd-visible-preview image" aria-label={`${title} 岗位描述缩略预览`}>
+        <img src={preview.imageDataUrl} alt={`${title} 岗位描述缩略预览`} />
         {imageHref ? (
           <Link href={imageHref} className="jd-preview-enlarge" aria-label={`放大查看 ${title}`}>
             <InlineIcon name="external" />
@@ -340,12 +340,12 @@ function JdVisiblePreview({
       <button
         type="button"
         className="jd-visible-preview text"
-        aria-label={`查看 ${title} 的 JD 原文`}
+        aria-label={`查看 ${title} 的岗位描述原文`}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
       >
-        <span className="jd-preview-label">JD 原文</span>
+        <span className="jd-preview-label">岗位描述原文</span>
         <span className="jd-preview-excerpt">{preview.text.slice(0, 120)}</span>
         <span className="jd-preview-enlarge" aria-hidden="true">
           <InlineIcon name="external" />
@@ -355,10 +355,10 @@ function JdVisiblePreview({
   }
 
   return (
-    <div className="jd-visible-preview metadata" aria-label={`${title} 暂无可预览 JD`}>
+    <div className="jd-visible-preview metadata" aria-label={`${title} 暂无可预览岗位描述`}>
       <span className="jd-preview-label">暂无预览</span>
       <span className="jd-preview-excerpt">{preview.note ?? "当前岗位输入暂无可直接展示的文本或截图。"}</span>
-      <button type="button" className="jd-preview-enlarge" disabled={!canPreview} aria-label="暂无可预览 JD">
+      <button type="button" className="jd-preview-enlarge" disabled={!canPreview} aria-label="暂无可预览岗位描述">
         <InlineIcon name="external" />
       </button>
     </div>
@@ -382,35 +382,35 @@ function JdInlinePreview({
   onClose: () => void;
 }) {
   const previewClassName = open ? "jd-inline-preview open" : "jd-inline-preview";
-  const title = preview.label || preview.originalName || "JD 详情";
+  const title = preview.label || preview.originalName || "岗位描述详情";
   const imageHref = typeof previewIndex === "number" ? `/runs/${runId}/jd-preview/${previewIndex}` : "";
   return (
     <div
       id={panelId}
       className={previewClassName}
       role="dialog"
-      aria-label={`${title} JD 详情`}
+      aria-label={`${title} 岗位描述详情`}
       aria-hidden={!open}
     >
       <div className="jd-inline-preview-inner">
         <div className="jd-inline-preview-heading">
           <div>
-            <p className="eyebrow">JD 详情</p>
+            <p className="eyebrow">岗位描述详情</p>
             <h5>{title}</h5>
           </div>
-          <button type="button" className="jd-inline-close" aria-label="关闭 JD 详情" onClick={onClose}>
+          <button type="button" className="jd-inline-close" aria-label="关闭岗位描述详情" onClick={onClose}>
             <InlineIcon name="close" />
           </button>
         </div>
         {preview.kind === "image" && preview.imageDataUrl ? (
           imageHref ? (
             <Link href={imageHref} className="jd-inline-image-link" aria-label={`打开 ${title} 大图预览`}>
-              <img src={preview.imageDataUrl} alt={`${title} JD 截图预览`} />
+              <img src={preview.imageDataUrl} alt={`${title} 岗位描述截图预览`} />
               <span>点击放大</span>
             </Link>
           ) : (
             <div className="jd-inline-image-link">
-              <img src={preview.imageDataUrl} alt={`${title} JD 截图预览`} />
+              <img src={preview.imageDataUrl} alt={`${title} 岗位描述截图预览`} />
             </div>
           )
         ) : null}

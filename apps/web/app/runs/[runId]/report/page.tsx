@@ -81,7 +81,7 @@ export default async function ReportPage({ params }: PageProps) {
               <span className="semantic-icon blue" aria-hidden="true">
                 <Icon name="stats" />
               </span>
-              Core
+              核心结论
             </h3>
             <ul>
               {reportSummary.coreSignals.map((item) => (
@@ -96,7 +96,7 @@ export default async function ReportPage({ params }: PageProps) {
               <span className="semantic-icon blue" aria-hidden="true">
                 <Icon name="shield-alert" />
               </span>
-              Guardrail
+              风险边界
             </h3>
             <ul>
               {reportSummary.guardrailSignals.map((item) => (
@@ -231,14 +231,14 @@ function buildReportSummary(detail: DetailForReport) {
       ...toSummaryItems(topExplanation?.risk_flags, "风险标记"),
     ]),
     coreSignals: [
-      `final score: ${formatOptionalPercent(finalScore)}`,
-      `risk score: ${formatOptionalPercent(riskScore)}`,
-      `decision source: ${topScorecard?.final_decision_source || "unknown"}`,
+      `综合得分：${formatOptionalPercent(finalScore)}`,
+      `风险水平：${formatOptionalPercent(riskScore)}`,
+      `决策依据：${formatUserText(topScorecard?.final_decision_source || "未提供")}`,
     ],
     guardrailSignals: [
-      `gate status: ${topScorecard?.gate_status || "unknown"}`,
-      ...(guardrailFlags.length ? guardrailFlags.map((flag) => `guardrail flag: ${flag}`) : ["guardrail flag: none"]),
-      ...gateReasons.map((reason) => `gate reason: ${reason}`),
+      `门槛状态：${formatUserText(topScorecard?.gate_status || "未提供")}`,
+      ...(guardrailFlags.length ? guardrailFlags.map((flag) => `风险标记：${formatUserText(flag)}`) : ["风险标记：无"]),
+      ...gateReasons.map((reason) => `门槛原因：${formatUserText(reason)}`),
     ],
   };
 }
@@ -250,7 +250,7 @@ function toRawStringArray(value: unknown): string[] {
 
 
 function formatOptionalPercent(value: unknown): string {
-  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value * 100)}%` : "unknown";
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value * 100)}%` : "未提供";
 }
 
 
@@ -279,7 +279,12 @@ function uniqueItems(items: Array<SummaryItem | null>): SummaryItem[] {
 
 
 function sanitizeReportMarkdown(markdown: string): string {
-  return markdown.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => formatUserText(token));
+  return markdown
+    .replace(/来源：/g, "依据：")
+    .replace(/ShotgunCV v[\d.]+ LLM Eval Summary/g, "评估摘要")
+    .replace(/Ranked Application Strategy/g, "投递策略排序")
+    .replace(/Top Evidence/g, "关键证据")
+    .replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => formatUserText(token));
 }
 
 
@@ -304,6 +309,12 @@ function formatUserText(value: string): string {
     risk_score: "风险",
     gate_status: "门槛状态",
     apply_decision: "投递建议",
+    blocked: "已阻断",
+    "preflight-gate": "前置检查",
+    "llm-primary": "主模型判断",
   };
+  if (labels[value]) {
+    return labels[value];
+  }
   return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
 }

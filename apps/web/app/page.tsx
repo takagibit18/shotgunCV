@@ -16,43 +16,43 @@ const FEATURES: Array<{
   {
     icon: "briefcase",
     title: "从岗位反推简历策略",
-    body: "从 JD 中提炼要求，生成可执行的简历优化方向，让修改有明确依据。",
+    body: "从岗位描述中提炼要求，生成可执行的简历优化方向，让修改有明确依据。",
   },
   {
     icon: "shield-check",
     title: "本地优先，边界清晰",
-    body: "Web 用于状态定位、风险提示与结果查看，不替代本地 CLI pipeline。",
+    body: "网页用于状态定位、风险提示与结果查看，不替代本地执行流程。",
   },
   {
     icon: "check-square",
     title: "证据化评估结果",
-    body: "输出 scorecard、gap map、匹配度、风险项与下一步建议。",
+    body: "输出评分摘要、差距分析、匹配度、风险项与下一步建议。",
   },
   {
     icon: "layers",
     title: "串联完整工作流",
-    body: "将 ingest、analyze、generate、evaluate、plan、report 串成完整流程。",
+    body: "将导入、分析、生成、评估、计划和报告串成完整流程。",
   },
 ];
 
 const USAGE_STEPS = [
-  "上传简历、补充材料和岗位描述，创建可复现的本地 run。",
-  "按草稿命令执行 pipeline，让本地流程生成结构化产物。",
+  "上传简历、补充材料和岗位描述，创建可复现的本地任务。",
+  "按草稿命令执行本地流程，让系统生成结构化产物。",
   "回到 Web 查看证据、风险、差距和下一步优化策略。",
 ];
 
 const FAQS = [
   {
-    question: "首页会展示原始 CV 或 JD 内容吗？",
-    answer: "不会。首页只展示 run 元数据、流程状态、风险提示和入口动作，避免暴露原始文本。",
+    question: "首页会展示原始简历或岗位描述内容吗？",
+    answer: "不会。首页只展示任务元数据、流程状态、风险提示和入口动作，避免暴露原始文本。",
   },
   {
-    question: "Web 会替代本地 CLI pipeline 吗？",
-    answer: "不会。Web 是工作流入口和证据复核层，核心执行仍保持本地优先。",
+    question: "网页会替代本地执行流程吗？",
+    answer: "不会。网页是工作流入口和证据复核层，核心执行仍保持本地优先。",
   },
   {
     question: "第一次打开应该先做什么？",
-    answer: "先创建草稿 run，再执行本地 pipeline，最后复核评估和简历优化结果。",
+    answer: "先创建投递草稿，再执行本地流程，最后复核评估和简历优化结果。",
   },
 ];
 
@@ -78,12 +78,12 @@ export default async function HomePage() {
         <div className="landing-hero-copy">
           <span className="landing-badge">
             <Icon name="sparkle" />
-            AI-Powered
+            智能辅助
           </span>
           <h1 id="landing-hero-title">从岗位输入到证据化简历策略，一屏掌控</h1>
-          <p className="landing-hero-lead">从 JD 输入、草稿 run、pipeline 执行到证据复核，帮助你高效完成简历优化与投递准备。</p>
+          <p className="landing-hero-lead">从岗位输入、投递草稿、本地执行到证据复核，帮助你高效完成简历优化与投递准备。</p>
           <p className="landing-hero-support">
-            ShotgunCV Web 保持本地优先：只展示 run 产物、评分证据、风险提示和下一步动作，不暴露原始 CV/JD 正文，只聚焦当前 workflow。
+            ShotgunCV 网页端保持本地优先：只展示任务产物、评分证据、风险提示和下一步动作，不暴露原始简历或岗位正文，只聚焦当前工作流。
           </p>
           <div className="landing-actions">
             <Link href="/upload" className="landing-button primary">
@@ -232,8 +232,8 @@ function HeroShowcase({
       </div>
       <div className="landing-product-card">
         <div className="landing-product-left">
-          <span className="landing-product-label">Workflow Health</span>
-          <strong>{totalRuns === 0 ? "等待首个 run" : `${totalRuns} 个 run 已接入`}</strong>
+          <span className="landing-product-label">流程健康度</span>
+          <strong>{totalRuns === 0 ? "等待首个任务" : `${totalRuns} 个任务已接入`}</strong>
           <div className="landing-pipeline-track" aria-label={`阶段覆盖 ${stageCoverage}%`}>
             {["ingest", "analyze", "generate", "evaluate", "plan", "report"].map((stage, index) => (
               <span key={stage} className={index < Math.max(1, Math.ceil((stageCoverage / 100) * STAGE_TOTAL)) ? "active" : ""} />

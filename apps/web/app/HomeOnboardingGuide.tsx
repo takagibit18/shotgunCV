@@ -25,15 +25,15 @@ const GUIDE_STEPS: Array<{
   {
     step: "01",
     title: "整理输入",
-    body: "上传 CV、补充材料和 JD。Web 只保存文件与元数据，不在浏览器里展开原文。",
+    body: "上传简历、补充材料和岗位描述。网页只保存文件与元数据，不在浏览器里展开原文。",
     href: "/upload",
-    action: "创建草稿 run",
+    action: "创建投递草稿",
     icon: "image-upload",
   },
   {
     step: "02",
-    title: "执行 pipeline",
-    body: "按照草稿返回的本地命令运行 ingest、analyze、generate、evaluate、plan、report。",
+    title: "执行本地流程",
+    body: "按照草稿返回的本地命令运行导入、分析、生成、评估、计划和报告。",
     href: "/runs",
     action: "查看运行队列",
     icon: "play",
@@ -41,7 +41,7 @@ const GUIDE_STEPS: Array<{
   {
     step: "03",
     title: "复核证据",
-    body: "在简历优化与评估结果中检查 scorecard、gate、gap map 和策略建议。",
+    body: "在简历优化与评估结果中检查评分摘要、门槛判断、差距分析和策略建议。",
     href: "/evaluations",
     action: "查看评估结果",
     icon: "shield-check",
@@ -55,7 +55,7 @@ export function HomeOnboardingGuide({ totalRuns, draftRuns, activeRuns }: HomeOn
   const activeStep = GUIDE_STEPS[activeIndex];
   const progressText = `${activeIndex + 1} / ${GUIDE_STEPS.length}`;
   const statusText = useMemo(
-    () => `当前有 ${totalRuns} 个 run，${draftRuns} 个草稿，${activeRuns} 个运行中。`,
+    () => `当前有 ${totalRuns} 个任务，${draftRuns} 个草稿，${activeRuns} 个运行中。`,
     [activeRuns, draftRuns, totalRuns],
   );
 
@@ -127,7 +127,7 @@ export function HomeOnboardingGuide({ totalRuns, draftRuns, activeRuns }: HomeOn
         <div>
           <span className="landing-kicker">打开后的第一步</span>
           <h2 id="workflow-title">先把工作流跑通，再进入证据复核</h2>
-          <p>首次进入时先给出可执行路径，同时保留 ShotgunCV 的本地执行边界：Web 帮你定位状态、风险和下一步，不替代 CLI pipeline。</p>
+          <p>首次进入时先给出可执行路径，同时保留 ShotgunCV 的本地执行边界：网页帮你定位状态、风险和下一步，不替代本地执行流程。</p>
         </div>
         <button className="landing-workflow-dismiss" type="button" onClick={handleDismiss}>
           收起

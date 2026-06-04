@@ -320,10 +320,14 @@ describe("run viewer data loading", () => {
 
     const html = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-v057" }) }));
 
-    expect(html).toContain("Core");
-    expect(html).toContain("Guardrail");
-    expect(html).toContain("hard_gate_missing");
-    expect(html).toContain("risk score");
+    expect(html).toContain("核心结论");
+    expect(html).toContain("风险边界");
+    expect(html).toContain("硬性要求缺少证据");
+    expect(html).toContain("风险水平");
+    expect(html).not.toContain("Core");
+    expect(html).not.toContain("Guardrail");
+    expect(html).not.toContain("hard_gate_missing");
+    expect(html).not.toContain("risk score");
   });
 
   it("creates a draft run with uploaded files and a metadata-only manifest", async () => {
@@ -1105,6 +1109,11 @@ describe("run viewer pages", () => {
     expect(runsHtml).toContain("阶段筛选");
     expect(runsHtml).toContain("排序");
     expect(runsHtml).toContain("集中查看每个投递的状态");
+    expect(runsHtml).toContain("内部工作台");
+    expect(runsHtml).toContain("优先处理");
+    expect(runsHtml).toContain("可导出简历");
+    expect(runsHtml).toContain("简历交付");
+    expect(runsHtml).toContain("检索增强等性能强化暂缓");
     expect(runsHtml).toContain("operational-shell");
     expect(html).not.toContain("editorial-hero");
     expect(html).not.toContain("dark-product-surface");
@@ -1139,8 +1148,8 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("/upload");
-    expect(html).toContain("创建草稿 run");
-    expect(html).toContain("等待首个 run");
+    expect(html).toContain("创建投递草稿");
+    expect(html).toContain("等待首个任务");
     expect(html).toContain("整理输入");
   });
 
@@ -1154,7 +1163,11 @@ describe("run viewer pages", () => {
     const dashboardHtml = renderToStaticMarkup(await HomePage());
     const html = renderToStaticMarkup(await RunsPage());
 
-    expect(dashboardHtml).toContain("Workflow Health");
+    expect(dashboardHtml).toContain("流程健康度");
+    expect(dashboardHtml).not.toContain("Workflow Health");
+    expect(html).toContain("内部工作台");
+    expect(html).toContain("优先处理");
+    expect(html).toContain("待处理投递");
     expect(dashboardHtml).toContain("完成率");
     expect(dashboardHtml).toContain("打开运行队列");
     expect(html).toContain("运行队列");
@@ -1217,6 +1230,7 @@ describe("run viewer pages", () => {
     expect(html).toContain("草稿");
     expect(html).not.toContain("JD 详情");
     expect(html).not.toContain("查看 JD 详情");
+    expect(html).not.toContain("JD 原文");
     expect(html).not.toContain("shotguncv run");
     expect(html).not.toContain("input_files/cv");
     expect(html).not.toContain("输入来源");
@@ -1254,8 +1268,10 @@ describe("run viewer pages", () => {
       kind: "text",
       text: "jd text",
     });
-    expect(html).toContain("JD 详情");
-    expect(html).toContain("JD 原文");
+    expect(html).toContain("岗位描述详情");
+    expect(html).not.toContain("JD 详情");
+    expect(html).toContain("岗位描述原文");
+    expect(html).not.toContain("JD 原文");
     expect(html).toContain("jd text");
     expect(html).toContain("Example AI - LLM Product Engineer");
     expect(html).not.toContain("输入来源");
@@ -1310,7 +1326,8 @@ describe("run viewer pages", () => {
     const previewHtml = renderToStaticMarkup(
       await JdImagePreviewPage({ params: Promise.resolve({ runId: "demo-full", index: "0" }) }),
     );
-    expect(previewHtml).toContain("JD 图片预览");
+    expect(previewHtml).toContain("岗位描述图片预览");
+    expect(previewHtml).not.toContain("JD 图片预览");
     expect(previewHtml).toContain("返回评估详情");
     expect(previewHtml).toContain("Example AI - Screenshot JD");
   });
@@ -1448,7 +1465,8 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-full" }) }));
 
-    expect(html).toContain("ShotgunCV v0.3.0 LLM Eval Summary");
+    expect(html).toContain("评估摘要");
+    expect(html).not.toContain("ShotgunCV v0.3.0 LLM Eval Summary");
     expect(html).toContain("LLM Product Engineer");
     expect(html).toContain("推荐结论");
     expect(html).toContain("关键证据");
@@ -1736,10 +1754,13 @@ describe("run viewer pages", () => {
     expect(overview.displayRunsDir).not.toContain(runsDir);
     expect(html).toContain("设置");
     expect(html).toContain("本地设置与环境检查");
-    expect(html).toContain("api.openai.com");
-    expect(html).toContain("OPENAI_API_KEY");
-    expect(html).toContain("local_ocr");
-    expect(html).toContain("openai_vision");
+    expect(html).toContain("服务地址");
+    expect(html).toContain("密钥状态");
+    expect(html).toContain("自定义服务");
+    expect(html).not.toContain("api.openai.com");
+    expect(html).not.toContain("OPENAI_API_KEY");
+    expect(html).not.toContain("local_ocr");
+    expect(html).not.toContain("openai_vision");
     expect(html).toContain("环境检查");
     expect(html).not.toContain(runsDir);
     expect(html).not.toContain("sk-sensitive-test-key");
@@ -1862,12 +1883,12 @@ describe("run viewer pages", () => {
     expect(html).toContain("本地模型配置");
     expect(html).toContain("密钥与模型运行参数");
     expect(html).toContain("环境健康");
-    expect(html).toContain(".env 边界");
+    expect(html).toContain("本地配置边界");
     expect(html).toContain("密钥状态");
     expect(html).toContain("local-config-field-with-icon");
     expect(html).toContain("已配置 · ****7777");
-    expect(html).toContain("api.openai.com");
-    expect(html).toContain("gpt-5.4-mini");
+    expect(html).not.toContain("api.openai.com");
+    expect(html).not.toContain("gpt-5.4-mini");
     expect(html).not.toContain("OCR 语言");
     expect(html).not.toContain("eng+chi_sim");
     expect(html).not.toContain("sk-page-secret-7777");
