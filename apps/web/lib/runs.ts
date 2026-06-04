@@ -1,4 +1,4 @@
-import { access, readdir, readFile, stat } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -52,6 +52,52 @@ type EvaluateTopVariant = {
 type DisplayVariant = ResumeVariant & {
   variantDisplayName: string;
   variantTypeDisplay: string;
+};
+
+type GeneratedResumeSection = {
+  title?: string;
+  content?: string;
+  evidence_refs?: string[];
+  rewrite_strategy?: string;
+  verification_status?: string;
+};
+
+type GeneratedResume = {
+  resume_id?: string;
+  display_name?: string;
+  target_jd_id?: string;
+  target_variant_id?: string;
+  status?: "deliverable" | "needs_review" | "blocked" | string;
+  markdown?: string;
+  sections?: GeneratedResumeSection[];
+  forbidden_items?: string[];
+  to_verify_items?: string[];
+  provenance?: {
+    candidate_evidence?: string[];
+    generated_from?: string[];
+    user_confirmations?: string[];
+  };
+};
+
+type UserEvidenceOverrideAction =
+  | "confirm_existing"
+  | "supplement_material"
+  | "mark_unsatisfied"
+  | "skip_requirement";
+
+type UserEvidenceOverride = {
+  jd_id: string;
+  requirement_id: string;
+  action: UserEvidenceOverrideAction;
+  note: string;
+  source: "user";
+  updated_at: string;
+};
+
+type UserEvidenceOverridesArtifact = {
+  schema_version: string;
+  run_id: string;
+  overrides: UserEvidenceOverride[];
 };
 
 type InputSourceDisplay = {
@@ -155,6 +201,7 @@ type RunDetail = {
   generate: {
     isComplete: boolean;
     variants: DisplayVariant[];
+    generatedResumes: GeneratedResume[];
   };
   evaluate: {
     isComplete: boolean;
@@ -178,6 +225,7 @@ type RunDetail = {
   review: {
     postRunReview: PostRunReview | null;
     interviewPrepMarkdown: string;
+    userEvidenceOverrides: UserEvidenceOverridesArtifact | null;
   };
 };
 
@@ -266,6 +314,8 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const preflightGates =
     (await readJsonIfExists<PreflightGate[]>(path.join(runDir, "analyze", "preflight_gates.json"))) ?? [];
   const variants = (await readJsonIfExists<ResumeVariant[]>(path.join(runDir, "generate", "resume_variants.json"))) ?? [];
+  const generatedResumes =
+    (await readJsonIfExists<GeneratedResume[]>(path.join(runDir, "generate", "generated_resumes.json"))) ?? [];
   const displayVariants: DisplayVariant[] = variants.map((variant) => ({
     ...variant,
     variantDisplayName: buildVariantDisplayName(variant.variant_id),
@@ -279,6 +329,9 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const strategies =
     (await readJsonIfExists<ApplicationStrategy[]>(path.join(runDir, "plan", "application_strategies.json"))) ?? [];
   const postRunReview = await readJsonIfExists<PostRunReview>(path.join(runDir, "review", "post_run_review.json"));
+  const userEvidenceOverrides = await readJsonIfExists<UserEvidenceOverridesArtifact>(
+    path.join(runDir, "review", "user_evidence_overrides.json"),
+  );
   const interviewPrepMarkdown = await readTextIfExists(path.join(runDir, "review", "interview_prep.md"));
 
   const gapCounts = new Map(gapMaps.map((gapMap) => [gapMap.jd_id, gapMap.items.length]));
@@ -319,6 +372,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     generate: {
       isComplete: completedStages.includes("generate"),
       variants: displayVariants,
+      generatedResumes,
     },
     evaluate: {
       isComplete: completedStages.includes("evaluate"),
@@ -342,8 +396,64 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     review: {
       postRunReview,
       interviewPrepMarkdown,
+      userEvidenceOverrides,
     },
   };
+}
+
+
+export async function saveUserEvidenceOverride(
+  runId: string,
+  input: {
+    jdId: string;
+    requirementId: string;
+    action: UserEvidenceOverrideAction;
+    note?: string;
+  },
+): Promise<UserEvidenceOverridesArtifact> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(runId)) {
+    throw new Error("运行批次标识无效。");
+  }
+  const runDir = path.join(getRunsDir(), runId);
+  const resolvedRunDir = path.resolve(runDir);
+  const runsRoot = path.resolve(getRunsDir());
+  const relativeRunDir = path.relative(runsRoot, resolvedRunDir);
+  if (relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)) {
+    throw new Error("运行批次路径无效。");
+  }
+  if (!(await pathExists(runDir))) {
+    throw new Error("运行批次不存在。");
+  }
+
+  const reviewDir = path.join(runDir, "review");
+  const artifactPath = path.join(reviewDir, "user_evidence_overrides.json");
+  const existing =
+    (await readJsonIfExists<UserEvidenceOverridesArtifact>(artifactPath)) ?? {
+      schema_version: "v0.11",
+      run_id: runId,
+      overrides: [],
+    };
+  const override: UserEvidenceOverride = {
+    jd_id: input.jdId.trim(),
+    requirement_id: input.requirementId.trim(),
+    action: input.action,
+    note: (input.note ?? "").trim(),
+    source: "user",
+    updated_at: new Date().toISOString(),
+  };
+  const next: UserEvidenceOverridesArtifact = {
+    schema_version: existing.schema_version || "v0.11",
+    run_id: runId,
+    overrides: [
+      ...existing.overrides.filter(
+        (item) => item.jd_id !== override.jd_id || item.requirement_id !== override.requirement_id,
+      ),
+      override,
+    ],
+  };
+  await mkdir(reviewDir, { recursive: true });
+  await writeFile(artifactPath, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+  return next;
 }
 
 
@@ -486,7 +596,19 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 
-export type { JdInputPreview, ObservabilitySummary, PostRunReview, RunDetail, RunReport, RunSummary };
+export type {
+  GeneratedResume,
+  GeneratedResumeSection,
+  JdInputPreview,
+  ObservabilitySummary,
+  PostRunReview,
+  RunDetail,
+  RunReport,
+  RunSummary,
+  UserEvidenceOverride,
+  UserEvidenceOverrideAction,
+  UserEvidenceOverridesArtifact,
+};
 
 
 function buildInputSources(ingestManifest: IngestManifest | null, draft: UploadManifest | null): InputSourceDisplay[] {

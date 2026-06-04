@@ -19,6 +19,9 @@ import {
   PUT as putLocalConfigRoute,
 } from "../app/api/settings/local-config/route";
 import {
+  POST as postEvidenceOverrideRoute,
+} from "../app/api/runs/[runId]/evidence-overrides/route";
+import {
   GET as getDependencyRoute,
   POST as postDependencyRoute,
 } from "../app/api/settings/dependencies/route";
@@ -1717,6 +1720,89 @@ describe("run viewer pages", () => {
     expect(html).not.toContain("jd text");
   });
 
+  it("renders a deliverable resume preview with markdown export controls and provenance", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-v010", {
+      includeV057Artifacts: true,
+      includeGeneratedResume: true,
+    });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const workspace = await loadResumeWorkspace();
+    const html = renderToStaticMarkup(await ResumePage());
+
+    expect(workspace.summary.generatedResumeCount).toBe(1);
+    expect(workspace.rows[0].generatedResumes[0]).toMatchObject({
+      displayName: "Example AI 定制简历",
+      exportFileName: "demo-run-example-ai.md",
+      targetLabel: "Example AI - LLM Product Engineer",
+      isDeliverable: true,
+    });
+    expect(html).toContain("实时简历预览");
+    expect(html).toContain("Example AI 定制简历");
+    expect(html).toContain("一键复制 Markdown");
+    expect(html).toContain("下载 Markdown");
+    expect(html).toContain("候选人：本地候选人");
+    expect(html).toContain("证据来源：候选人画像 / 生成产物");
+    expect(html).toContain("围绕 LLM 辅助工作流搭建过内部工具");
+    expect(html).not.toContain("generated_resumes.json");
+    expect(html).not.toContain("target_jd_ids");
+  });
+
+  it("marks blocked generated resumes as non-deliverable and keeps them in review mode", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-blocked", {
+      includeV057Artifacts: true,
+      includeGeneratedResume: true,
+      preflightStatus: "blocked",
+    });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await ResumePage());
+
+    expect(html).toContain("不可直接投递");
+    expect(html).toContain("先补齐阻断证据，再导出投递版本。");
+    expect(html).not.toContain('download="demo-run-example-ai.md"');
+  });
+
+  it("persists user evidence confirmations as an independent review artifact", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-v011", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const response = await postEvidenceOverrideRoute(
+      new Request("http://localhost/api/runs/resume-v011/evidence-overrides", {
+        method: "POST",
+        body: JSON.stringify({
+          jdId: "jd-001",
+          requirementId: "jd-001-req-001",
+          action: "confirm_existing",
+          note: "确认简历中的项目经历可用于该硬门槛。",
+        }),
+      }),
+      { params: Promise.resolve({ runId: "resume-v011" }) },
+    );
+    const body = await response.json();
+    const artifact = JSON.parse(
+      await readFile(path.join(runsDir, "resume-v011", "review", "user_evidence_overrides.json"), "utf-8"),
+    );
+    const candidateProfile = await readFile(
+      path.join(runsDir, "resume-v011", "analyze", "candidate_profile.json"),
+      "utf-8",
+    );
+
+    expect(response.status).toBe(200);
+    expect(body.savedCount).toBe(1);
+    expect(artifact.overrides[0]).toMatchObject({
+      jd_id: "jd-001",
+      requirement_id: "jd-001-req-001",
+      action: "confirm_existing",
+      note: "确认简历中的项目经历可用于该硬门槛。",
+      source: "user",
+    });
+    expect(candidateProfile).not.toContain("确认简历中的项目经历可用于该硬门槛。");
+  });
+
   it("loads settings overview from local runs without leaking sensitive values", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "demo-settings", { includeV057Artifacts: true });
@@ -2093,9 +2179,15 @@ async function createIncompleteRun(runsDir: string, runId: string): Promise<void
 async function createCompleteRun(
   runsDir: string,
   runId: string,
-  options?: { includeExplanations?: boolean; includeV057Artifacts?: boolean },
+  options?: {
+    includeExplanations?: boolean;
+    includeV057Artifacts?: boolean;
+    includeGeneratedResume?: boolean;
+    preflightStatus?: "pass" | "blocked" | "needs_review";
+  },
 ): Promise<void> {
   const includeExplanations = options?.includeExplanations ?? true;
+  const preflightStatus = options?.preflightStatus ?? "pass";
   const runDir = path.join(runsDir, runId);
   await createIncompleteRun(runsDir, runId);
   await mkdir(path.join(runDir, "generate"), { recursive: true });
@@ -2134,10 +2226,57 @@ async function createCompleteRun(
     await writeJson(path.join(runDir, "analyze", "preflight_gates.json"), [
       {
         jd_id: "jd-001",
-        status: "pass",
-        reasons: [],
+        status: preflightStatus,
+        reasons: preflightStatus === "pass" ? [] : ["缺少可验证硬门槛证据"],
         skipped_stages: [],
-        user_action: "",
+        user_action: preflightStatus === "pass" ? "" : "补充或确认硬门槛证据",
+      },
+    ]);
+  }
+  if (options?.includeGeneratedResume) {
+    await writeJson(path.join(runDir, "generate", "generated_resumes.json"), [
+      {
+        resume_id: "resume-jd-001",
+        display_name: "Example AI 定制简历",
+        target_jd_id: "jd-001",
+        target_variant_id: "variant-jd-jd-001",
+        status: preflightStatus === "pass" ? "deliverable" : "needs_review",
+        markdown: [
+          "# 本地候选人",
+          "",
+          "## 摘要",
+          "围绕 LLM 辅助工作流搭建过内部工具，能够支持评估流程建设。",
+          "",
+          "## 技能",
+          "- LLM workflows",
+          "- evaluation",
+          "",
+          "## 经历",
+          "- 围绕 LLM 辅助工作流搭建过内部工具",
+        ].join("\n"),
+        sections: [
+          {
+            title: "摘要",
+            content: "围绕 LLM 辅助工作流搭建过内部工具，能够支持评估流程建设。",
+            evidence_refs: ["围绕 LLM 辅助工作流搭建过内部工具"],
+            rewrite_strategy: "证据内强化表达",
+            verification_status: "verified",
+          },
+          {
+            title: "技能",
+            content: "LLM workflows, evaluation",
+            evidence_refs: ["LLM workflows"],
+            rewrite_strategy: "关键词对齐",
+            verification_status: "verified",
+          },
+        ],
+        forbidden_items: ["Do not fabricate certificates."],
+        to_verify_items: preflightStatus === "pass" ? [] : ["缺少可验证硬门槛证据"],
+        provenance: {
+          candidate_evidence: ["围绕 LLM 辅助工作流搭建过内部工具"],
+          generated_from: ["候选人画像", "简历版本", "证据矩阵"],
+          user_confirmations: [],
+        },
       },
     ]);
   }
