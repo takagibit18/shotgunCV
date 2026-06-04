@@ -8,9 +8,8 @@
 4. [评估设计](./evaluation-design.md)
 5. [仓库蓝图](./repo-blueprint.md)
 6. [决策日志](./decision-log.md)
-7. [v0.6 Web 体验计划](./plan-v0.6-web-experience.md)
-8. [v0.6.1+ 后续优化规划](./plan-v0.6.1-followup.md)
-9. [v0.6.1 视觉 QA 基线](./qa-v0.6.1-visual-baseline.md)
+7. [v0.8 Web UX 强化计划](./plan-v0.8-web-ux.md)
+8. [v0.9-v1.0 产品对齐路线](./plan-v0.9-v1-product-alignment.md)
 
 ## 文档角色
 
@@ -20,6 +19,5 @@
 - `evaluation-design.md`：评分体系、判分规则与回归目标。
 - `repo-blueprint.md`：目录结构与职责归属。
 - `decision-log.md`：关键架构与产品取舍记录。
-- `plan-v0.6-web-experience.md`：v0.6 Web 工作台体验重构方向。
-- `plan-v0.6.1-followup.md`：v0.6.1 起的稳定化、独立页面、设置页、简历优化和视觉 QA 后续规划。
-- `qa-v0.6.1-visual-baseline.md`：v0.6.1 起用于浏览器截图级检查的桌面与移动端 QA 清单。
+- `plan-v0.8-web-ux.md`：v0.8 Web 用户化、中文化、运行触发和跨页面体验强化计划。
+- `plan-v0.9-v1-product-alignment.md`：v0.9 到 v1.0 的产品化路线，强调真实工作台、完整简历生成与导出、证据确认闭环，并明确暂缓 RAG/性能类局部指标优化。
