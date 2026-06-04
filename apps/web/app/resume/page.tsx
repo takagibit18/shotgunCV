@@ -26,8 +26,8 @@ export default async function ResumePage() {
             <strong>{workspace.summary.totalRuns}</strong>
           </article>
           <article className="status-strip-item success">
-            <span>简历版本</span>
-            <strong>{workspace.summary.variantCount}</strong>
+            <span>可预览简历</span>
+            <strong>{workspace.summary.generatedResumeCount}</strong>
           </article>
           <article
             className={

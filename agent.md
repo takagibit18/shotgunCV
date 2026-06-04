@@ -59,6 +59,11 @@
 - Always run the smallest possible test scope
 - Never run full test suite unless explicitly requested
 
+## 浏览器插件使用偏好
+
+- 只有用户手动添加或明确点名浏览器插件时，才启用浏览器可视化、页面截图或交互验证能力。
+- 不要主动打断询问用户是否启用浏览器功能；默认使用代码、测试和构建验证完成工作。
+
 ## 文档维护规则
 
 - 架构或产品关键取舍变化时更新 `docs/decision-log.md`。
