@@ -1,5 +1,6 @@
 import type { ApplicationStrategy, PreflightGate, RankingExplanation, RequirementEvidence, ScoreCard } from "./types";
 import { loadRunDetail, listRuns } from "./runs";
+import { formatRunDisplayName } from "./user-facing";
 
 export {
   DEFAULT_EVALUATION_FILTERS,
@@ -55,7 +56,7 @@ export async function loadEvaluationResults(): Promise<EvaluationResult[]> {
         const strategy = detail.plan.strategies.find((candidate) => candidate.jd_id === item.jdId);
         return buildEvaluationResult({
           runId: run.runId,
-          runLabel: run.label || run.runId,
+          runLabel: formatRunDisplayName(run.label),
           lastModified: run.lastModified,
           jdId: item.jdId,
           title: item.title || item.jdId,

@@ -458,8 +458,8 @@ export function UploadForm() {
 
       {error ? (
         <div className="upload-result error" role="alert">
-          <p className="eyebrow">{"页面级错误摘要"}</p>
-          <strong>{error.code}</strong>
+          <p className="eyebrow">{"创建未完成"}</p>
+          <strong>{"请检查输入后重试"}</strong>
           <p>{error.error}</p>
         </div>
       ) : null}
@@ -476,14 +476,6 @@ export function UploadForm() {
               {"返回运行队列"}
             </a>
           </div>
-          <p>
-            {"运行批次："}
-            <span className="mono">{result.runId}</span>
-          </p>
-          <p>
-            {"上传清单："}
-            <span className="mono">{result.uploadManifestPath}</span>
-          </p>
           <details className="advanced-command">
             <summary>高级 / 本地执行命令</summary>
             <pre className="command-block">{result.nextCommand}</pre>

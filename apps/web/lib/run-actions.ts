@@ -195,7 +195,20 @@ export async function startRunAction(runId: string, action: RunAction, spawnRunn
       return;
     }
     const reason = signal ? `CLI 运行失败，信号 ${signal}` : `CLI 运行失败，退出码 ${code ?? "未知"}`;
-    await markRunFailed(runDir, startedAt, currentStage, action, `${reason}${formatCapturedOutput(outputSnapshot.all)}`);
+    if (statusAfterExit?.status === "failed" && statusAfterExit.error_stage) {
+      await writeRunStatus(runDir, {
+        ...statusAfterExit,
+        status: "failed",
+        current_stage: statusAfterExit.current_stage ?? statusAfterExit.error_stage,
+        started_at: statusAfterExit.started_at ?? startedAt,
+        finished_at: statusAfterExit.finished_at ?? nowIso(),
+        error_stage: statusAfterExit.error_stage,
+        error_summary: buildUserFacingFailureSummary(statusAfterExit),
+        last_action: action,
+      });
+      return;
+    }
+    await markRunFailed(runDir, startedAt, currentStage, action, buildCliFailureSummary(reason, outputSnapshot.all));
   });
   child.unref?.();
 
@@ -251,12 +264,14 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
     return displayName ? { ...file, displayName } : file;
   });
 
-  if (input.cvFiles && input.cvFiles.length > 0) {
+  const cvFiles = normalizePatchFiles(input.cvFiles);
+  if (cvFiles.length > 0) {
+    cvFiles.forEach(validateFile);
     const cvDir = path.join(runDir, "input_files", "cv");
     await rm(cvDir, { recursive: true, force: true });
     await mkdir(cvDir, { recursive: true });
     manifest.files = manifest.files.filter((file) => file.role !== "cv");
-    manifest.files.unshift(...(await writeRoleFiles(runDir, "cv", input.cvFiles, uploadedAt)));
+    manifest.files.unshift(...(await writeRoleFiles(runDir, "cv", cvFiles, uploadedAt)));
   }
 
   const cvTextEntries = normalizeCvTextEntries(input);
@@ -278,9 +293,10 @@ export async function patchRunDraft(runId: string, input: DraftPatchInput) {
       .filter((file) => file.role === "jd")
       .map((file) => path.basename(file.storedRelativePath).toLowerCase()),
   );
-  if (input.jdFiles && input.jdFiles.length > 0) {
+  const jdFiles = normalizePatchFiles(input.jdFiles);
+  if (jdFiles.length > 0) {
     manifest.files.push(
-      ...(await writeRoleFiles(runDir, "jd", input.jdFiles, uploadedAt, usedJdNames, (input.jdFileDisplayNames ?? []).slice(jdIndex))),
+      ...(await writeRoleFiles(runDir, "jd", jdFiles, uploadedAt, usedJdNames, (input.jdFileDisplayNames ?? []).slice(jdIndex))),
     );
   }
   const textEntries = normalizeJdTextEntries(input.jdTexts ?? [], input.jdTextDisplayNames ?? []);
@@ -311,6 +327,11 @@ function normalizeCvTextEntries(input: DraftPatchInput): Array<{ originalName?: 
   }
   const cvText = input.cvText?.trim();
   return cvText ? [{ text: cvText }] : [];
+}
+
+
+function normalizePatchFiles(files: File[] | undefined): File[] {
+  return (files ?? []).filter((file) => !(file.size === 0 && file.name.trim() === ""));
 }
 
 
@@ -491,6 +512,58 @@ function formatCapturedOutput(output: string): string {
 }
 
 
+function buildCliFailureSummary(reason: string, output: string): string {
+  if (!output.trim()) {
+    return reason;
+  }
+  return `${reason}。请查看本地运行日志获取技术细节，修正输入或配置后重试。`;
+}
+
+
+function buildUserFacingFailureSummary(status: RunStatusFile): string {
+  const rawSummary = status.error_summary ?? "";
+  const code = status.error_code ?? "";
+  if (code === "STRUCTURED_ANALYSIS_INVALID" || rawSummary.includes("Structured analysis validation failed")) {
+    return buildStructuredAnalysisFailureSummary(rawSummary);
+  }
+  if (status.status_kind === "parse_error") {
+    return "输入解析失败：请检查上传的简历 PDF/JD 文本是否可复制、非空且没有乱码，然后重新上传或补充可读文本。";
+  }
+  if (isModelNetworkFailure(code, rawSummary)) {
+    return buildModelNetworkFailureSummary();
+  }
+  if (status.status_kind === "model_error" || code.startsWith("MODEL_")) {
+    return "模型服务调用失败：请检查 API Key、provider、model 权限和网络连通性，确认配置后重试。";
+  }
+  return "运行失败：请根据失败阶段检查对应输入或配置，修正后重试。";
+}
+
+
+function buildModelNetworkFailureSummary(): string {
+  return "模型请求超时或网络连接失败：结构化分析已经开始，但模型没有稳定返回。可先只保留 1 个 JD、裁短简历，切换更快的分析器模型，或提高 SHOTGUNCV_ANALYZER_TIMEOUT_SEC 后重试。";
+}
+
+
+function isModelNetworkFailure(code: string, rawSummary: string): boolean {
+  const text = rawSummary.toLowerCase();
+  return code === "MODEL_NETWORK_ERROR" || text.includes("timed out") || text.includes("timeout") || text.includes("network connection failed");
+}
+
+
+function buildStructuredAnalysisFailureSummary(rawSummary: string): string {
+  if (rawSummary.includes("CV and JD structured outputs are missing") || rawSummary.includes("candidate_profile or jd_profiles")) {
+    return "结构化分析失败：简历信息和 JD 信息都没有被模型转换成可用结构。请检查简历是否包含可识别的经历、项目和技能，JD 是否包含岗位职责和任职要求，然后修改后重试。";
+  }
+  if (rawSummary.includes("CV structured output")) {
+    return "结构化分析失败：简历信息没有被模型转换成可用结构。请检查简历文本是否清晰，并补充经历、项目、技能或教育等可识别内容后重试。";
+  }
+  if (rawSummary.includes("JD structured output")) {
+    return "结构化分析失败：JD 信息没有被模型转换成可用结构。请补充岗位名称、职责、硬性要求和加分项后重试。";
+  }
+  return "结构化分析失败：模型返回内容不符合简历/JD 分析结构。请检查简历和 JD 内容是否完整、清晰，然后重试。";
+}
+
+
 async function markRunFailed(
   runDir: string,
   startedAt: string,
@@ -521,8 +594,10 @@ function summarizeRunStatus(status: RunStatusFile | null) {
   }
   return {
     status: status.status,
+    statusKind: status.status_kind,
     currentStage: status.current_stage,
     errorStage: status.error_stage,
+    errorCode: status.error_code,
     errorSummary: status.error_summary,
     finishedAt: status.finished_at,
   };

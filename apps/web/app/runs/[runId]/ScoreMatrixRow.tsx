@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import type { JdInputPreview } from "../../../lib/runs";
 import type { ApplicationStrategy, RankingExplanation, ScoreCard } from "../../../lib/types";
+import { sanitizeUserFacingText } from "../../../lib/user-facing";
 
 
 export type ScoreMatrixRowProps = {
@@ -564,13 +565,13 @@ function buildRecommendationMeta(
     return {
       kind: "strong",
       label: "强烈建议投递",
-      reason: strategy.reason_summary || "评分和证据覆盖均处于高优先级区间，建议优先处理。",
+      reason: sanitizeUserFacingText(strategy.reason_summary || "评分和证据覆盖均处于高优先级区间，建议优先处理。"),
     };
   }
   return {
     kind: decision,
     label: formatDecision(decision),
-    reason: strategy.reason_summary || "策略产物未提供详细原因，请结合证据引用和风险解释复核。",
+    reason: sanitizeUserFacingText(strategy.reason_summary || "策略产物未提供详细原因，请结合证据引用和风险解释复核。"),
   };
 }
 
@@ -643,7 +644,7 @@ function formatUserText(value: string): string {
     skip: "跳过",
     review: "复核",
   };
-  return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
+  return sanitizeUserFacingText(value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " ")));
 }
 
 

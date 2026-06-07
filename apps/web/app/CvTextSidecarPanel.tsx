@@ -50,11 +50,11 @@ export function CvTextSidecarPanel({ runId, cvIssues, onSaved }: Props) {
   return (
     <section className="cv-sidecar-panel">
       <div>
-        <p className="eyebrow">扫描件简历</p>
-        <h3>补充简历文本</h3>
+        <p className="eyebrow">可选补充</p>
+        <h3>为扫描/空白 PDF 补充简历文本</h3>
         <p>
-          检测到扫描件简历，文本可能无法自动提取。请在下方粘贴简历的纯文本内容，确保分析结果准确。
-          你也可以先跳过，系统会继续尝试本地依赖或视觉兜底。
+          这里不会替换或覆盖已上传的简历文件，只会为对应 PDF 写入一份文本 sidecar 作为补充证据。
+          留空会跳过，系统会继续使用已上传文件启动评估。
         </p>
       </div>
       <div className="cv-sidecar-fields">

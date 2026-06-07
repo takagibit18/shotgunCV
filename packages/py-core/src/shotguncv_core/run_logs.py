@@ -152,6 +152,8 @@ def log_llm_call_started(
     provider: str,
     model: str,
     prompt_tokens: int | None = None,
+    prompt_chars: int | None = None,
+    timeout_sec: int | None = None,
     max_completion_tokens: int | None = None,
 ) -> float:
     append_event(
@@ -163,6 +165,8 @@ def log_llm_call_started(
             "provider": provider,
             "model": model,
             "prompt_tokens": prompt_tokens,
+            "prompt_chars": prompt_chars,
+            "timeout_sec": timeout_sec,
             "max_completion_tokens": max_completion_tokens,
         },
     )
@@ -215,6 +219,7 @@ def log_llm_call_failed(
     started: float,
     error: Exception,
     fallback_used: bool,
+    timeout_sec: int | None = None,
 ) -> None:
     append_event(
         run_dir,
@@ -226,7 +231,10 @@ def log_llm_call_failed(
             "model": model,
             "duration_ms": _duration_ms(started),
             "error_type": error.__class__.__name__,
+            "error_code": getattr(error, "code", error.__class__.__name__),
+            "error_category": getattr(error, "category", None),
             "error_summary": (str(error).strip() or error.__class__.__name__)[:500],
+            "timeout_sec": timeout_sec,
             "fallback_used": fallback_used,
         },
     )
@@ -368,6 +376,28 @@ def log_quality_gate_checked(
             "status": status,
             "checks": checks,
             "action": action,
+        },
+    )
+
+
+def log_pipeline_stage_status(
+    run_dir: Path,
+    *,
+    stage_key: str,
+    status: str,
+    summary: str = "",
+    error_code: str | None = None,
+    checks: dict[str, Any] | None = None,
+) -> None:
+    append_event(
+        run_dir,
+        {
+            "event": "pipeline_stage_status",
+            "stage_key": stage_key,
+            "status": status,
+            "summary": summary[:500],
+            "error_code": error_code,
+            "checks": checks or {},
         },
     )
 
@@ -593,7 +623,8 @@ def log_stage_failed(run_dir: Path, stage: LogStageName, started: float, error: 
             "event": "stage_failed",
             "stage": stage,
             "duration_ms": _duration_ms(started),
-            "error_code": error.__class__.__name__,
+            "error_code": getattr(error, "code", error.__class__.__name__),
+            "error_category": getattr(error, "category", None),
             "error_summary": summary[:500],
         },
     )

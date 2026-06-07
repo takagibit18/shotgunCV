@@ -57,6 +57,54 @@ class ResumeVariant:
 
 
 @dataclass(slots=True)
+class ResumeBasics:
+    full_name: str
+    headline: str = ""
+    location: str = ""
+    email: str = ""
+    phone: str = ""
+    links: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ResumeEntry:
+    id: str
+    title: str
+    organization: str = ""
+    period: str = ""
+    bullets: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CustomizedResumeDocument:
+    basics: ResumeBasics
+    summary: str
+    skills: list[str] = field(default_factory=list)
+    experiences: list[ResumeEntry] = field(default_factory=list)
+    projects: list[ResumeEntry] = field(default_factory=list)
+    education: list[ResumeEntry] = field(default_factory=list)
+    certifications: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ResumeProvenance:
+    field_sources: dict[str, list[str]] = field(default_factory=dict)
+    to_verify_fields: list[str] = field(default_factory=list)
+    forbidden_fields: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class GeneratedResume:
+    resume_id: str
+    target_jd_id: str
+    status: str
+    document: CustomizedResumeDocument
+    provenance: ResumeProvenance
+    display_name: str = ""
+    target_variant_id: str = ""
+
+
+@dataclass(slots=True)
 class RequirementEvidence:
     jd_id: str
     requirement_id: str

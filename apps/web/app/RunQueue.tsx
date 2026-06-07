@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { STAGE_LABELS, STATUS_LABELS } from "../lib/labels";
 import type { RunSummary } from "../lib/runs";
+import { formatRunDisplayName, sanitizeUserFacingText } from "../lib/user-facing";
 import { Icon } from "./AppShell";
 
 type RunListFilterState = {
@@ -218,7 +219,7 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
             <article key={run.runId} className="run-row" role="row">
               <div className="run-primary" role="cell">
                 <Link href={`/runs/${run.runId}`} className="run-title-link">
-                  <strong title={run.label || ""}>{run.label || "未命名投递"}</strong>
+                  <strong title={formatRunDisplayName(run.label)}>{formatRunDisplayName(run.label)}</strong>
                 </Link>
                 <span className="muted">最近更新 {formatDateTime(run.lastModified)}</span>
               </div>
@@ -256,9 +257,9 @@ export function RunQueue({ runs }: { runs: RunSummary[] }) {
               <div className="run-action-cell" role="cell">
                 <p
                   className={run.runStatus?.error_summary ? "risk-line" : "muted"}
-                  title={run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? ""}
+                  title={sanitizeUserFacingText(run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? "")}
                 >
-                  {truncateText(run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? getNextStepText(run), 34)}
+                  {truncateText(sanitizeUserFacingText(run.runStatus?.error_summary ?? run.runStatus?.quality_summary ?? getNextStepText(run)), 34)}
                 </p>
                 <span className={run.runStatus?.error_summary ? "status-chip danger" : "status-chip success"}>
                   {run.runStatus?.error_summary ? "需处理" : "可继续"}
@@ -362,7 +363,7 @@ function compareRuns(left: RunSummary, right: RunSummary, sortKey: RunSortKey): 
     return statusWeight(right.draftStatus) - statusWeight(left.draftStatus) || right.lastModified.localeCompare(left.lastModified);
   }
   if (sortKey === "label") {
-    return (left.label || left.runId).localeCompare(right.label || right.runId, "zh-Hans-CN");
+    return formatRunDisplayName(left.label).localeCompare(formatRunDisplayName(right.label), "zh-Hans-CN");
   }
   return right.lastModified.localeCompare(left.lastModified);
 }

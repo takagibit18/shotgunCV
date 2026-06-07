@@ -95,7 +95,7 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
       checks: [
         { label: "运行目录", status: "fail", detail: "运行目录不可读，请检查 SHOTGUNCV_RUNS_DIR 或默认运行路径。" },
         { label: "运行清单", status: "warning", detail: "无法读取运行清单。" },
-        { label: "配置快照", status: "warning", detail: "无法检查 run_config.json。" },
+        { label: "配置快照", status: "warning", detail: "无法检查运行配置。" },
         { label: "shotguncv CLI", status: cliVisible() ? "pass" : "warning", detail: buildCliDetail() },
       ],
     };
@@ -152,8 +152,8 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
         status: configIssueCount === 0 ? "pass" : "warning",
         detail:
           configIssueCount === 0
-            ? `可解析 ${parseableConfigs.length} 个 run_config.json。`
-            : `${configIssueCount} 个运行批次缺少或无法解析 run_config.json：${formatRunList(configIssueRunIds)}。`,
+            ? `可解析 ${parseableConfigs.length} 个运行配置。`
+            : `${configIssueCount} 个投递缺少或无法解析运行配置，可在运行队列按最近更新时间定位。`,
       },
       {
         label: "关键产物",
@@ -161,7 +161,7 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
         detail:
           artifactIssueCount === 0
             ? "已存在的关键 JSON 产物均可解析。"
-            : `${artifactIssueCount} 个已存在 JSON 产物无法解析：${formatRunList(artifactIssueRunIds)}。`,
+            : `${artifactIssueCount} 个已存在产物无法解析，可回到运行队列重新处理相关投递。`,
       },
       {
         label: "模型提供商配置",
@@ -169,7 +169,7 @@ export async function loadSettingsOverview(): Promise<SettingsOverview> {
         detail:
           unknownProviderCount === 0
             ? "可解析配置未发现未知模型提供商。"
-            : `${unknownProviderCount} 项模型提供商为 unknown：${formatRunList(unknownProviderRunIds)}。`,
+            : `${unknownProviderCount} 项模型提供商未能识别，可检查最近投递的本地配置。`,
       },
       { label: "shotguncv CLI", status: cliVisible() ? "pass" : "warning", detail: buildCliDetail() },
     ],
@@ -261,13 +261,6 @@ function countUnknownProviders(config: RunConfig | null): number {
   ).length;
 }
 
-function formatRunList(runIds: string[]): string {
-  if (runIds.length === 0) {
-    return "无";
-  }
-  return runIds.slice(0, 4).join("、") + (runIds.length > 4 ? ` 等 ${runIds.length} 个 run` : "");
-}
-
 async function pathReadable(filePath: string): Promise<boolean> {
   try {
     await access(filePath);
@@ -277,7 +270,7 @@ async function pathReadable(filePath: string): Promise<boolean> {
   }
 }
 
-function maskPath(filePath: string): string {
+export function maskPath(filePath: string): string {
   const parsed = path.parse(path.resolve(filePath));
   const base = path.basename(filePath) || parsed.root;
   const parent = path.basename(path.dirname(filePath));

@@ -48,6 +48,59 @@ export type ResumeVariant = {
   forbidden_gaps?: string[];
 };
 
+export type ResumeBasics = {
+  full_name: string;
+  headline?: string;
+  location?: string;
+  email?: string;
+  phone?: string;
+  links?: string[];
+};
+
+export type ResumeEntry = {
+  id: string;
+  title: string;
+  organization?: string;
+  period?: string;
+  bullets: string[];
+};
+
+export type CustomizedResumeDocument = {
+  basics: ResumeBasics;
+  summary: string;
+  skills: string[];
+  experiences: ResumeEntry[];
+  projects: ResumeEntry[];
+  education: ResumeEntry[];
+  certifications: string[];
+};
+
+export type ResumeProvenance = {
+  field_sources: Record<string, string[]>;
+  to_verify_fields: string[];
+  forbidden_fields: string[];
+};
+
+export type GeneratedResume = {
+  resume_id?: string;
+  display_name?: string;
+  target_jd_id?: string;
+  target_variant_id?: string;
+  status?: "deliverable" | "needs_review" | "blocked" | string;
+  document?: CustomizedResumeDocument;
+  provenance?: ResumeProvenance;
+  markdown?: string;
+  sections?: Array<{
+    title?: string;
+    content?: string;
+    evidence_refs?: string[];
+    rewrite_strategy?: string;
+    verification_status?: string;
+  }>;
+  forbidden_items?: string[];
+  to_verify_items?: string[];
+};
+
 export type RequirementEvidence = {
   jd_id: string;
   requirement_id: string;
@@ -192,7 +245,7 @@ export type EvalSummaryItem = {
   top_reasons: string[];
 };
 
-export type RunDraftStatus = "draft" | "queued" | "running" | "done" | "failed" | "ingest-ready";
+export type RunDraftStatus = "draft" | "queued" | "running" | "done" | "failed" | "partial_failed" | "ingest-ready";
 
 export type StageName = "ingest" | "analyze" | "generate" | "evaluate" | "plan" | "report";
 export type TimelineStageName = StageName | "review";
@@ -203,11 +256,13 @@ export type StageStatus = {
 };
 
 export type RunStatusFile = {
-  status: "draft" | "queued" | "running" | "done" | "failed";
+  status: "draft" | "queued" | "running" | "done" | "failed" | "partial_failed";
+  status_kind?: "success" | "running" | "failed" | "partial_failed" | "config_error" | "model_error" | "parse_error" | string;
   current_stage: StageName | null;
   started_at: string | null;
   finished_at: string | null;
   error_stage: StageName | null;
+  error_code?: string | null;
   error_summary: string | null;
   last_action: "run" | "retry_full" | "resume_failed" | "draft_update" | "delete";
   quality_status?: "ok" | "warning" | "failed";
@@ -233,14 +288,17 @@ export type RunTimelineEvent = {
     | "tool_call_failed"
     | "agent_reasoning_summary"
     | "quality_gate_checked"
+    | "pipeline_stage_status"
     | "fallback_used"
     | "graph_node_started"
     | "graph_node_finished"
     | "retrieval_query";
   stage?: TimelineStageName;
+  stage_key?: string;
   status?: string;
   duration_ms?: number;
   error_code?: string;
+  error_category?: string | null;
   error_summary?: string;
   trigger_entrypoint?: string;
   input_scale?: Record<string, number>;
@@ -254,6 +312,8 @@ export type RunTimelineEvent = {
   operation?: string;
   model?: string;
   prompt_tokens?: number | null;
+  prompt_chars?: number | null;
+  timeout_sec?: number | null;
   completion_tokens?: number | null;
   total_tokens?: number | null;
   output_parse_status?: string;

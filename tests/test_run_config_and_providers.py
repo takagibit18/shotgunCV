@@ -9,6 +9,7 @@ import pytest
 
 from shotguncv_cli.main import run
 from shotguncv_agents.providers import OpenAIAnalyzeProvider, _classify_cluster
+from shotguncv_core.errors import ModelProviderError, StructuredAnalysisError
 from shotguncv_core.pipeline import _build_input_extraction_options, analyze_run, evaluate_run, generate_run, ingest_run
 from shotguncv_core.run_config import load_run_config
 
@@ -211,6 +212,220 @@ def test_openai_analyze_provider_derives_cluster_when_payload_omits_it(monkeypat
     )
 
     assert feedback.jd_profiles[0].cluster == "operations-analyst"
+
+
+def test_openai_analyze_provider_identifies_missing_cv_and_jd_structures(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen([json.dumps({"candidate_profile": {}, "jd_profiles": []})]))
+
+    provider = OpenAIAnalyzeProvider(model="gpt-5.4-mini", base_url="https://api.openai.com/v1", api_key="test-key")
+
+    with pytest.raises(StructuredAnalysisError) as excinfo:
+        provider.analyze(
+            candidate_id="cand-001",
+            candidate_resume_path="resume.pdf",
+            resume_text="Built Python and LLM workflow automation with traceable production evidence.",
+            jd_inputs=[
+                {
+                    "source_type": "text",
+                    "source_value": "jd.txt",
+                    "content": "Title: AI Engineer\nCompany: Example\nBody:\n- Build Python LLM systems",
+                }
+            ],
+        )
+
+    message = str(excinfo.value)
+    assert "CV and JD structured outputs are missing" in message
+    assert "candidate_profile or jd_profiles" not in message
+
+
+def test_openai_analyze_provider_identifies_missing_jd_structure(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "candidate_profile": {
+            "experiences": ["Built reporting workflows"],
+            "projects": [],
+            "skills": ["Python"],
+        },
+        "jd_profiles": [],
+    }
+    monkeypatch.setattr("urllib.request.urlopen", _fake_openai_urlopen([json.dumps(payload)]))
+
+    provider = OpenAIAnalyzeProvider(model="gpt-5.4-mini", base_url="https://api.openai.com/v1", api_key="test-key")
+
+    with pytest.raises(StructuredAnalysisError) as excinfo:
+        provider.analyze(
+            candidate_id="cand-001",
+            candidate_resume_path="resume.pdf",
+            resume_text="Built Python and LLM workflow automation with traceable production evidence.",
+            jd_inputs=[
+                {
+                    "source_type": "text",
+                    "source_value": "jd.txt",
+                    "content": "Title: AI Engineer\nCompany: Example\nBody:\n- Build Python LLM systems",
+                }
+            ],
+        )
+
+    assert "JD structured output is missing" in str(excinfo.value)
+
+
+def test_openai_analyze_provider_maps_403_without_deterministic_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def forbidden_urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
+        raise HTTPError(
+            "https://api.openai.com/v1/chat/completions",
+            403,
+            "Forbidden",
+            None,
+            None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", forbidden_urlopen)
+    provider = OpenAIAnalyzeProvider(
+        model="gpt-5.4-mini",
+        base_url="https://api.openai.com/v1",
+        api_key="invalid-key",
+        run_dir=tmp_path,
+    )
+
+    with pytest.raises(ModelProviderError) as excinfo:
+        provider.analyze(
+            candidate_id="cand-001",
+            candidate_resume_path="resume.pdf",
+            resume_text="Built Python and LLM workflow automation with traceable production evidence.",
+            jd_inputs=[
+                {
+                    "source_type": "text",
+                    "source_value": "jd.txt",
+                    "content": "Title: AI Engineer\nCompany: Example\nBody:\n- Build Python LLM systems",
+                }
+            ],
+        )
+
+    assert excinfo.value.code == "MODEL_PROVIDER_PERMISSION_DENIED"
+    assert excinfo.value.category == "model_error"
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(event["event"] == "llm_call_failed" and event["error_code"] == "MODEL_PROVIDER_PERMISSION_DENIED" for event in events)
+    assert not any(event["event"] == "fallback_used" for event in events)
+
+
+def test_openai_analyze_provider_uses_extended_timeout_and_logs_timeout_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SHOTGUNCV_ANALYZER_TIMEOUT_SEC", "180")
+    capture: dict[str, int] = {}
+
+    def timeout_urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
+        capture["timeout"] = int(timeout)
+        capture["request_chars"] = len(req.data.decode("utf-8"))
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("urllib.request.urlopen", timeout_urlopen)
+    provider = OpenAIAnalyzeProvider(
+        model="deepseek-v4-pro",
+        base_url="https://api.deepseek.com/v1",
+        api_key="test-key",
+        run_dir=tmp_path,
+    )
+    resume_text = "Built Python and LLM workflow automation with traceable production evidence. " * 20
+
+    with pytest.raises(ModelProviderError) as excinfo:
+        provider.analyze(
+            candidate_id="cand-001",
+            candidate_resume_path="resume.pdf",
+            resume_text=resume_text,
+            jd_inputs=[
+                {
+                    "source_type": "text",
+                    "source_value": "jd.txt",
+                    "content": "Title: AI Engineer\nCompany: Example\nBody:\n- Build Python LLM systems",
+                }
+            ],
+        )
+
+    assert excinfo.value.code == "MODEL_NETWORK_ERROR"
+    assert capture["timeout"] == 180
+    assert capture["request_chars"] > len(resume_text)
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    started = next(event for event in events if event["event"] == "llm_call_started")
+    failed = next(event for event in events if event["event"] == "llm_call_failed")
+    assert started["timeout_sec"] == 180
+    assert started["prompt_chars"] > len(resume_text)
+    assert failed["timeout_sec"] == 180
+    assert failed["error_code"] == "MODEL_NETWORK_ERROR"
+    assert "timed out" in failed["error_summary"].lower()
+    assert "permission" not in failed["error_summary"].lower()
+
+
+def test_cli_run_marks_model_403_failed_instead_of_completed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENAI_API_KEY=invalid-key\n", encoding="utf-8")
+    config_path = tmp_path / "openai-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": "openai", "model": "gpt-5.4-mini"},
+                "generator": {"provider": "deterministic", "model": ""},
+                "judge": {"provider": "deterministic", "model": ""},
+                "planner": {"provider": "deterministic", "model": ""},
+                "openai": {
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key_env": "OPENAI_API_KEY",
+                    "env_file": str(dotenv_path),
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def forbidden_urlopen(req, timeout=0):  # type: ignore[no-untyped-def]
+        raise HTTPError(
+            "https://api.openai.com/v1/chat/completions",
+            403,
+            "Forbidden",
+            None,
+            None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", forbidden_urlopen)
+    run_dir = tmp_path / "forbidden-run"
+
+    exit_code, output = run(
+        [
+            "run",
+            "--run-dir",
+            str(run_dir),
+            "--candidate-id",
+            "cand-001",
+            "--candidate-resume",
+            str(ROOT / "fixtures" / "candidates" / "base_resume.md"),
+            "--jd-file",
+            str(ROOT / "fixtures" / "jds" / "sample_batch.txt"),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "MODEL_PROVIDER_PERMISSION_DENIED" in output
+    status = json.loads((run_dir / "run_status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "failed"
+    assert status["status_kind"] == "model_error"
+    assert status["error_stage"] == "analyze"
+    assert status["error_code"] == "MODEL_PROVIDER_PERMISSION_DENIED"
+    assert not (run_dir / "evaluate" / "scorecards.json").exists()
 
 
 def test_cli_generate_fails_with_helpful_message_when_run_config_missing(tmp_path: Path) -> None:
@@ -574,11 +789,27 @@ def test_evaluate_run_uses_resolved_runtime_provider_and_model_in_fallback_score
 
 def _prepare_analyzed_run(tmp_path: Path) -> Path:
     run_dir = tmp_path / "run"
+    config_path = tmp_path / "deterministic-analyze-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": "deterministic", "model": ""},
+                "generator": {"provider": "deterministic", "model": ""},
+                "judge": {"provider": "deterministic", "model": ""},
+                "planner": {"provider": "deterministic", "model": ""},
+                "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": ".env"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     ingest_run(
         run_dir=run_dir,
         candidate_id="cand-001",
         candidate_resume_path=ROOT / "fixtures" / "candidates" / "base_resume.md",
         jd_sources=[ROOT / "fixtures" / "jds" / "sample_batch.txt"],
+        config_path=config_path,
     )
     analyze_run(run_dir)
     return run_dir

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { AppShell, Icon, MetricCard } from "../../AppShell";
 import { STAGE_LABELS, STATUS_LABELS } from "../../../lib/labels";
 import { loadRunDetail } from "../../../lib/runs";
+import { formatRunDisplayName, sanitizeUserFacingText } from "../../../lib/user-facing";
 import { RunActionPanel } from "./RunActionPanel";
 import { ScoreMatrixRow } from "./ScoreMatrixRow";
 
@@ -20,12 +21,13 @@ export default async function RunPage({ params }: PageProps) {
   const detail = await loadRunDetail(resolvedParams.runId);
   const sortedResults = detail.evaluate.topVariants.slice().sort((left, right) => right.overallScore - left.overallScore);
   const topResult = sortedResults[0];
-  const displayTitle = detail.label || topResult?.title || "岗位评估详情";
+  const displayTitle = buildDetailTitle(detail.label, topResult?.title);
   const displayStatus = buildDisplayStatus(detail);
   const riskCount = countHighRiskScores(detail);
   const reviewCount = countReviewItems(detail);
   const topScore = topResult ? `${Math.round(topResult.overallScore * 100)}%` : "--";
   const canShowActions = detail.draftStatus === "draft" || detail.draftStatus === "failed";
+  const canShowReport = detail.completedStages.includes("report");
 
   return (
     <AppShell active="evaluation" eyebrow="评估详情">
@@ -49,13 +51,15 @@ export default async function RunPage({ params }: PageProps) {
             </span>
             <div>
               <span>当前结论</span>
-              <strong>{buildPrimaryConclusion(topResult, reviewCount, riskCount)}</strong>
+              <strong>{buildPrimaryConclusion(topResult, reviewCount, riskCount, detail)}</strong>
               <small>{displayStatus}</small>
             </div>
-            <Link href={`/runs/${detail.runId}/report`} className="primary-link icon-link">
-              <Icon name="document" />
-              查看报告
-            </Link>
+            {canShowReport ? (
+              <Link href={`/runs/${detail.runId}/report`} className="primary-link icon-link">
+                <Icon name="document" />
+                查看报告
+              </Link>
+            ) : null}
           </div>
         </section>
 
@@ -158,8 +162,17 @@ export default async function RunPage({ params }: PageProps) {
 
 function RunExecutionState({ detail }: { detail: RunDetail }) {
   const status = detail.runStatus?.status ?? detail.draftStatus;
+  const statusKind = detail.runStatus?.status_kind ?? status;
   const currentStage = detail.runStatus?.current_stage ?? null;
-  const stageLabel = currentStage ? STAGE_LABELS[currentStage] ?? currentStage : "";
+  const displayStage = status === "failed" || status === "partial_failed" ? detail.runStatus?.error_stage ?? currentStage : currentStage;
+  const stageLabel = displayStage ? STAGE_LABELS[displayStage] ?? displayStage : "";
+  const errorCode = detail.runStatus?.error_code ?? "";
+  const rawErrorSummary = detail.runStatus?.error_summary ?? detail.runStatus?.quality_summary ?? "";
+  const errorSummary = buildUserFacingRunErrorSummary(
+    rawErrorSummary,
+    errorCode,
+    statusKind,
+  );
 
   if (status === "running" || status === "queued") {
     const runningText = buildRunningText(currentStage);
@@ -176,16 +189,68 @@ function RunExecutionState({ detail }: { detail: RunDetail }) {
     );
   }
 
+  if (status === "partial_failed" || statusKind === "partial_failed") {
+    return (
+      <section className="section run-state-panel partial" role="status">
+        <div>
+          <p className="eyebrow">部分未完成</p>
+          <h2>部分岗位或输入未完成分析</h2>
+          <p className="section-copy">
+            {stageLabel ? `影响阶段：${stageLabel}。` : ""}
+            {errorSummary || "部分输入未能进入完整流程，请查看解析提示后重试或继续复核已成功结果。"}
+          </p>
+          <div className="pill-row compact">
+            <Link className="secondary-link" href={`/runs/${detail.runId}`}>
+              查看当前结果
+            </Link>
+            <Link className="secondary-link" href="/settings">
+              检查模型配置
+            </Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   if (status === "failed") {
+    const structuredAnalysisError = isStructuredAnalysisError(errorCode);
+    const networkRelated = isModelNetworkError(errorCode, rawErrorSummary);
+    const configRelated =
+      !structuredAnalysisError && !networkRelated && (statusKind === "config_error" || statusKind === "model_error" || /^MODEL_/.test(errorCode));
     return (
       <section className="section run-state-panel failed" role="alert">
         <div>
           <p className="eyebrow">运行失败</p>
-          <h2>评估未完成</h2>
+          <h2>
+            {networkRelated
+              ? "模型请求超时"
+              : configRelated
+              ? "模型服务配置失败"
+              : structuredAnalysisError
+                ? "结构化分析失败"
+                : statusKind === "parse_error"
+                  ? "输入解析失败"
+                  : "评估未完成"}
+          </h2>
           <p className="section-copy">
             {stageLabel ? `失败阶段：${stageLabel}。` : "失败阶段：未知。"}
-            {detail.runStatus?.error_summary ? `原因：${detail.runStatus.error_summary}` : "请查看本地运行日志确认原因。"}
+            {errorSummary ? `原因：${errorSummary}` : "请查看本地运行日志确认原因。"}
           </p>
+          {configRelated ? (
+            <div className="notice-strip warning">
+              <strong>当前任务未完成</strong>
+              <span>API Key 可能无权限、不可用，或当前 provider/model 没有开通。检查配置后重新运行。</span>
+              <Link className="secondary-link" href="/settings">
+                检查配置
+              </Link>
+            </div>
+          ) : null}
+          {networkRelated ? (
+            <div className="notice-strip warning">
+              <strong>结构化分析长请求未返回</strong>
+              <span>先减少 JD 数量或裁短简历；也可以切换更快的分析器模型，或提高 SHOTGUNCV_ANALYZER_TIMEOUT_SEC 后重试。</span>
+            </div>
+          ) : null}
         </div>
       </section>
     );
@@ -216,6 +281,33 @@ function RunExecutionState({ detail }: { detail: RunDetail }) {
   }
 
   return null;
+}
+
+
+function buildUserFacingRunErrorSummary(summary: string, errorCode: string, statusKind: string): string {
+  const rawSummary = summary.trim();
+  if (errorCode === "STRUCTURED_ANALYSIS_INVALID" || rawSummary.includes("Structured analysis validation failed")) {
+    if (rawSummary.includes("CV and JD structured outputs are missing") || rawSummary.includes("candidate_profile or jd_profiles")) {
+      return "结构化分析失败：简历信息和 JD 信息都没有被模型转换成可用结构。请检查简历是否包含可识别的经历、项目和技能，JD 是否包含岗位职责和任职要求，然后修改后重试。";
+    }
+    if (rawSummary.includes("CV structured output")) {
+      return "结构化分析失败：简历信息没有被模型转换成可用结构。请检查简历文本是否清晰，并补充经历、项目、技能或教育等可识别内容后重试。";
+    }
+    if (rawSummary.includes("JD structured output")) {
+      return "结构化分析失败：JD 信息没有被模型转换成可用结构。请补充岗位名称、职责、硬性要求和加分项后重试。";
+    }
+    return "结构化分析失败：模型返回内容不符合简历/JD 分析结构。请检查简历和 JD 内容是否完整、清晰，然后重试。";
+  }
+  if (statusKind === "parse_error") {
+    return "输入解析失败：请检查上传的简历 PDF/JD 文本是否可复制、非空且没有乱码，然后重新上传或补充可读文本。";
+  }
+  if (isModelNetworkError(errorCode, rawSummary)) {
+    return "模型请求超时或网络连接失败：结构化分析已经开始，但模型没有稳定返回。可先只保留 1 个 JD、裁短简历，切换更快的分析器模型，或提高 SHOTGUNCV_ANALYZER_TIMEOUT_SEC 后重试。";
+  }
+  if (statusKind === "model_error" || errorCode.startsWith("MODEL_")) {
+    return "模型服务调用失败：请检查 API Key、provider、model 权限和网络连通性，确认配置后重试。";
+  }
+  return sanitizeUserFacingText(rawSummary);
 }
 
 
@@ -256,6 +348,15 @@ function buildRunningText(stage: string | null): string {
     return "分析中...";
   }
   return "思考中...";
+}
+
+
+function buildDetailTitle(label: string, topTitle?: string): string {
+  const displayLabel = formatRunDisplayName(label);
+  if (displayLabel !== "未命名投递") {
+    return displayLabel;
+  }
+  return topTitle || "岗位评估详情";
 }
 
 
@@ -331,7 +432,7 @@ function PostRunReviewSection({ detail }: { detail: RunDetail }) {
           <ul className="requirement-list">
             {citations.slice(0, 4).map((citation, index) => (
               <li key={`${citation.source_type ?? "source"}-${index}`}>
-                {citation.provenance_summary || citation.artifact_path || "证据产物"}
+                {formatUserText(citation.provenance_summary || citation.artifact_path || "证据产物")}
               </li>
             ))}
           </ul>
@@ -365,6 +466,24 @@ function PostRunReviewSection({ detail }: { detail: RunDetail }) {
 
 
 function buildDisplayStatus(detail: RunDetail): string {
+  if (detail.runStatus?.status_kind === "config_error") {
+    return "配置错误";
+  }
+  if (isModelNetworkError(detail.runStatus?.error_code ?? "", detail.runStatus?.error_summary ?? "")) {
+    return "模型请求超时";
+  }
+  if (isStructuredAnalysisError(detail.runStatus?.error_code ?? "")) {
+    return "结构化分析失败";
+  }
+  if (detail.runStatus?.status_kind === "model_error") {
+    return "模型服务错误";
+  }
+  if (detail.runStatus?.status_kind === "parse_error") {
+    return "解析错误";
+  }
+  if (detail.draftStatus === "partial_failed" || detail.runStatus?.status_kind === "partial_failed") {
+    return "部分未完成";
+  }
   if (detail.draftStatus === "done" && detail.runStatus?.quality_status === "warning") {
     return "完成，建议复核提醒项";
   }
@@ -376,7 +495,26 @@ function buildPrimaryConclusion(
   topResult: RunDetail["evaluate"]["topVariants"][number] | undefined,
   reviewCount: number,
   riskCount: number,
+  detail?: RunDetail,
 ): string {
+  if (detail?.draftStatus === "failed") {
+    if (isStructuredAnalysisError(detail.runStatus?.error_code ?? "")) {
+      return "检查简历和 JD 内容";
+    }
+    if (isModelNetworkError(detail.runStatus?.error_code ?? "", detail.runStatus?.error_summary ?? "")) {
+      return "调整分析器后重试";
+    }
+    if (detail.runStatus?.status_kind === "model_error" || detail.runStatus?.status_kind === "config_error") {
+      return "检查模型配置后重试";
+    }
+    if (detail.runStatus?.status_kind === "parse_error") {
+      return "重新上传可识别文件";
+    }
+    return "任务未完成";
+  }
+  if (detail?.draftStatus === "partial_failed" || detail?.runStatus?.status_kind === "partial_failed") {
+    return "先处理未完成项";
+  }
   if (!topResult) {
     return "等待评估结果";
   }
@@ -387,6 +525,17 @@ function buildPrimaryConclusion(
     return "存在风险，建议谨慎推进";
   }
   return `优先关注 ${topResult.title}`;
+}
+
+
+function isStructuredAnalysisError(errorCode: string): boolean {
+  return errorCode === "STRUCTURED_ANALYSIS_INVALID";
+}
+
+
+function isModelNetworkError(errorCode: string, summary = ""): boolean {
+  const text = summary.toLowerCase();
+  return errorCode === "MODEL_NETWORK_ERROR" || text.includes("timed out") || text.includes("timeout") || text.includes("network connection failed");
 }
 
 
@@ -465,5 +614,5 @@ function formatUserText(value: string): string {
     skip: "跳过",
     review: "复核",
   };
-  return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
+  return sanitizeUserFacingText(value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " ")));
 }

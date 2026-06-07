@@ -21,6 +21,7 @@ from shotguncv_core.pipeline import (
     plan_run,
     report_run,
 )
+from shotguncv_agents.providers import AnalyzeFeedback
 from shotguncv_core.models import CandidateProfile, JDProfile, RequirementEvidence
 
 
@@ -48,6 +49,7 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "analyze" / "candidate_profile.json").exists()
     assert (run_dir / "analyze" / "jd_profiles.json").exists()
     assert (run_dir / "generate" / "resume_variants.json").exists()
+    assert (run_dir / "generate" / "generated_resumes.json").exists()
     assert (run_dir / "evaluate" / "scorecards.json").exists()
     assert (run_dir / "evaluate" / "gap_maps.json").exists()
     assert (run_dir / "evaluate" / "ranking_explanations.json").exists()
@@ -57,8 +59,10 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     assert analysis.candidate.candidate_id == "cand-001"
     assert len(analysis.jd_profiles) == 2
     assert len(generation.variants) == len(analysis.jd_profiles)
+    assert len(generation.generated_resumes) == len(analysis.jd_profiles)
     assert all(variant.variant_type == "jd-specific" for variant in generation.variants)
     assert len(evaluation.scorecards) == len(analysis.jd_profiles)
+    assert any(scorecard.final_overall_score > 0 for scorecard in evaluation.scorecards)
     assert len(evaluation.explanations) >= 2
     assert strategy.strategies[0].apply_decision in {"apply", "hold"}
     assert strategy.strategies[0].decision_drivers
@@ -75,6 +79,28 @@ def test_stage_pipeline_writes_expected_run_artifacts(tmp_path: Path) -> None:
     assert manifest["jd_inputs"][0]["original_name"] == "sample_batch.txt"
     assert manifest["jd_inputs"][0]["relative_path"].endswith("fixtures/jds/sample_batch.txt")
     assert manifest["jd_inputs"][0]["content"] == manifest["jd_inputs"][0]["text"]
+
+    generated_resumes = json.loads((run_dir / "generate" / "generated_resumes.json").read_text(encoding="utf-8"))
+    first_resume = generated_resumes[0]
+    assert first_resume["resume_id"] == "resume-jd-001"
+    assert first_resume["target_jd_id"] == "jd-001"
+    assert first_resume["status"] == "deliverable"
+    assert set(first_resume["document"]) == {
+        "basics",
+        "summary",
+        "skills",
+        "experiences",
+        "projects",
+        "education",
+        "certifications",
+    }
+    assert first_resume["document"]["summary"]
+    assert first_resume["document"]["skills"]
+    assert first_resume["document"]["experiences"]
+    assert "markdown" not in first_resume
+    assert first_resume["provenance"]["field_sources"]["document.summary"]
+    assert isinstance(first_resume["provenance"]["to_verify_fields"], list)
+    assert isinstance(first_resume["provenance"]["forbidden_fields"], list)
 
     report_text = report_path.read_text(encoding="utf-8")
     assert "LLM Product Engineer" in report_text
@@ -344,6 +370,145 @@ def test_ingest_run_fails_when_all_jd_inputs_are_unparseable(tmp_path: Path) -> 
         assert "At least one JD input must contain extractable text." in str(exc)
     else:
         raise AssertionError("ingest_run should fail when all JD inputs are unparseable")
+
+
+def test_ingest_run_blocks_unreadable_cv_text_before_analysis(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_path = tmp_path / "cv.txt"
+    jd_path = tmp_path / "jd.txt"
+    cv_path.write_text("锛 鏄 鐨 杩 妫 绱 ???", encoding="utf-8")
+    jd_path.write_text("Title: AI Engineer\nCompany: Example\nBody:\n- Build Python automation", encoding="utf-8")
+
+    try:
+        ingest_run(
+            run_dir=run_dir,
+            candidate_id="cand-001",
+            candidate_resume_path=cv_path,
+            jd_sources=[jd_path],
+            config_path=config_path,
+        )
+    except ValueError as exc:
+        assert "CV text quality check failed" in str(exc)
+    else:
+        raise AssertionError("ingest_run should block unreadable CV text")
+
+    assert not (run_dir / "ingest" / "manifest.json").exists()
+    events = [
+        json.loads(line)
+        for line in (run_dir / "logs" / "run_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(
+        event.get("event") == "pipeline_stage_status"
+        and event.get("stage_key") == "parse_cv"
+        and event.get("status") == "parse_error"
+        for event in events
+    )
+
+
+def test_ingest_run_marks_bad_jd_as_partial_and_analyze_uses_only_valid_jds(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_path = tmp_path / "cv.txt"
+    jd_dir = tmp_path / "jds"
+    jd_dir.mkdir()
+    cv_path.write_text(
+        "Built Python LLM workflow automation, LangGraph review tools, and evidence-backed ranking reports.",
+        encoding="utf-8",
+    )
+    (jd_dir / "good.txt").write_text(
+        "Title: AI Engineer\nCompany: Example\nBody:\n- Build Python automation\n- Own LLM evaluation metrics",
+        encoding="utf-8",
+    )
+    (jd_dir / "bad.txt").write_text("Apply", encoding="utf-8")
+
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=cv_path,
+        jd_input_sources=[jd_dir],
+        config_path=config_path,
+    )
+    analysis = analyze_run(run_dir)
+
+    manifest = json.loads((run_dir / "ingest" / "manifest.json").read_text(encoding="utf-8"))
+    bad_jd = next(item for item in manifest["jd_inputs"] if item["original_name"] == "bad.txt")
+    assert bad_jd["text_quality_status"] == "failed"
+    assert bad_jd["analysis_eligible"] is False
+    assert len(analysis.jd_profiles) == 1
+    assert analysis.jd_profiles[0].source_value.endswith("good.txt")
+    status = json.loads((run_dir / "run_status.json").read_text(encoding="utf-8"))
+    assert status["quality_status"] == "warning"
+    assert status["status_kind"] == "partial_failed"
+
+
+def test_analyze_run_rejects_incomplete_structured_artifacts(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    run_dir = tmp_path / "run"
+    config_path = _write_deterministic_config(tmp_path)
+    cv_path = tmp_path / "cv.txt"
+    jd_path = tmp_path / "jd.txt"
+    cv_path.write_text(
+        "Built Python LLM workflow automation, LangGraph review tools, and evidence-backed ranking reports.",
+        encoding="utf-8",
+    )
+    jd_path.write_text("Title: AI Engineer\nCompany: Example\nBody:\n- Build Python automation", encoding="utf-8")
+    ingest_run(
+        run_dir=run_dir,
+        candidate_id="cand-001",
+        candidate_resume_path=cv_path,
+        jd_sources=[jd_path],
+        config_path=config_path,
+    )
+
+    class _IncompleteAnalyzer:
+        def analyze(self, candidate_id, candidate_resume_path, resume_text, jd_inputs):  # type: ignore[no-untyped-def]
+            return AnalyzeFeedback(
+                candidate_profile=CandidateProfile(
+                    candidate_id=candidate_id,
+                    base_resume_path=candidate_resume_path,
+                    experiences=[],
+                    projects=[],
+                    skills=[],
+                    industry_tags=[],
+                    strengths=[],
+                    constraints=[],
+                    preferences=[],
+                    core_claims=[],
+                    verified_evidence=[],
+                ),
+                jd_profiles=[
+                    JDProfile(
+                        jd_id="jd-001",
+                        title="",
+                        company="",
+                        cluster="",
+                        responsibilities=[],
+                        requirements=[],
+                        keywords=[],
+                        seniority="",
+                        bonuses=[],
+                        risk_signals=[],
+                        source_type="text",
+                        source_value="jd.txt",
+                    )
+                ],
+                evidence_map={},
+            )
+
+    monkeypatch.setattr(
+        "shotguncv_core.pipeline.build_analyzer_provider",
+        lambda config, stage, run_dir: _IncompleteAnalyzer(),
+    )
+
+    try:
+        analyze_run(run_dir)
+    except ValueError as exc:
+        assert "Structured analysis validation failed" in str(exc)
+    else:
+        raise AssertionError("analyze_run should reject incomplete structured artifacts")
+
+    assert not (run_dir / "analyze" / "candidate_profile.json").exists()
 
 
 def test_plan_stage_sorts_by_score_and_gap_risk(tmp_path: Path) -> None:

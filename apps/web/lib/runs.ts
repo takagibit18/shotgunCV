@@ -4,11 +4,13 @@ import path from "node:path";
 import type {
   ApplicationStrategy,
   CandidateProfile,
+  CustomizedResumeDocument,
   EvalSummaryItem,
   GapMap,
   JDProfile,
   PreflightGate,
   RankingExplanation,
+  ResumeProvenance,
   RequirementEvidence,
   ResumeVariant,
   RunConfig,
@@ -68,11 +70,12 @@ type GeneratedResume = {
   target_jd_id?: string;
   target_variant_id?: string;
   status?: "deliverable" | "needs_review" | "blocked" | string;
+  document?: CustomizedResumeDocument;
   markdown?: string;
   sections?: GeneratedResumeSection[];
   forbidden_items?: string[];
   to_verify_items?: string[];
-  provenance?: {
+  provenance?: ResumeProvenance | {
     candidate_evidence?: string[];
     generated_from?: string[];
     user_confirmations?: string[];
@@ -98,6 +101,22 @@ type UserEvidenceOverridesArtifact = {
   schema_version: string;
   run_id: string;
   overrides: UserEvidenceOverride[];
+};
+
+type ResumeFieldStatus = "confirmed" | "to_verify";
+
+type UserResumeEdit = {
+  resume_id: string;
+  document_patch: Partial<CustomizedResumeDocument>;
+  field_statuses: Record<string, ResumeFieldStatus>;
+  source: "user";
+  updated_at: string;
+};
+
+type UserResumeEditsArtifact = {
+  schema_version: string;
+  run_id: string;
+  edits: UserResumeEdit[];
 };
 
 type InputSourceDisplay = {
@@ -226,6 +245,7 @@ type RunDetail = {
     postRunReview: PostRunReview | null;
     interviewPrepMarkdown: string;
     userEvidenceOverrides: UserEvidenceOverridesArtifact | null;
+    userResumeEdits: UserResumeEditsArtifact | null;
   };
 };
 
@@ -332,6 +352,9 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   const userEvidenceOverrides = await readJsonIfExists<UserEvidenceOverridesArtifact>(
     path.join(runDir, "review", "user_evidence_overrides.json"),
   );
+  const userResumeEdits = await readJsonIfExists<UserResumeEditsArtifact>(
+    path.join(runDir, "review", "user_resume_edits.json"),
+  );
   const interviewPrepMarkdown = await readTextIfExists(path.join(runDir, "review", "interview_prep.md"));
 
   const gapCounts = new Map(gapMaps.map((gapMap) => [gapMap.jd_id, gapMap.items.length]));
@@ -397,6 +420,7 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
       postRunReview,
       interviewPrepMarkdown,
       userEvidenceOverrides,
+      userResumeEdits,
     },
   };
 }
@@ -457,6 +481,68 @@ export async function saveUserEvidenceOverride(
 }
 
 
+export async function saveUserResumeEdit(
+  runId: string,
+  input: {
+    resumeId: string;
+    documentPatch?: Partial<CustomizedResumeDocument>;
+    fieldStatuses?: Record<string, ResumeFieldStatus>;
+    reset?: boolean;
+  },
+): Promise<UserResumeEditsArtifact> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(runId)) {
+    throw new Error("运行批次标识无效。");
+  }
+  const resumeId = input.resumeId.trim();
+  if (!resumeId) {
+    throw new Error("简历版本标识不能为空。");
+  }
+  const runDir = path.join(getRunsDir(), runId);
+  const resolvedRunDir = path.resolve(runDir);
+  const runsRoot = path.resolve(getRunsDir());
+  const relativeRunDir = path.relative(runsRoot, resolvedRunDir);
+  if (relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)) {
+    throw new Error("运行批次路径无效。");
+  }
+  if (!(await pathExists(runDir))) {
+    throw new Error("运行批次不存在。");
+  }
+
+  const reviewDir = path.join(runDir, "review");
+  const artifactPath = path.join(reviewDir, "user_resume_edits.json");
+  const existing =
+    (await readJsonIfExists<UserResumeEditsArtifact>(artifactPath)) ?? {
+      schema_version: "resume-edits-v1",
+      run_id: runId,
+      edits: [],
+    };
+  const remaining = existing.edits.filter((item) => item.resume_id !== resumeId);
+  const next: UserResumeEditsArtifact = input.reset
+    ? {
+        schema_version: existing.schema_version || "resume-edits-v1",
+        run_id: runId,
+        edits: remaining,
+      }
+    : {
+        schema_version: existing.schema_version || "resume-edits-v1",
+        run_id: runId,
+        edits: [
+          ...remaining,
+          {
+            resume_id: resumeId,
+            document_patch: input.documentPatch ?? {},
+            field_statuses: input.fieldStatuses ?? {},
+            source: "user",
+            updated_at: new Date().toISOString(),
+          },
+        ],
+      };
+  await mkdir(reviewDir, { recursive: true });
+  await writeFile(artifactPath, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
+  return next;
+}
+
+
 export async function loadRunReport(runId: string): Promise<RunReport | null> {
   const reportPath = path.join(getRunsDir(), runId, "report", "summary.md");
   if (!(await pathExists(reportPath))) {
@@ -487,7 +573,7 @@ async function getCompletedStages(runDir: string): Promise<StageName[]> {
 
 function buildStageStatuses(completedStages: StageName[], runStatus: RunStatusFile | null): StageStatus[] {
   return (Object.keys(REQUIRED_STAGE_FILES) as StageName[]).map((stage) => {
-    if (runStatus?.status === "failed" && runStatus.error_stage === stage) {
+    if ((runStatus?.status === "failed" || runStatus?.status === "partial_failed") && runStatus.error_stage === stage) {
       return { stage, status: "failed" };
     }
     if (runStatus?.status === "running" && runStatus.current_stage === stage) {
@@ -608,6 +694,9 @@ export type {
   UserEvidenceOverride,
   UserEvidenceOverrideAction,
   UserEvidenceOverridesArtifact,
+  ResumeFieldStatus,
+  UserResumeEdit,
+  UserResumeEditsArtifact,
 };
 
 

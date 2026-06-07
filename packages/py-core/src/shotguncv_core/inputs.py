@@ -42,6 +42,9 @@ class InputDocument:
     extraction_error: str = ""
     original_name: str = ""
     size_bytes: int = 0
+    text_quality_status: str = "unchecked"
+    text_quality_error: str = ""
+    analysis_eligible: bool = True
 
 
 @dataclass(slots=True)

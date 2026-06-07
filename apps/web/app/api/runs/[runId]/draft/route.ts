@@ -12,8 +12,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const { runId } = await context.params;
     const formData = await request.formData();
-    const cvFiles = formData.getAll("cvFiles").filter((item): item is File => item instanceof File);
-    const jdFiles = formData.getAll("jdFiles").filter((item): item is File => item instanceof File);
+    const cvFiles = formData.getAll("cvFiles").filter(isSelectedFile);
+    const jdFiles = formData.getAll("jdFiles").filter(isSelectedFile);
     const jdFileDisplayNames = formData
       .getAll("jdFileDisplayNames")
       .filter((item): item is string => typeof item === "string");
@@ -54,4 +54,9 @@ export async function PATCH(request: Request, context: RouteContext) {
 
 function stringValue(value: FormDataEntryValue | null): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+
+function isSelectedFile(value: FormDataEntryValue): value is File {
+  return value instanceof File && !(value.size === 0 && value.name.trim() === "");
 }

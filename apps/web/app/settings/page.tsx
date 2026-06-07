@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { loadLocalConfig } from "../../lib/local-config";
 import { loadSettingsOverview, type SettingsCheck, type SettingsOverview } from "../../lib/settings";
+import { formatRunDisplayName } from "../../lib/user-facing";
 import { AppShell, Icon, MetricCard } from "../AppShell";
 import { DependencyPanel } from "./DependencyPanel";
 import { LocalConfigPanel } from "./LocalConfigPanel";
@@ -121,8 +122,7 @@ function LatestConfig({ overview }: { overview: SettingsOverview }) {
   return (
     <div className="settings-config">
       <dl className="settings-list">
-        <SummaryRow label="运行批次" value={config.runId} />
-        <SummaryRow label="标签" value={config.label || "未命名"} />
+        <SummaryRow label="最近投递" value={formatRunDisplayName(config.label)} />
         <SummaryRow label="服务地址" value={config.baseUrlHost ? "已配置" : "未配置"} />
         <SummaryRow label="密钥状态" value={config.apiKeyEnv ? "已指定本地密钥来源" : "未指定"} />
         <SummaryRow label="配置文件" value={config.envFile ? "已检测" : "未指定"} />

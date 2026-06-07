@@ -1,13 +1,10 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import type {
-  GeneratedResumePreview,
-  ResumeWorkspaceConstraint,
-  ResumeWorkspaceRow,
-} from "../../lib/resume";
+import type { ResumeWorkspaceConstraint, ResumeWorkspaceRow } from "../../lib/resume";
+import type { CustomizedResumeDocument, ResumeEntry } from "../../lib/types";
 import { Icon } from "../AppShell";
 import {
   buildConstraintClassName,
@@ -30,6 +27,8 @@ const DEFAULT_FILTERS: FilterState = {
   source: "all",
   sort: "recent",
 };
+
+type ResumePreviewModel = ResumeWorkspaceRow["generatedResumes"][number];
 
 export function ResumeWorkspace({ rows }: { rows: ResumeWorkspaceRow[] }) {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
@@ -95,6 +94,34 @@ export function ResumeWorkspace({ rows }: { rows: ResumeWorkspaceRow[] }) {
         <Link href="/upload" className="primary-link">
           创建投递草稿
         </Link>
+      </section>
+    );
+  }
+
+  const generatedRows = rows.filter((row) => row.generatedResumeCount > 0);
+  if (generatedRows.length === 0) {
+    const reviewRow =
+      rows.find((row) => row.evidenceConstraintCount > 0 && (row.preflightStatus === "blocked" || row.preflightStatus === "needs_review")) ??
+      rows.find((row) => row.status === "failed") ??
+      rows[0];
+    return (
+      <section className="resume-studio empty-resume-studio" aria-label="简历生成状态">
+        <div className="empty-state">
+          <h3>暂无可预览或导出的简历</h3>
+          <p>已有投递任务，但还没有完整简历产物。先处理证据门槛或重新运行失败任务，生成完成后这里会出现预览、复制和导出入口。</p>
+          <div className="row-actions">
+            <Link href={reviewRow?.detailHref ?? "/runs"} className="primary-link">
+              处理当前任务
+            </Link>
+            <Link href="/runs" className="secondary-link">
+              查看运行队列
+            </Link>
+            <Link href="/upload" className="secondary-link">
+              补充材料
+            </Link>
+          </div>
+        </div>
+        {reviewRow ? <EvidencePanel row={reviewRow} /> : null}
       </section>
     );
   }
@@ -220,10 +247,55 @@ function ResumePreview({
   onSelectResume,
 }: {
   row: ResumeWorkspaceRow;
-  resume: GeneratedResumePreview;
+  resume: ResumePreviewModel;
   selectedResumeId: string;
   onSelectResume: (resumeId: string) => void;
 }) {
+  const [draftDocument, setDraftDocument] = useState<CustomizedResumeDocument>(resume.previewDocument);
+  const [fieldStatuses, setFieldStatuses] = useState(resume.fieldStatuses);
+
+  useEffect(() => {
+    setDraftDocument(resume.previewDocument);
+    setFieldStatuses(resume.fieldStatuses);
+  }, [resume.resumeId, resume.previewDocument, resume.fieldStatuses]);
+
+  const draftMarkdown = useMemo(() => buildMarkdownFromDraft(draftDocument), [draftDocument]);
+
+  async function persist(nextDocument: CustomizedResumeDocument, nextStatuses = fieldStatuses) {
+    await fetch(`/api/runs/${encodeURIComponent(row.runId)}/resume-edits`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resumeId: resume.resumeId,
+        documentPatch: nextDocument,
+        fieldStatuses: nextStatuses,
+      }),
+    });
+  }
+
+  function updateDocument(nextDocument: CustomizedResumeDocument, persistNow = false) {
+    setDraftDocument(nextDocument);
+    if (persistNow) {
+      void persist(nextDocument);
+    }
+  }
+
+  function setFieldStatus(path: string, status: "confirmed" | "to_verify") {
+    const nextStatuses = { ...fieldStatuses, [path]: status };
+    setFieldStatuses(nextStatuses);
+    void persist(draftDocument, nextStatuses);
+  }
+
+  function restoreSystemVersion() {
+    setDraftDocument(resume.systemDocument);
+    setFieldStatuses({});
+    void fetch(`/api/runs/${encodeURIComponent(row.runId)}/resume-edits`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resumeId: resume.resumeId, reset: true }),
+    });
+  }
+
   return (
     <article className="resume-live-preview">
       <div className="resume-preview-toolbar">
@@ -233,15 +305,27 @@ function ResumePreview({
           <p>{resume.targetLabel}</p>
         </div>
         <div className="row-actions">
-          <CopyMarkdownButton markdown={resume.markdown} />
+          <CopyMarkdownButton markdown={draftMarkdown} />
+          <button className="secondary-link" type="button" onClick={restoreSystemVersion}>
+            <Icon name="reset" />
+            重置为系统生成版本
+          </button>
           {resume.isDeliverable ? (
-            <a
-              className="primary-link"
-              href={`data:text/markdown;charset=utf-8,${encodeURIComponent(resume.markdown)}`}
-              download={resume.exportFileName}
-            >
-              下载 Markdown
-            </a>
+            <>
+              <button className="primary-link" type="button" data-export-kind="pdf" onClick={() => window.print()}>
+                <Icon name="document" />
+                导出 PDF
+              </button>
+              <a
+                className="secondary-link"
+                href={`data:text/markdown;charset=utf-8,${encodeURIComponent(draftMarkdown)}`}
+                download={resume.exportFileName}
+                data-export-kind="markdown"
+              >
+                <Icon name="save" />
+                导出 Markdown
+              </a>
+            </>
           ) : (
             <span className="status-chip danger">不可直接投递</span>
           )}
@@ -272,11 +356,17 @@ function ResumePreview({
         </div>
       ) : null}
 
-      <section className="resume-paper" aria-label="完整简历正文">
-        {resume.markdown.split(/\n{2,}/).map((block, index) => (
-          <p key={`${index}-${block.slice(0, 24)}`}>{block}</p>
-        ))}
-      </section>
+      <div className="resume-json-workspace">
+        <ResumeFieldEditor
+          document={draftDocument}
+          systemDocument={resume.systemDocument}
+          fieldStatuses={fieldStatuses}
+          onChange={updateDocument}
+          onBlur={() => void persist(draftDocument)}
+          onSetFieldStatus={setFieldStatus}
+        />
+        <ResumePaper document={draftDocument} fieldStatuses={fieldStatuses} resume={resume} />
+      </div>
 
       <section className="resume-provenance" aria-label="简历来源与风险">
         <div className="resume-info-title">
@@ -284,7 +374,7 @@ function ResumePreview({
           <h3>证据来源</h3>
         </div>
         <p>{resume.sourceLabel}</p>
-        <p>候选人：{resume.markdown.startsWith("# ") ? resume.markdown.slice(2).split(/\r?\n/)[0] : "本地候选人"}</p>
+        <p>候选人：{draftDocument.basics.full_name}</p>
         <TagList items={resume.generatedFrom} emptyText="当前产物未声明生成来源。" />
         <TagList items={resume.candidateEvidence} emptyText="当前产物未列出候选人证据。" />
         <RiskList title="待核实" items={resume.toVerifyItems} />
@@ -423,7 +513,7 @@ function LegacyResumeState({ row }: { row: ResumeWorkspaceRow }) {
         </Link>
       </div>
       {firstVariant ? (
-        <section className="resume-paper">
+        <section className="resume-legacy-panel">
           <p>{firstVariant.variantDisplayName}</p>
           <p>{firstVariant.summary}</p>
           <p>{firstVariant.sourceLabel}</p>
@@ -457,13 +547,14 @@ function BoundarySection({ title, items }: { title: string; items: string[] }) {
 }
 
 function TagList({ items, emptyText }: { items: string[]; emptyText: string }) {
-  if (items.length === 0) {
+  const uniqueItems = Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+  if (uniqueItems.length === 0) {
     return <p className="muted">{emptyText}</p>;
   }
   return (
     <div className="pill-row compact">
-      {items.map((item) => (
-        <span key={item} className="pill">
+      {uniqueItems.map((item, index) => (
+        <span key={`${index}-${item}`} className="pill">
           {item}
         </span>
       ))}
@@ -472,17 +563,468 @@ function TagList({ items, emptyText }: { items: string[]; emptyText: string }) {
 }
 
 function RiskList({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) {
+  const uniqueItems = Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+  if (uniqueItems.length === 0) {
     return null;
   }
   return (
     <div className="resume-risk-list">
       <strong>{title}</strong>
       <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
+        {uniqueItems.map((item, index) => (
+          <li key={`${index}-${item}`}>{item}</li>
         ))}
       </ul>
     </div>
   );
+}
+
+function ResumeFieldEditor({
+  document,
+  systemDocument,
+  fieldStatuses,
+  onChange,
+  onBlur,
+  onSetFieldStatus,
+}: {
+  document: CustomizedResumeDocument;
+  systemDocument: CustomizedResumeDocument;
+  fieldStatuses: Record<string, "confirmed" | "to_verify">;
+  onChange: (document: CustomizedResumeDocument, persistNow?: boolean) => void;
+  onBlur: () => void;
+  onSetFieldStatus: (path: string, status: "confirmed" | "to_verify") => void;
+}) {
+  function patch(next: Partial<CustomizedResumeDocument>, persistNow = false) {
+    onChange({ ...document, ...next }, persistNow);
+  }
+
+  function updateBasics(field: keyof CustomizedResumeDocument["basics"], value: string) {
+    patch({ basics: { ...document.basics, [field]: value } });
+  }
+
+  function updateEntry(
+    collection: "experiences" | "projects" | "education",
+    index: number,
+    nextEntry: ResumeEntry,
+  ) {
+    const next = [...document[collection]];
+    next[index] = nextEntry;
+    patch({ [collection]: next } as Partial<CustomizedResumeDocument>, true);
+  }
+
+  function removeEntry(collection: "experiences" | "projects" | "education", index: number) {
+    patch({ [collection]: document[collection].filter((_, itemIndex) => itemIndex !== index) } as Partial<CustomizedResumeDocument>, true);
+  }
+
+  function addEntry(collection: "experiences" | "projects" | "education", title: string) {
+    const nextEntry: ResumeEntry = {
+      id: `${collection}-${Date.now()}`,
+      title,
+      organization: "",
+      period: "",
+      bullets: [""],
+    };
+    patch({ [collection]: [...document[collection], nextEntry] } as Partial<CustomizedResumeDocument>, true);
+  }
+
+  return (
+    <aside className="resume-field-editor" aria-label="字段编辑器">
+      <div className="resume-editor-heading">
+        <span className="section-kicker">字段编辑器</span>
+        <strong>{document.basics.full_name}</strong>
+      </div>
+
+      <FieldText
+        label="姓名"
+        path="document.basics.full_name"
+        value={document.basics.full_name}
+        status={fieldStatuses["document.basics.full_name"]}
+        onChange={(value) => updateBasics("full_name", value)}
+        onBlur={onBlur}
+        onSetFieldStatus={onSetFieldStatus}
+        onRestore={() => updateBasics("full_name", systemDocument.basics.full_name)}
+      />
+      <FieldText
+        label="标题"
+        path="document.basics.headline"
+        value={document.basics.headline ?? ""}
+        status={fieldStatuses["document.basics.headline"]}
+        onChange={(value) => updateBasics("headline", value)}
+        onBlur={onBlur}
+        onSetFieldStatus={onSetFieldStatus}
+        onRestore={() => updateBasics("headline", systemDocument.basics.headline ?? "")}
+      />
+      <FieldTextArea
+        label="摘要"
+        path="document.summary"
+        value={document.summary}
+        status={fieldStatuses["document.summary"]}
+        onChange={(value) => patch({ summary: value })}
+        onBlur={onBlur}
+        onSetFieldStatus={onSetFieldStatus}
+        onRestore={() => patch({ summary: systemDocument.summary }, true)}
+      />
+
+      <ArrayFieldEditor
+        label="技能"
+        items={document.skills}
+        basePath="document.skills"
+        fieldStatuses={fieldStatuses}
+        onSetFieldStatus={onSetFieldStatus}
+        onChange={(items) => patch({ skills: items }, true)}
+      />
+      <EntryFieldEditor
+        label="经历"
+        collection="experiences"
+        entries={document.experiences}
+        fieldStatuses={fieldStatuses}
+        onSetFieldStatus={onSetFieldStatus}
+        onChange={updateEntry}
+        onRemove={removeEntry}
+        onAdd={() => addEntry("experiences", "Relevant Experience")}
+      />
+      <EntryFieldEditor
+        label="项目"
+        collection="projects"
+        entries={document.projects}
+        fieldStatuses={fieldStatuses}
+        onSetFieldStatus={onSetFieldStatus}
+        onChange={updateEntry}
+        onRemove={removeEntry}
+        onAdd={() => addEntry("projects", "Relevant Project")}
+      />
+      <EntryFieldEditor
+        label="教育"
+        collection="education"
+        entries={document.education}
+        fieldStatuses={fieldStatuses}
+        onSetFieldStatus={onSetFieldStatus}
+        onChange={updateEntry}
+        onRemove={removeEntry}
+        onAdd={() => addEntry("education", "Education")}
+      />
+      <ArrayFieldEditor
+        label="证书"
+        items={document.certifications}
+        basePath="document.certifications"
+        fieldStatuses={fieldStatuses}
+        onSetFieldStatus={onSetFieldStatus}
+        onChange={(items) => patch({ certifications: items }, true)}
+      />
+    </aside>
+  );
+}
+
+function FieldText({
+  label,
+  path,
+  value,
+  status,
+  onChange,
+  onBlur,
+  onSetFieldStatus,
+  onRestore,
+}: {
+  label: string;
+  path: string;
+  value: string;
+  status?: "confirmed" | "to_verify";
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  onSetFieldStatus: (path: string, status: "confirmed" | "to_verify") => void;
+  onRestore: () => void;
+}) {
+  return (
+    <label className="resume-edit-field">
+      <FieldLabel label={label} path={path} status={status} onSetFieldStatus={onSetFieldStatus} onRestore={onRestore} />
+      <input value={value} onChange={(event) => onChange(event.currentTarget.value)} onBlur={onBlur} />
+    </label>
+  );
+}
+
+function FieldTextArea(props: Parameters<typeof FieldText>[0]) {
+  return (
+    <label className="resume-edit-field">
+      <FieldLabel
+        label={props.label}
+        path={props.path}
+        status={props.status}
+        onSetFieldStatus={props.onSetFieldStatus}
+        onRestore={props.onRestore}
+      />
+      <textarea
+        value={props.value}
+        rows={4}
+        onChange={(event) => props.onChange(event.currentTarget.value)}
+        onBlur={props.onBlur}
+      />
+    </label>
+  );
+}
+
+function FieldLabel({
+  label,
+  path,
+  status,
+  onSetFieldStatus,
+  onRestore,
+}: {
+  label: string;
+  path: string;
+  status?: "confirmed" | "to_verify";
+  onSetFieldStatus: (path: string, status: "confirmed" | "to_verify") => void;
+  onRestore: () => void;
+}) {
+  return (
+    <span className="resume-field-label">
+      <span>{label}</span>
+      {status ? <StatusText status={status} /> : null}
+      <button type="button" title="标记已确认" onClick={() => onSetFieldStatus(path, "confirmed")}>
+        <Icon name="check-square" />
+      </button>
+      <button type="button" title="标记待核实" onClick={() => onSetFieldStatus(path, "to_verify")}>
+        <Icon name="alert-triangle" />
+      </button>
+      <button type="button" title="恢复系统版本" onClick={onRestore}>
+        <Icon name="reset" />
+      </button>
+    </span>
+  );
+}
+
+function ArrayFieldEditor({
+  label,
+  items,
+  basePath,
+  fieldStatuses,
+  onSetFieldStatus,
+  onChange,
+}: {
+  label: string;
+  items: string[];
+  basePath: string;
+  fieldStatuses: Record<string, "confirmed" | "to_verify">;
+  onSetFieldStatus: (path: string, status: "confirmed" | "to_verify") => void;
+  onChange: (items: string[]) => void;
+}) {
+  return (
+    <div className="resume-edit-group">
+      <div className="resume-edit-group-title">
+        <strong>{label}</strong>
+        <button type="button" onClick={() => onChange([...items, ""])}>
+          添加
+        </button>
+      </div>
+      {items.map((item, index) => {
+        const path = `${basePath}.${index}`;
+        return (
+          <label className="resume-array-field" key={`${path}-${index}`}>
+            <FieldLabel
+              label={`${label} ${index + 1}`}
+              path={path}
+              status={fieldStatuses[path]}
+              onSetFieldStatus={onSetFieldStatus}
+              onRestore={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
+            />
+            <input
+              value={item}
+              onChange={(event) => onChange(items.map((current, itemIndex) => (itemIndex === index ? event.currentTarget.value : current)))}
+            />
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function EntryFieldEditor({
+  label,
+  collection,
+  entries,
+  fieldStatuses,
+  onSetFieldStatus,
+  onChange,
+  onRemove,
+  onAdd,
+}: {
+  label: string;
+  collection: "experiences" | "projects" | "education";
+  entries: ResumeEntry[];
+  fieldStatuses: Record<string, "confirmed" | "to_verify">;
+  onSetFieldStatus: (path: string, status: "confirmed" | "to_verify") => void;
+  onChange: (collection: "experiences" | "projects" | "education", index: number, entry: ResumeEntry) => void;
+  onRemove: (collection: "experiences" | "projects" | "education", index: number) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="resume-edit-group">
+      <div className="resume-edit-group-title">
+        <strong>{label}</strong>
+        <button type="button" onClick={onAdd}>
+          添加
+        </button>
+      </div>
+      {entries.map((entry, entryIndex) => (
+        <div className="resume-entry-editor" key={entry.id || `${collection}-${entryIndex}`}>
+          <input
+            aria-label={`${label}标题`}
+            value={entry.title}
+            onChange={(event) => onChange(collection, entryIndex, { ...entry, title: event.currentTarget.value })}
+          />
+          <input
+            aria-label={`${label}组织`}
+            value={entry.organization ?? ""}
+            onChange={(event) => onChange(collection, entryIndex, { ...entry, organization: event.currentTarget.value })}
+          />
+          <input
+            aria-label={`${label}时间`}
+            value={entry.period ?? ""}
+            onChange={(event) => onChange(collection, entryIndex, { ...entry, period: event.currentTarget.value })}
+          />
+          <ArrayFieldEditor
+            label={`${label} bullet`}
+            items={entry.bullets}
+            basePath={`document.${collection}.${entryIndex}.bullets`}
+            fieldStatuses={fieldStatuses}
+            onSetFieldStatus={onSetFieldStatus}
+            onChange={(bullets) => onChange(collection, entryIndex, { ...entry, bullets })}
+          />
+          <button type="button" className="resume-remove-button" onClick={() => onRemove(collection, entryIndex)}>
+            删除{label}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ResumePaper({
+  document,
+  fieldStatuses,
+  resume,
+}: {
+  document: CustomizedResumeDocument;
+  fieldStatuses: Record<string, "confirmed" | "to_verify">;
+  resume: ResumePreviewModel;
+}) {
+  return (
+    <section className="resume-paper" aria-label="完整简历正文">
+      <header className="resume-paper-header">
+        <h1>{document.basics.full_name}</h1>
+        {document.basics.headline ? <p>{document.basics.headline}</p> : null}
+        <small>{[document.basics.location, document.basics.email, document.basics.phone].filter(Boolean).join(" · ")}</small>
+      </header>
+      <PaperSection title="摘要" status={fieldStatuses["document.summary"]}>
+        <p>{document.summary}</p>
+      </PaperSection>
+      <PaperSection title="技能">
+        <div className="resume-paper-skill-list">
+          {document.skills.map((skill, index) => (
+            <span key={`${skill}-${index}`}>
+              {skill}
+              <StatusText status={fieldStatuses[`document.skills.${index}`]} />
+            </span>
+          ))}
+        </div>
+      </PaperSection>
+      <EntryPaperSection title="经历" collection="experiences" entries={document.experiences} fieldStatuses={fieldStatuses} />
+      <EntryPaperSection title="项目" collection="projects" entries={document.projects} fieldStatuses={fieldStatuses} />
+      <EntryPaperSection title="教育" collection="education" entries={document.education} fieldStatuses={fieldStatuses} />
+      {document.certifications.length > 0 ? (
+        <PaperSection title="证书">
+          <ul>
+            {document.certifications.map((item, index) => (
+              <li key={`${item}-${index}`}>{item}</li>
+            ))}
+          </ul>
+        </PaperSection>
+      ) : null}
+      <footer className="resume-paper-footer">
+        <span>{resume.sourceLabel}</span>
+        <span>{resume.status === "blocked" ? "复核版" : "JSON 画布导出版"}</span>
+      </footer>
+    </section>
+  );
+}
+
+function PaperSection({
+  title,
+  status,
+  children,
+}: {
+  title: string;
+  status?: "confirmed" | "to_verify";
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="resume-paper-section">
+      <h2>
+        {title}
+        <StatusText status={status} />
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function EntryPaperSection({
+  title,
+  collection,
+  entries,
+  fieldStatuses,
+}: {
+  title: string;
+  collection: "experiences" | "projects" | "education";
+  entries: ResumeEntry[];
+  fieldStatuses: Record<string, "confirmed" | "to_verify">;
+}) {
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <PaperSection title={title}>
+      {entries.map((entry, entryIndex) => (
+        <article className="resume-paper-entry" key={entry.id || `${collection}-${entryIndex}`}>
+          <h3>{[entry.title, entry.organization, entry.period].filter(Boolean).join(" · ")}</h3>
+          <ul>
+            {entry.bullets.map((bullet, bulletIndex) => (
+              <li key={`${entry.id}-${bulletIndex}`}>
+                {bullet}
+                <StatusText status={fieldStatuses[`document.${collection}.${entryIndex}.bullets.${bulletIndex}`]} />
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))}
+    </PaperSection>
+  );
+}
+
+function StatusText({ status }: { status?: "confirmed" | "to_verify" }) {
+  if (status === "confirmed") {
+    return <small className="resume-field-status confirmed">已确认</small>;
+  }
+  if (status === "to_verify") {
+    return <small className="resume-field-status verify">待核实</small>;
+  }
+  return null;
+}
+
+function buildMarkdownFromDraft(document: CustomizedResumeDocument): string {
+  const chunks = [
+    `# ${document.basics.full_name}`,
+    document.basics.headline ?? "",
+    document.summary ? `## 摘要\n${document.summary}` : "",
+    document.skills.length ? `## 技能\n${document.skills.map((skill) => `- ${skill}`).join("\n")}` : "",
+    ...document.experiences.map((entry) => buildMarkdownEntry("经历", entry)),
+    ...document.projects.map((entry) => buildMarkdownEntry("项目", entry)),
+    ...document.education.map((entry) => buildMarkdownEntry("教育", entry)),
+    document.certifications.length ? `## 证书\n${document.certifications.map((item) => `- ${item}`).join("\n")}` : "",
+  ];
+  return chunks.filter((chunk): chunk is string => Boolean(chunk.trim())).join("\n\n");
+}
+
+function buildMarkdownEntry(title: string, entry: ResumeEntry): string {
+  const heading = [entry.title, entry.organization, entry.period].filter(Boolean).join(" · ");
+  return `## ${title}：${heading || "未命名条目"}\n${entry.bullets.map((bullet) => `- ${bullet}`).join("\n")}`;
 }

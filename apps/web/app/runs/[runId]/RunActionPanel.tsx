@@ -88,7 +88,12 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
     event.preventDefault();
     setIsBusy(true);
     setMessage(String());
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    formData.delete("cvFiles");
+    formData.delete("jdFiles");
+    appendSelectedFiles(formData, "cvFiles", form.elements.namedItem("cvFiles"));
+    appendSelectedFiles(formData, "jdFiles", form.elements.namedItem("jdFiles"));
     const response = await fetch(`/api/runs/${runId}/draft`, {
       method: "PATCH",
       body: formData,
@@ -128,18 +133,26 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
   return (
     <div className="run-action-stack">
       <div className="pill-row compact">
-        <button className="primary-link" type="button" disabled={!canRun || isBusy} onClick={() => runAction("run", "开始评估")}>
-          {"开始评估"}
-        </button>
-        <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("retry_full", "重新评估")}>
-          {"重新评估"}
-        </button>
-        <button className="secondary-link" type="button" disabled={!canRetry || isBusy} onClick={() => runAction("resume_failed", "从失败处继续")}>
-          {"从失败处继续"}
-        </button>
-        <button className="secondary-link danger" type="button" disabled={!canDelete || isBusy} onClick={deleteCurrentRun}>
-          {"删除"}
-        </button>
+        {canRun ? (
+          <button className="primary-link" type="button" disabled={isBusy} onClick={() => runAction("run", "开始评估")}>
+            {"开始评估"}
+          </button>
+        ) : null}
+        {canRetry ? (
+          <>
+            <button className="primary-link" type="button" disabled={isBusy} onClick={() => runAction("retry_full", "重新评估")}>
+              {"重新评估"}
+            </button>
+            <button className="secondary-link" type="button" disabled={isBusy} onClick={() => runAction("resume_failed", "从失败处继续")}>
+              {"从失败处继续"}
+            </button>
+          </>
+        ) : null}
+        {canDelete ? (
+          <button className="secondary-link danger" type="button" disabled={isBusy} onClick={deleteCurrentRun}>
+            {"删除"}
+          </button>
+        ) : null}
       </div>
       {actionPhase !== "idle" ? <RunActionProgress phase={actionPhase} actionLabel={activeActionLabel} /> : null}
       {draftStatus === "draft" && dependencyReport && dependencyReport.overall !== "healthy" ? (
@@ -158,17 +171,14 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
         <form className="draft-edit-form" onSubmit={patchDraft}>
           <div className="detail-grid">
             <label className="field-label">
-              <span>{"候选人备注"}</span>
-              <input name="candidateId" defaultValue={draft.candidateId} />
-            </label>
-            <label className="field-label">
               <span>{"投递名称"}</span>
               <input name="label" defaultValue={draft.label} />
             </label>
           </div>
           <label className="field-label">
-            <span>{"替换全部简历文件"}</span>
+            <span>{"可选：替换简历文件"}</span>
             <input name="cvFiles" type="file" multiple accept=".txt,.md,.pdf,.png,.jpg,.jpeg" />
+            <small>{"不选择文件会保留当前简历；只有选择新文件才会替换全部简历输入。"}</small>
           </label>
           <div className="jd-text-stack">
             {draft.files
@@ -183,6 +193,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
           <label className="field-label">
             <span>{"追加岗位文件"}</span>
             <input name="jdFiles" type="file" multiple accept=".txt,.md,.pdf,.png,.jpg,.jpeg" />
+            <small>{"不选择文件不会改变现有岗位；这里只用于追加新的 JD 文件。"}</small>
           </label>
           <label className="field-label">
             <span>{"新岗位显示名"}</span>
@@ -192,6 +203,7 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
             <span>{"追加粘贴岗位"}</span>
             <input name="jdTextDisplayNames" placeholder="例如：公司名称 - 岗位名称" />
             <textarea name="jdTexts" rows={5} placeholder="粘贴岗位描述文本" />
+            <small>{"留空会跳过，不会覆盖已上传的岗位内容。"}</small>
           </label>
           <button className="primary-link" type="submit" disabled={isBusy}>
             {"更新草稿"}
@@ -200,6 +212,17 @@ export function RunActionPanel({ runId, draftStatus, draft }: Props) {
       ) : null}
     </div>
   );
+}
+
+function appendSelectedFiles(formData: FormData, fieldName: string, field: Element | RadioNodeList | null) {
+  if (!(field instanceof HTMLInputElement) || field.type !== "file" || !field.files) {
+    return;
+  }
+  Array.from(field.files).forEach((file) => {
+    if (file.size > 0 || file.name.trim()) {
+      formData.append(fieldName, file);
+    }
+  });
 }
 
 function RunActionProgress({ phase, actionLabel }: { phase: ActionPhase; actionLabel: string }) {

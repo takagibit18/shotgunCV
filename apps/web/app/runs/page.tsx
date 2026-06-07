@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { STATUS_LABELS } from "../../lib/labels";
 import { listRuns, type RunSummary } from "../../lib/runs";
+import { formatRunDisplayName, sanitizeUserFacingText } from "../../lib/user-facing";
 import { AppShell, Icon, MetricCard } from "../AppShell";
 import { RunQueue } from "../RunQueue";
 
@@ -29,10 +30,10 @@ export default async function RunsPage() {
       <main className="app-shell operational-shell">
         <section className="page-header with-actions">
           <div>
-            <p className="eyebrow">内部工作台</p>
+            <p className="eyebrow">投递工作台</p>
             <h1 className="page-title">运行队列</h1>
             <p className="hero-copy">
-              这里是进入产品后的真实工作台：集中查看每个投递的状态，处理简历生成进度、失败风险和下一步动作。首页继续承担展示与引导职责。
+              集中查看每个投递的状态，优先处理失败、草稿、证据复核和报告导出，让下一步动作保持清楚。
             </p>
           </div>
           <div className="row-actions">
@@ -50,7 +51,7 @@ export default async function RunsPage() {
         <section className="metric-card-grid" aria-label="工作台关键指标">
           <MetricCard icon="alert-triangle" label="待处理投递" value={failedRuns + warningRuns + draftRuns} helper="失败、提醒与草稿优先进入队列" tone="orange" />
           <MetricCard icon="play" label="运行中" value={activeRuns} helper="本地流程正在推进或排队" tone="blue" />
-          <MetricCard icon="document" label="可导出简历" value={resumeReadyRuns} helper="已生成简历变体，后续补齐导出闭环" tone="green" />
+          <MetricCard icon="document" label="简历产物" value={resumeReadyRuns} helper="已进入生成阶段，需到简历工作台确认是否可导出" tone="green" />
           <MetricCard icon="stats" label="全部投递" value={totalRuns} helper={`平均阶段完成度 ${averageProgress}%`} tone="neutral" />
         </section>
 
@@ -74,7 +75,7 @@ export default async function RunsPage() {
                   {priorityRuns.map((run) => (
                     <article className="dashboard-priority-row" key={run.runId}>
                       <div>
-                        <strong>{run.label || run.runId}</strong>
+                        <strong>{formatRunDisplayName(run.label)}</strong>
                         <span>{getRunActionHint(run)}</span>
                       </div>
                       <span className={buildStatusClassName(run)}>{STATUS_LABELS[run.draftStatus] ?? run.draftStatus}</span>
@@ -107,7 +108,7 @@ export default async function RunsPage() {
                 </span>
                 <div>
                   <h3>简历交付</h3>
-                  <p className="muted">真实生成与导出闭环是后续版本的主线。</p>
+                  <p className="muted">进入简历工作台预览、复核证据，并导出可投递版本。</p>
                 </div>
               </div>
               <div className="dashboard-rail-stats">
@@ -133,7 +134,7 @@ export default async function RunsPage() {
                 </span>
                 <div>
                   <h3>风险复核</h3>
-                  <p className="muted">先稳住产物可信度，检索增强等性能强化暂缓。</p>
+                  <p className="muted">优先确认缺口、失败原因和可导出版本，避免在证据不足时推进投递。</p>
                 </div>
               </div>
               <div className="dashboard-check-list">
@@ -149,8 +150,8 @@ export default async function RunsPage() {
                   <Icon name="sparkle" />
                 </span>
                 <div>
-                  <h3>v0.9 工作台</h3>
-                  <p className="muted">展示页保持对外叙事，内部页面承接真实处理、复核和交付动作。</p>
+                  <h3>本地边界</h3>
+                  <p className="muted">网页只整理本地任务、证据和报告；核心分析仍由 Python 流程生成。</p>
                 </div>
               </div>
             </section>
@@ -183,10 +184,10 @@ function getPriorityWeight(run: RunSummary): number {
 
 function getRunActionHint(run: RunSummary): string {
   if (run.runStatus?.error_summary) {
-    return run.runStatus.error_summary;
+    return sanitizeUserFacingText(run.runStatus.error_summary);
   }
   if (run.runStatus?.quality_summary) {
-    return run.runStatus.quality_summary;
+    return sanitizeUserFacingText(run.runStatus.quality_summary);
   }
   if (run.draftStatus === "draft" || run.draftStatus === "ingest-ready") {
     return "确认输入后启动本地流程";

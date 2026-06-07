@@ -22,6 +22,9 @@ import {
   POST as postEvidenceOverrideRoute,
 } from "../app/api/runs/[runId]/evidence-overrides/route";
 import {
+  POST as postResumeEditRoute,
+} from "../app/api/runs/[runId]/resume-edits/route";
+import {
   GET as getDependencyRoute,
   POST as postDependencyRoute,
 } from "../app/api/settings/dependencies/route";
@@ -674,6 +677,112 @@ describe("run viewer data loading", () => {
     expect(runs[0].draftStatus).toBe("failed");
   });
 
+  it("renders model permission errors with an explicit configuration cue", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "model-error-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeJson(path.join(runsDir, "model-error-run", "run_status.json"), {
+      status: "failed",
+      status_kind: "model_error",
+      current_stage: "analyze",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:01:00.000Z",
+      error_stage: "analyze",
+      error_code: "MODEL_PROVIDER_PERMISSION_DENIED",
+      error_summary: "HTTP Error 403: Forbidden",
+      last_action: "run",
+    });
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "model-error-run" }) }));
+
+    expect(html).toContain("模型服务配置失败");
+    expect(html).toContain("API Key 可能无权限");
+    expect(html).toContain("/settings");
+    expect(html).not.toContain("MODEL_PROVIDER_PERMISSION_DENIED");
+    expect(html).not.toContain("model-error-run");
+    expect(html).not.toContain("run-state-panel success");
+  });
+
+  it("renders model network errors as timeout guidance instead of permission guidance", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "model-network-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeJson(path.join(runsDir, "model-network-run", "run_status.json"), {
+      status: "failed",
+      status_kind: "model_error",
+      current_stage: "analyze",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:03:00.000Z",
+      error_stage: "analyze",
+      error_code: "MODEL_NETWORK_ERROR",
+      error_summary: "MODEL_NETWORK_ERROR: Model provider request timed out after 180s.",
+      last_action: "run",
+    });
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "model-network-run" }) }));
+
+    expect(html).toContain("模型请求超时或网络连接失败");
+    expect(html).toContain("结构化分析");
+    expect(html).toContain("分析器模型");
+    expect(html).not.toContain("MODEL_NETWORK_ERROR");
+    expect(html).not.toContain("model-network-run");
+    expect(html).not.toContain("模型服务配置失败");
+    expect(html).not.toContain("API Key 可能无权限");
+  });
+
+  it("renders structured analysis failures as CV/JD guidance instead of raw schema fields", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "structured-error-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeJson(path.join(runsDir, "structured-error-run", "run_status.json"), {
+      status: "failed",
+      status_kind: "model_error",
+      current_stage: "analyze",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:01:00.000Z",
+      error_stage: "analyze",
+      error_code: "STRUCTURED_ANALYSIS_INVALID",
+      error_summary: "Structured analysis validation failed: missing candidate_profile or jd_profiles.",
+      last_action: "run",
+    });
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "structured-error-run" }) }));
+
+    expect(html).toContain("结构化分析失败");
+    expect(html).toContain("简历信息和 JD 信息");
+    expect(html).toContain("岗位职责和任职要求");
+    expect(html).not.toContain("模型服务配置失败");
+    expect(html).not.toContain("API Key 可能无权限");
+    expect(html).not.toContain("candidate_profile");
+    expect(html).not.toContain("jd_profiles");
+  });
+
+  it("renders partial failed runs as incomplete instead of success", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "partial-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeJson(path.join(runsDir, "partial-run", "run_status.json"), {
+      status: "partial_failed",
+      status_kind: "partial_failed",
+      current_stage: "report",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:01:00.000Z",
+      error_stage: "ingest",
+      error_code: "PARSE_JD_PARTIAL_FAILED",
+      error_summary: "1 JD input could not be parsed and was excluded.",
+      last_action: "run",
+      quality_status: "warning",
+      quality_summary: "1 JD input could not be parsed and was excluded.",
+    });
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: "partial-run" }) }));
+
+    expect(html).toContain("岗位输入解析失败");
+    expect(html).toContain("run-state-panel partial");
+    expect(html).not.toContain("PARSE_JD_PARTIAL_FAILED");
+    expect(html).not.toContain("run-state-panel success");
+  });
+
   it("loads structured timeline events from logs without requiring report artifacts", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "timeline-run");
@@ -838,6 +947,32 @@ describe("run viewer data loading", () => {
     expect(status).toMatchObject({ status: "draft", last_action: "draft_update" });
   });
 
+  it("keeps existing CV files when draft edit submits an empty file input", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      label: "Draft upload",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    await patchRunDraft(draft.runId, {
+      cvFiles: [new File([""], "", { type: "application/octet-stream" })],
+      now: new Date("2026-04-25T09:00:00.000Z"),
+    });
+
+    const runDir = path.join(runsDir, draft.runId);
+    const manifest = JSON.parse(await readFile(path.join(runDir, "ingest", "upload_manifest.json"), "utf-8"));
+
+    expect(await readFile(path.join(runDir, "input_files", "cv", "resume.md"), "utf-8")).toBe("resume");
+    expect(manifest.files.filter((file: { role: string }) => file.role === "cv")).toEqual([
+      expect.objectContaining({ originalName: "resume.md", storedRelativePath: "input_files/cv/resume.md" }),
+    ]);
+  });
+
   it("deletes draft and failed runs but rejects running runs", async () => {
     const runsDir = await createTempRunsDir();
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -958,11 +1093,113 @@ describe("run viewer data loading", () => {
       last_action: "run",
     });
     expect(status.error_summary).toContain("CLI 运行失败，退出码 1");
-    expect(status.error_summary).toContain("missing python package");
+    expect(status.error_summary).toContain("请查看本地运行日志");
+    expect(status.error_summary).not.toContain("missing python package");
     const actionLog = await readFile(path.join(runsDir, draft.runId, "logs", "web_run_action.jsonl"), "utf-8");
     expect(actionLog).toContain("web_cli_start");
     expect(actionLog).toContain("web_cli_exit");
     expect(actionLog).toContain("missing python package");
+  });
+
+  it("preserves backend analyze failures and replaces raw structured errors with user guidance", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    process.env.SHOTGUNCV_CLI_COMMAND = process.execPath;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+    const runDir = path.join(runsDir, draft.runId);
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      unref: () => void;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.unref = () => undefined;
+
+    await startRunAction(draft.runId, "run", () => child);
+    await writeJson(path.join(runDir, "run_status.json"), {
+      status: "failed",
+      status_kind: "model_error",
+      current_stage: "analyze",
+      started_at: "2026-04-25T08:30:00.000Z",
+      finished_at: "2026-04-25T08:31:00.000Z",
+      error_stage: "analyze",
+      error_code: "STRUCTURED_ANALYSIS_INVALID",
+      error_summary: "Structured analysis validation failed: missing candidate_profile or jd_profiles.",
+      last_action: "run",
+    });
+    child.stdout.emit("data", Buffer.from("Structured analysis validation failed: missing candidate_profile or jd_profiles."));
+    child.emit("exit", 1, null);
+    await waitForRunStatusSummary(path.join(runDir, "run_status.json"), "简历信息和 JD 信息");
+
+    const status = JSON.parse(await readFile(path.join(runDir, "run_status.json"), "utf-8"));
+    expect(status).toMatchObject({
+      status: "failed",
+      current_stage: "analyze",
+      error_stage: "analyze",
+      error_code: "STRUCTURED_ANALYSIS_INVALID",
+      status_kind: "model_error",
+    });
+    expect(status.error_summary).toContain("简历信息和 JD 信息");
+    expect(status.error_summary).toContain("岗位职责和任职要求");
+    expect(status.error_summary).not.toContain("candidate_profile");
+  });
+
+  it("preserves backend analyze network failures as timeout guidance", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    process.env.SHOTGUNCV_CLI_COMMAND = process.execPath;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Draft Role"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+    const runDir = path.join(runsDir, draft.runId);
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      unref: () => void;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.unref = () => undefined;
+
+    await startRunAction(draft.runId, "run", () => child);
+    await writeJson(path.join(runDir, "run_status.json"), {
+      status: "failed",
+      status_kind: "model_error",
+      current_stage: "analyze",
+      started_at: "2026-04-25T08:30:00.000Z",
+      finished_at: "2026-04-25T08:33:00.000Z",
+      error_stage: "analyze",
+      error_code: "MODEL_NETWORK_ERROR",
+      error_summary: "MODEL_NETWORK_ERROR: Model provider request timed out after 180s.",
+      last_action: "run",
+    });
+    child.stdout.emit("data", Buffer.from("MODEL_NETWORK_ERROR: Model provider request timed out after 180s."));
+    child.emit("exit", 1, null);
+    await waitForRunStatusSummary(path.join(runDir, "run_status.json"), "模型请求超时或网络连接失败");
+
+    const status = JSON.parse(await readFile(path.join(runDir, "run_status.json"), "utf-8"));
+    expect(status).toMatchObject({
+      status: "failed",
+      current_stage: "analyze",
+      error_stage: "analyze",
+      error_code: "MODEL_NETWORK_ERROR",
+      status_kind: "model_error",
+    });
+    expect(status.error_summary).toContain("结构化分析");
+    expect(status.error_summary).toContain("分析器模型");
+    expect(status.error_summary).not.toContain("API Key");
+    expect(status.error_summary).not.toContain("权限");
   });
 
   it("rejects duplicate draft run ids", async () => {
@@ -1067,7 +1304,7 @@ describe("run viewer pages", () => {
     delete process.env.SHOTGUNCV_RUNS_DIR;
   });
 
-  it("renders the landing home page", async () => {
+  it("renders the home page as the operational run workspace", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -1075,18 +1312,19 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("智能简历工作台");
-    expect(html).toContain("从岗位输入到证据化简历策略，一屏掌控");
+    expect(html).toContain("运行队列");
     expect(html).toContain("demo");
-    expect(html).toContain("为什么用智能简历工作台");
-    expect(html).toContain("准备开始你的第一轮简历工作流了吗");
-    expect(html).toContain("打开运行队列");
+    expect(html).toContain("投递工作台");
+    expect(html).toContain("搜索投递名称、状态、风险");
+    expect(html).toContain("优先处理");
     expect(html).toContain('href="/upload"');
-    expect(html).toContain('href="/runs"');
-    expect(html).not.toContain("app-sidebar");
-    expect(html).not.toContain("app-commandbar");
+    expect(html).toContain("app-sidebar");
+    expect(html).toContain("app-commandbar");
+    expect(html).not.toContain("功能特色");
+    expect(html).not.toContain("准备开始你的第一轮简历工作流了吗");
   });
 
-  it("renders landing navigation and keeps full queue controls on the queue page", async () => {
+  it("keeps full queue controls on both home and the dedicated queue page", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -1095,28 +1333,21 @@ describe("run viewer pages", () => {
     const runsHtml = renderToStaticMarkup(await RunsPage());
 
     expect(html).toContain("智能简历工作台");
-    expect(html).toContain("功能特色");
-    expect(html).toContain("工作流");
-    expect(html).toContain("使用方式");
-    expect(html).toContain("常见问题");
+    expect(html).toContain("运行队列");
     expect(html).toContain('href="/resume"');
-    expect(html).toContain('href="#features"');
-    expect(html).toContain('href="#workflow"');
     expect(html).not.toContain("模板库");
     expect(html).not.toContain("sidebar-nav-item disabled");
-    expect(html).toContain("本地优先，边界清晰");
-    expect(html).toContain("先把工作流跑通，再进入证据复核");
-    expect(html).not.toContain("搜索投递名称、状态、风险");
+    expect(html).toContain("搜索投递名称、状态、风险");
     expect(runsHtml).toContain("搜索投递名称、状态、风险");
     expect(runsHtml).toContain("状态筛选");
     expect(runsHtml).toContain("阶段筛选");
     expect(runsHtml).toContain("排序");
-    expect(runsHtml).toContain("集中查看每个投递的状态");
-    expect(runsHtml).toContain("内部工作台");
+    expect(runsHtml).toContain("优先处理失败、草稿、证据复核和报告导出");
+    expect(runsHtml).toContain("投递工作台");
     expect(runsHtml).toContain("优先处理");
-    expect(runsHtml).toContain("可导出简历");
+    expect(runsHtml).toContain("简历产物");
     expect(runsHtml).toContain("简历交付");
-    expect(runsHtml).toContain("检索增强等性能强化暂缓");
+    expect(runsHtml).toContain("本地边界");
     expect(runsHtml).toContain("operational-shell");
     expect(html).not.toContain("editorial-hero");
     expect(html).not.toContain("dark-product-surface");
@@ -1124,7 +1355,7 @@ describe("run viewer pages", () => {
     expect(html).not.toContain("v0.5.8");
   });
 
-  it("keeps the landing hero separate from the full run queue", async () => {
+  it("renders pagination directly on the home workbench", async () => {
     const runsDir = await createTempRunsDir();
     for (let index = 0; index < 12; index += 1) {
       await createIncompleteRun(runsDir, `dashboard-run-${String(index + 1).padStart(2, "0")}`);
@@ -1133,15 +1364,12 @@ describe("run viewer pages", () => {
 
     const html = renderToStaticMarkup(await HomePage());
 
-    expect(html).toContain("从岗位输入到证据化简历策略，一屏掌控");
-    expect(html).toContain('href="/runs"');
-    expect(html).toContain("landing-workflow-card");
-    expect(html).toContain("aria-label=\"下一步\"");
-    expect(html).toContain("aria-label=\"查看第 2 步\"");
-    expect(html).not.toContain("搜索投递名称、状态、风险");
-    expect(html).not.toContain("状态筛选");
-    expect(html).not.toContain("第 1 / 2 页");
-    expect(html).not.toContain("每页 10 条");
+    expect(html).toContain("运行队列");
+    expect(html).toContain("搜索投递名称、状态、风险");
+    expect(html).toContain("状态筛选");
+    expect(html).toContain("第 1 / 2 页");
+    expect(html).toContain("每页 10 条");
+    expect(html).not.toContain("landing-workflow-card");
   });
 
   it("renders the draft upload entry point on the run index page", async () => {
@@ -1152,8 +1380,8 @@ describe("run viewer pages", () => {
 
     expect(html).toContain("/upload");
     expect(html).toContain("创建投递草稿");
-    expect(html).toContain("等待首个任务");
-    expect(html).toContain("整理输入");
+    expect(html).toContain("暂无投递");
+    expect(html).toContain("工作台会把下一步动作、风险和简历交付状态集中到这里");
   });
 
   it("renders run pagination on the dedicated queue page", async () => {
@@ -1166,13 +1394,13 @@ describe("run viewer pages", () => {
     const dashboardHtml = renderToStaticMarkup(await HomePage());
     const html = renderToStaticMarkup(await RunsPage());
 
-    expect(dashboardHtml).toContain("流程健康度");
+    expect(dashboardHtml).toContain("运行队列");
     expect(dashboardHtml).not.toContain("Workflow Health");
-    expect(html).toContain("内部工作台");
+    expect(html).toContain("投递工作台");
     expect(html).toContain("优先处理");
     expect(html).toContain("待处理投递");
-    expect(dashboardHtml).toContain("完成率");
-    expect(dashboardHtml).toContain("打开运行队列");
+    expect(dashboardHtml).toContain("状态筛选");
+    expect(dashboardHtml).toContain("开始新投递");
     expect(html).toContain("运行队列");
     expect(html).toContain("全部投递");
     expect(html).toContain("进行中");
@@ -1461,7 +1689,18 @@ describe("run viewer pages", () => {
     await createCompleteRun(runsDir, "demo-full");
     await writeFile(
       path.join(runsDir, "demo-full", "report", "summary.md"),
-      "# ShotgunCV v0.3.0 LLM Eval Summary\n\n- gate: hard_gate_missing\n- review: needs_review\n- Top Evidence: 围绕 LLM 辅助工作流搭建过内部工具\n",
+      [
+        "# ShotgunCV v0.3.0 LLM Eval Summary",
+        "",
+        "- Candidate: `cand-001`",
+        `- Run directory: ${path.join(runsDir, "demo-full")}`,
+        "- gate: hard_gate_missing",
+        "- review: needs_review",
+        "- source: Source: fixtures/candidates/base_resume.md",
+        "- decision: preflight-gate",
+        "- Top Evidence: 围绕 LLM 辅助工作流搭建过内部工具",
+        "",
+      ].join("\n"),
       "utf-8",
     );
     process.env.SHOTGUNCV_RUNS_DIR = runsDir;
@@ -1487,6 +1726,9 @@ describe("run viewer pages", () => {
     expect(html).toContain("需要复核");
     expect(html).not.toContain("hard_gate_missing");
     expect(html).not.toContain("needs_review");
+    expect(html).not.toContain("Run directory");
+    expect(html).not.toContain("fixtures/candidates/base_resume.md");
+    expect(html).not.toContain("preflight-gate");
     expect(html).not.toContain("主要风险");
   });
 
@@ -1632,6 +1874,20 @@ describe("run viewer pages", () => {
     expect(homeHtml).toContain("评估结果");
   });
 
+  it("renders evaluation risk rows without raw artifact tokens", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "risky-run", { includeV057Artifacts: true });
+    await makeRunRisky(runsDir, "risky-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await EvaluationPage());
+
+    expect(html).toContain("学历硬门槛缺失");
+    expect(html).toContain("投递建议：人工复核");
+    expect(html).not.toContain("hard_gate_missing");
+    expect(html).not.toContain("投递建议：manual_review");
+  });
+
   it("renders an empty evaluation result state when no run has evaluate artifacts", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "draft-only");
@@ -1682,9 +1938,9 @@ describe("run viewer pages", () => {
     expect(workspace.rows[0].variants[0]).toMatchObject({
       variantId: "variant-jd-jd-001",
       variantDisplayName: "岗位定制版本（jd-001）",
-      safeRewriteItems: ["Keep education and employer facts unchanged."],
+      safeRewriteItems: ["保持教育和雇主事实不变。"],
       simulatedSupplementItems: ["待核实模拟补强：风控项目复盘"],
-      forbiddenGapItems: ["Do not fabricate certificates."],
+      forbiddenGapItems: ["不要编造证书。"],
       sourceLabel: "来源：简历版本",
     });
     expect(workspace.rows[0].constraints[0]).toMatchObject({
@@ -1709,18 +1965,33 @@ describe("run viewer pages", () => {
     expect(html).toContain("简历优化");
     expect(html).toContain("创建投递草稿");
     expect(html).toContain('href="/upload"');
-    expect(html).toContain("岗位定制版本（jd-001）");
+    expect(html).toContain("暂无可预览或导出的简历");
+    expect(html).toContain("处理当前任务");
+    expect(html).toContain("证据确认");
     expect(html).toContain("可安全改写");
-    expect(html).toContain("待核实模拟补强");
-    expect(html).toContain("禁止编造缺口");
-    expect(html).toContain("来源：简历版本");
     expect(html).toContain("来源：证据矩阵 / 投递前门槛");
-    expect(html).toContain("来源：投递策略 / 运行状态");
+    expect(html).not.toContain("Do not fabricate certificates.");
     expect(html).not.toContain("resume text");
     expect(html).not.toContain("jd text");
   });
 
-  it("renders a deliverable resume preview with markdown export controls and provenance", async () => {
+  it("renders a focused empty state for runs without structured generated resumes", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-no-json", { includeV057Artifacts: true });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await ResumePage());
+
+    expect(html).toContain("暂无可预览或导出的简历");
+    expect(html).toContain("生成完成后这里会出现预览、复制和导出入口");
+    expect(html).toContain("处理当前任务");
+    expect(html).not.toContain("resume-task-list");
+    expect(html).not.toContain("resume-legacy-panel");
+    expect(html).not.toContain("resume-paper-header");
+    expect(html).not.toContain("导出 PDF");
+  });
+
+  it("renders a deliverable JSON resume canvas with export controls and provenance", async () => {
     const runsDir = await createTempRunsDir();
     await createCompleteRun(runsDir, "resume-v010", {
       includeV057Artifacts: true,
@@ -1740,13 +2011,76 @@ describe("run viewer pages", () => {
     });
     expect(html).toContain("实时简历预览");
     expect(html).toContain("Example AI 定制简历");
-    expect(html).toContain("一键复制 Markdown");
-    expect(html).toContain("下载 Markdown");
-    expect(html).toContain("候选人：本地候选人");
+    expect(html).toContain("导出 PDF");
+    expect(html).toContain("导出 Markdown");
+    expect(html).toContain("重置为系统生成版本");
+    expect(html).toContain("字段编辑器");
+    expect(html).toContain("候选人：cand-001");
     expect(html).toContain("证据来源：候选人画像 / 生成产物");
     expect(html).toContain("围绕 LLM 辅助工作流搭建过内部工具");
     expect(html).not.toContain("generated_resumes.json");
+    expect(html).not.toContain("field_sources");
+    expect(html).not.toContain("forbidden_fields");
+    expect(html).not.toContain("to_verify_fields");
     expect(html).not.toContain("target_jd_ids");
+  });
+
+  it("merges user resume edits into the JSON preview without mutating candidate_profile", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-edited", {
+      includeV057Artifacts: true,
+      includeGeneratedResume: true,
+    });
+    const reviewDir = path.join(runsDir, "resume-edited", "review");
+    await mkdir(reviewDir, { recursive: true });
+    await writeJson(path.join(reviewDir, "user_resume_edits.json"), {
+      schema_version: "resume-edits-v1",
+      run_id: "resume-edited",
+      edits: [
+        {
+          resume_id: "resume-jd-001",
+          document_patch: {
+            summary: "用户确认版摘要：聚焦 RAG 评估和证据化交付。",
+            skills: ["LLM workflows", "RAG evaluation"],
+            experiences: [
+              {
+                id: "exp-001",
+                title: "AI Workflow Builder",
+                organization: "Internal Tools",
+                period: "",
+                bullets: ["用户改写 bullet：搭建过证据化评估流程。"],
+              },
+            ],
+          },
+          field_statuses: {
+            "document.summary": "confirmed",
+            "document.skills.1": "to_verify",
+          },
+          source: "user",
+          updated_at: "2026-06-04T08:00:00.000Z",
+        },
+      ],
+    });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const workspace = await loadResumeWorkspace();
+    const html = renderToStaticMarkup(await ResumePage());
+    const candidateProfile = await readFile(
+      path.join(runsDir, "resume-edited", "analyze", "candidate_profile.json"),
+      "utf-8",
+    );
+
+    expect(workspace.rows[0].generatedResumes[0].previewDocument.summary).toBe(
+      "用户确认版摘要：聚焦 RAG 评估和证据化交付。",
+    );
+    expect(workspace.rows[0].generatedResumes[0].fieldStatuses["document.summary"]).toBe("confirmed");
+    expect(workspace.rows[0].generatedResumes[0].fieldStatuses["document.skills.1"]).toBe("to_verify");
+    expect(html).toContain("用户确认版摘要：聚焦 RAG 评估和证据化交付。");
+    expect(html).toContain("用户改写 bullet：搭建过证据化评估流程。");
+    expect(html).toContain("已确认");
+    expect(html).toContain("待核实");
+    expect(candidateProfile).not.toContain("用户确认版摘要");
+    expect(candidateProfile).not.toContain("用户改写 bullet");
   });
 
   it("marks blocked generated resumes as non-deliverable and keeps them in review mode", async () => {
@@ -1763,6 +2097,51 @@ describe("run viewer pages", () => {
     expect(html).toContain("不可直接投递");
     expect(html).toContain("先补齐阻断证据，再导出投递版本。");
     expect(html).not.toContain('download="demo-run-example-ai.md"');
+    expect(html).not.toContain('data-export-kind="pdf"');
+    expect(html).not.toContain('data-export-kind="markdown"');
+  });
+
+  it("persists user resume edits as an independent review artifact", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "resume-edit-api", {
+      includeV057Artifacts: true,
+      includeGeneratedResume: true,
+    });
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const response = await postResumeEditRoute(
+      new Request("http://localhost/api/runs/resume-edit-api/resume-edits", {
+        method: "POST",
+        body: JSON.stringify({
+          resumeId: "resume-jd-001",
+          documentPatch: {
+            summary: "API 保存的人工摘要。",
+          },
+          fieldStatuses: {
+            "document.summary": "confirmed",
+          },
+        }),
+      }),
+      { params: Promise.resolve({ runId: "resume-edit-api" }) },
+    );
+    const body = await response.json();
+    const artifact = JSON.parse(
+      await readFile(path.join(runsDir, "resume-edit-api", "review", "user_resume_edits.json"), "utf-8"),
+    );
+    const candidateProfile = await readFile(
+      path.join(runsDir, "resume-edit-api", "analyze", "candidate_profile.json"),
+      "utf-8",
+    );
+
+    expect(response.status).toBe(200);
+    expect(body.savedCount).toBe(1);
+    expect(artifact.edits[0]).toMatchObject({
+      resume_id: "resume-jd-001",
+      document_patch: { summary: "API 保存的人工摘要。" },
+      field_statuses: { "document.summary": "confirmed" },
+      source: "user",
+    });
+    expect(candidateProfile).not.toContain("API 保存的人工摘要。");
   });
 
   it("persists user evidence confirmations as an independent review artifact", async () => {
@@ -1898,8 +2277,10 @@ describe("run viewer pages", () => {
     expect(overview.artifactIssueCount).toBeGreaterThanOrEqual(1);
     expect(html).toContain("配置缺失或异常");
     expect(html).toContain("产物解析异常");
-    expect(html).toContain("unknown-provider");
-    expect(html).toContain("unknown");
+    expect(html).toContain("未能识别");
+    expect(html).not.toContain("unknown-provider");
+    expect(html).not.toContain("模型提供商为 unknown");
+    expect(html).not.toContain("run_config.json");
     expect(html).not.toContain("jd text");
   });
 
@@ -2241,41 +2622,38 @@ async function createCompleteRun(
         target_jd_id: "jd-001",
         target_variant_id: "variant-jd-jd-001",
         status: preflightStatus === "pass" ? "deliverable" : "needs_review",
-        markdown: [
-          "# 本地候选人",
-          "",
-          "## 摘要",
-          "围绕 LLM 辅助工作流搭建过内部工具，能够支持评估流程建设。",
-          "",
-          "## 技能",
-          "- LLM workflows",
-          "- evaluation",
-          "",
-          "## 经历",
-          "- 围绕 LLM 辅助工作流搭建过内部工具",
-        ].join("\n"),
-        sections: [
-          {
-            title: "摘要",
-            content: "围绕 LLM 辅助工作流搭建过内部工具，能够支持评估流程建设。",
-            evidence_refs: ["围绕 LLM 辅助工作流搭建过内部工具"],
-            rewrite_strategy: "证据内强化表达",
-            verification_status: "verified",
+        document: {
+          basics: {
+            full_name: "cand-001",
+            headline: "LLM Product Engineer",
+            location: "",
+            email: "",
+            phone: "",
+            links: [],
           },
-          {
-            title: "技能",
-            content: "LLM workflows, evaluation",
-            evidence_refs: ["LLM workflows"],
-            rewrite_strategy: "关键词对齐",
-            verification_status: "verified",
-          },
-        ],
-        forbidden_items: ["Do not fabricate certificates."],
-        to_verify_items: preflightStatus === "pass" ? [] : ["缺少可验证硬门槛证据"],
+          summary: "围绕 LLM 辅助工作流搭建过内部工具，能够支持评估流程建设。",
+          skills: ["LLM workflows", "evaluation"],
+          experiences: [
+            {
+              id: "exp-001",
+              title: "AI Workflow Builder",
+              organization: "Internal Tools",
+              period: "",
+              bullets: ["围绕 LLM 辅助工作流搭建过内部工具"],
+            },
+          ],
+          projects: [],
+          education: [],
+          certifications: [],
+        },
         provenance: {
-          candidate_evidence: ["围绕 LLM 辅助工作流搭建过内部工具"],
-          generated_from: ["候选人画像", "简历版本", "证据矩阵"],
-          user_confirmations: [],
+          field_sources: {
+            "document.summary": ["围绕 LLM 辅助工作流搭建过内部工具"],
+            "document.skills.0": ["LLM workflows"],
+            "document.experiences.0.bullets.0": ["围绕 LLM 辅助工作流搭建过内部工具"],
+          },
+          to_verify_fields: preflightStatus === "pass" ? [] : ["document.basics.education"],
+          forbidden_fields: ["Do not fabricate certificates."],
         },
       },
     ]);
@@ -2487,6 +2865,17 @@ async function waitForRunStatus(statusPath: string, expectedStatus: string): Pro
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const status = JSON.parse(await readFile(statusPath, "utf-8")) as { status?: string };
     if (status.status === expectedStatus) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+
+async function waitForRunStatusSummary(statusPath: string, expectedText: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const status = JSON.parse(await readFile(statusPath, "utf-8")) as { error_summary?: string };
+    if (status.error_summary?.includes(expectedText)) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 10));

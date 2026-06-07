@@ -12,6 +12,7 @@ import {
   type EvaluationFilterState,
   type EvaluationSortKey,
 } from "../../lib/evaluation-filters";
+import { formatDecisionLabel, formatGateStatusLabel, sanitizeUserFacingText } from "../../lib/user-facing";
 
 const PAGE_SIZE = 10;
 
@@ -110,7 +111,7 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
             <option value="all">全部建议</option>
             {decisionOptions.map((decision) => (
               <option key={decision} value={decision}>
-                {decision}
+                {formatDecision(decision)}
               </option>
             ))}
           </select>
@@ -150,9 +151,9 @@ export function EvaluationQueue({ results }: { results: EvaluationResult[] }) {
           <h3>没有匹配的评估结果</h3>
           <p>
           当前筛选：{filters.gate !== "all" ? `门槛=${formatGateStatus(filters.gate)} ` : ""}
-            {filters.risk !== "all" ? `风险=${filters.risk} ` : ""}
-            {filters.score !== "all" ? `分数=${filters.score} ` : ""}
-            {filters.decision !== "all" ? `建议=${filters.decision} ` : ""}
+            {filters.risk !== "all" ? `风险=${sanitizeUserFacingText(filters.risk)} ` : ""}
+            {filters.score !== "all" ? `分数=${sanitizeUserFacingText(filters.score)} ` : ""}
+            {filters.decision !== "all" ? `建议=${formatDecision(filters.decision)} ` : ""}
             {filters.query ? `搜索="${filters.query}" ` : ""}
           </p>
           <button className="secondary-button" type="button" onClick={() => setFilters(DEFAULT_EVALUATION_FILTERS)}>
@@ -296,11 +297,11 @@ function ScoreMetric({ label, value, tone }: { label: string; value: number | nu
 }
 
 function firstText(primary: string[], fallback: string[], emptyText: string): string {
-  return primary[0] ?? fallback[0] ?? emptyText;
+  return sanitizeUserFacingText(primary[0] ?? fallback[0] ?? emptyText);
 }
 
 function summarizeList(values: string[]): string {
-  const [first, ...rest] = values;
+  const [first, ...rest] = values.map(sanitizeUserFacingText);
   if (!first) {
     return "";
   }
@@ -316,24 +317,11 @@ function formatDateTime(value: string): string {
 }
 
 function formatGateStatus(status: string): string {
-  const labels: Record<string, string> = {
-    pass: "通过",
-    blocked: "阻断",
-    needs_review: "需复核",
-    legacy: "历史结果",
-  };
-  return labels[status] ?? status;
+  return formatGateStatusLabel(status);
 }
 
 function formatDecision(value: string): string {
-  const labels: Record<string, string> = {
-    apply: "建议投递",
-    manual_review: "人工复核",
-    hold: "暂缓",
-    skip: "跳过",
-    review: "复核",
-  };
-  return labels[value] ?? value;
+  return formatDecisionLabel(value);
 }
 
 function buildGateClassName(status: string): string {

@@ -5,11 +5,12 @@ from pathlib import Path
 from shutil import rmtree
 from typing import Any, Literal
 
+from shotguncv_core.errors import classify_error
 from shotguncv_core.storage import dump_json, load_json
 
 
 StageName = Literal["ingest", "analyze", "generate", "evaluate", "plan", "report"]
-RunState = Literal["draft", "queued", "running", "done", "failed"]
+RunState = Literal["draft", "queued", "running", "done", "failed", "partial_failed"]
 RunAction = Literal["run", "retry_full", "resume_failed", "draft_update", "delete"]
 RunQualityStatus = Literal["ok", "warning", "failed"]
 
@@ -41,13 +42,17 @@ def build_run_status(
     last_action: RunAction = "run",
     quality_status: RunQualityStatus = "ok",
     quality_summary: str | None = None,
+    status_kind: str | None = None,
+    error_code: str | None = None,
 ) -> dict[str, Any]:
     return {
         "status": status,
+        "status_kind": status_kind or _status_kind_for_state(status),
         "current_stage": current_stage,
         "started_at": started_at,
         "finished_at": finished_at,
         "error_stage": error_stage,
+        "error_code": error_code,
         "error_summary": error_summary,
         "last_action": last_action,
         "quality_status": quality_status,
@@ -71,6 +76,10 @@ def update_quality_status(
     run_dir: Path,
     quality_status: RunQualityStatus,
     quality_summary: str | None,
+    *,
+    status_kind: str | None = None,
+    error_code: str | None = None,
+    error_stage: StageName | None = None,
 ) -> dict[str, Any]:
     status = read_run_status(run_dir) or build_run_status("draft")
     current_quality = str(status.get("quality_status") or "ok")
@@ -78,6 +87,13 @@ def update_quality_status(
     if severity.get(quality_status, 0) >= severity.get(current_quality, 0):
         status["quality_status"] = quality_status
         status["quality_summary"] = quality_summary
+        if status_kind is not None:
+            status["status_kind"] = status_kind
+        if error_code is not None:
+            status["error_code"] = error_code
+        if error_stage is not None:
+            status["error_stage"] = error_stage
+            status["current_stage"] = status.get("current_stage") or error_stage
         write_run_status(run_dir, status)
     return status
 
@@ -99,11 +115,16 @@ def mark_queued(run_dir: Path, *, action: RunAction) -> dict[str, Any]:
 
 def mark_running(run_dir: Path, stage: StageName, *, started_at: str, action: RunAction) -> dict[str, Any]:
     quality_status, quality_summary = _existing_quality(run_dir)
+    existing = read_run_status(run_dir) or {}
+    partial = _has_partial_failure(existing)
     status = build_run_status(
         "running",
         current_stage=stage,
         started_at=started_at,
         finished_at=None,
+        error_stage=existing.get("error_stage") if partial else None,
+        error_summary=existing.get("error_summary") if partial else None,
+        error_code=existing.get("error_code") if partial else None,
         last_action=action,
         quality_status=quality_status,
         quality_summary=quality_summary,
@@ -114,14 +135,20 @@ def mark_running(run_dir: Path, stage: StageName, *, started_at: str, action: Ru
 
 def mark_done(run_dir: Path, stage: StageName, *, started_at: str, action: RunAction) -> dict[str, Any]:
     quality_status, quality_summary = _existing_quality(run_dir)
+    existing = read_run_status(run_dir) or {}
+    partial = _has_partial_failure(existing)
     status = build_run_status(
-        "done",
+        "partial_failed" if partial else "done",
         current_stage=stage,
         started_at=started_at,
         finished_at=now_iso(),
+        error_stage=existing.get("error_stage") if partial else None,
+        error_summary=existing.get("error_summary") if partial else None,
+        error_code=existing.get("error_code") if partial else None,
         last_action=action,
         quality_status=quality_status,
         quality_summary=quality_summary,
+        status_kind="partial_failed" if partial else "success",
     )
     write_run_status(run_dir, status)
     return status
@@ -137,16 +164,19 @@ def mark_failed(
 ) -> dict[str, Any]:
     summary = str(error).strip() or error.__class__.__name__
     quality_status, quality_summary = _existing_quality(run_dir)
+    classification = classify_error(error)
     status = build_run_status(
         "failed",
         current_stage=stage,
         started_at=started_at,
         finished_at=now_iso(),
         error_stage=stage,
+        error_code=classification.error_code,
         error_summary=summary[:500],
         last_action=action,
         quality_status=quality_status,
         quality_summary=quality_summary,
+        status_kind=classification.status_kind,
     )
     write_run_status(run_dir, status)
     return status
@@ -192,3 +222,20 @@ def _existing_quality(run_dir: Path) -> tuple[RunQualityStatus, str | None]:
         quality_status = "ok"
     quality_summary = status.get("quality_summary")
     return quality_status, str(quality_summary) if quality_summary else None
+
+
+def _status_kind_for_state(status: RunState) -> str:
+    if status in {"queued", "running"}:
+        return "running"
+    if status == "done":
+        return "success"
+    if status == "partial_failed":
+        return "partial_failed"
+    if status == "failed":
+        return "failed"
+    return status
+
+
+def _has_partial_failure(status: dict[str, Any]) -> bool:
+    error_code = str(status.get("error_code") or "")
+    return status.get("status_kind") == "partial_failed" or error_code.endswith("_PARTIAL_FAILED")

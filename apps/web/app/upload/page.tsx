@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { AppShell } from "../AppShell";
 import { getRunsDir } from "../../lib/runs";
+import { maskPath } from "../../lib/settings";
 import { UploadForm } from "./UploadForm";
 
 
@@ -34,7 +35,7 @@ export default function UploadPage() {
         <UploadForm />
         <div className="detail-card upload-note">
           <h3>{"数据存储位置"}</h3>
-          <p className="mono">{getRunsDir()}</p>
+          <p>{maskPath(getRunsDir())}</p>
           <p>{"草稿会保存简历文件、岗位文件、上传清单和运行配置。创建后进入详情页即可启动本地流程；需要排查时可查看高级命令。 "}</p>
         </div>
       </section>

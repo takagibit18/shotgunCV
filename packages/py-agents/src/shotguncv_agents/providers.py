@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from urllib.error import HTTPError, URLError
 from urllib import request
 from typing import Protocol
 
+from shotguncv_core.errors import ModelProviderError, StructuredAnalysisError
 from shotguncv_core.models import ApplicationStrategy, CandidateProfile, JDProfile, LLMAssessment, ResumeVariant
 from shotguncv_core.run_config import RunConfig
 from shotguncv_agents.prompts import build_system_prompt as _shared_system_prompt
@@ -15,6 +18,7 @@ from shotguncv_agents.structured import parse_json_object
 
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
 DEFAULT_OPENAI_TIMEOUT_SEC = 90
+DEFAULT_ANALYZER_TIMEOUT_SEC = 180
 DEFAULT_LLM_RETRY_TIMES = 2
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 _ASCII_LETTER_PATTERN = re.compile(r"[A-Za-z]")
@@ -330,6 +334,8 @@ class OpenAIGeneratorProvider:
                 operation="build_cluster_summary",
                 provider=self.runtime_provider,
             )
+        except ModelProviderError:
+            raise
         except Exception as exc:
             if self.run_dir is not None:
                 log_fallback_used(
@@ -363,6 +369,8 @@ class OpenAIGeneratorProvider:
                 operation="build_jd_summary",
                 provider=self.runtime_provider,
             )
+        except ModelProviderError:
+            raise
         except Exception as exc:
             if self.run_dir is not None:
                 log_fallback_used(
@@ -406,6 +414,8 @@ class OpenAIJudgeProvider:
                 operation="judge_review",
                 provider=self.runtime_provider,
             )
+        except ModelProviderError:
+            raise
         except Exception as exc:
             if self.run_dir is not None:
                 log_fallback_used(
@@ -470,13 +480,22 @@ class OpenAIJudgeProvider:
 
 
 class OpenAIAnalyzeProvider:
-    def __init__(self, model: str, base_url: str | None, api_key: str, provider: str = "openai", run_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        model: str,
+        base_url: str | None,
+        api_key: str,
+        provider: str = "openai",
+        run_dir: Path | None = None,
+        timeout_sec: int | None = None,
+    ) -> None:
         self.model = model
         self.base_url = base_url or "https://api.openai.com/v1"
         self.api_key = api_key
         self.runtime_provider = provider
         self.runtime_model = model
         self.run_dir = run_dir
+        self.timeout_sec = timeout_sec or _resolve_timeout_sec({}, "SHOTGUNCV_ANALYZER_TIMEOUT_SEC", DEFAULT_ANALYZER_TIMEOUT_SEC)
 
     def analyze(self, candidate_id: str, candidate_resume_path: str, resume_text: str, jd_inputs: list[dict[str, str]]) -> AnalyzeFeedback:
         cleaned_jd_inputs = _clean_jd_inputs(jd_inputs)
@@ -510,19 +529,14 @@ class OpenAIAnalyzeProvider:
                 stage="analyze",
                 operation="analyze_resume_and_jds",
                 provider=self.runtime_provider,
+                timeout_sec=self.timeout_sec,
             )
             payload = _parse_json_payload(raw)
+        except ModelProviderError:
+            raise
         except Exception as exc:
-            if self.run_dir is not None:
-                log_fallback_used(
-                    self.run_dir,
-                    stage="analyze",
-                    operation="analyze_resume_and_jds",
-                    from_provider=self.runtime_provider,
-                    to_provider="deterministic",
-                    reason=str(exc).strip() or exc.__class__.__name__,
-                )
-            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, cleaned_jd_inputs)
+            message = str(exc).strip() or exc.__class__.__name__
+            raise StructuredAnalysisError(f"Structured analysis validation failed: analyzer output was not usable ({message}).") from exc
         candidate_payload = payload.get("candidate_profile", {})
         candidate = CandidateProfile(
             candidate_id=candidate_id,
@@ -567,8 +581,14 @@ class OpenAIAnalyzeProvider:
                 )
             )
         evidence_map = payload.get("evidence_map", {})
-        if not jd_profiles or not candidate.experiences:
-            return DeterministicAnalyzeProvider().analyze(candidate_id, candidate_resume_path, resume_text, cleaned_jd_inputs)
+        missing_cv = not candidate.experiences and not candidate.projects
+        missing_jd = not jd_profiles
+        if missing_cv and missing_jd:
+            raise StructuredAnalysisError("Structured analysis validation failed: CV and JD structured outputs are missing.")
+        if missing_cv:
+            raise StructuredAnalysisError("Structured analysis validation failed: CV structured output is missing both work experience and project evidence — at least one is required.")
+        if missing_jd:
+            raise StructuredAnalysisError("Structured analysis validation failed: JD structured output is missing required job profiles.")
         return AnalyzeFeedback(candidate_profile=candidate, jd_profiles=jd_profiles, evidence_map=evidence_map if isinstance(evidence_map, dict) else {})
 
 
@@ -730,7 +750,14 @@ def build_analyzer_provider(config: RunConfig, stage: str, run_dir: Path) -> Ana
             resolved_model=runtime_model,
             base_url=runtime_base_url,
         )
-        return OpenAIAnalyzeProvider(model=runtime_model, base_url=runtime_base_url, api_key=api_key, provider=provider, run_dir=run_dir)
+        return OpenAIAnalyzeProvider(
+            model=runtime_model,
+            base_url=runtime_base_url,
+            api_key=api_key,
+            provider=provider,
+            run_dir=run_dir,
+            timeout_sec=_resolve_timeout_sec(env_values, "SHOTGUNCV_ANALYZER_TIMEOUT_SEC", DEFAULT_ANALYZER_TIMEOUT_SEC),
+        )
     raise ValueError(f"Unsupported analyzer provider `{provider}` for stage `{stage}`.")
 
 
@@ -836,8 +863,12 @@ def _resolve_openai_runtime(
     env_values: dict[str, str],
 ) -> tuple[str, str, str]:
     if not env_path.exists():
-        raise RuntimeError(
-            f"Stage `{stage}` failed for provider `{provider}`: missing `.env` file `{env_path}`."
+        raise ModelProviderError(
+            "MODEL_CONFIG_INVALID",
+            f"Stage `{stage}` failed for provider `{provider}`: missing `.env` file `{env_path}`.",
+            category="config_error",
+            provider=provider,
+            model=configured_model,
         )
     resolved_model = configured_model.strip() or DEFAULT_OPENAI_MODEL
     resolved_base_url = (
@@ -849,8 +880,12 @@ def _resolve_openai_runtime(
     api_key = env_values.get(api_key_name, "").strip()
     if api_key:
         return resolved_model, resolved_base_url, api_key
-    raise RuntimeError(
-        f"Stage `{stage}` failed for provider `{provider}` model `{resolved_model}`: missing key `{api_key_name}` in `{env_path}`."
+    raise ModelProviderError(
+        "MODEL_CONFIG_INVALID",
+        f"Stage `{stage}` failed for provider `{provider}` model `{resolved_model}`: missing key `{api_key_name}` in `{env_path}`.",
+        category="config_error",
+        provider=provider,
+        model=resolved_model,
     )
 
 
@@ -865,6 +900,16 @@ def _resolve_model(configured_model: str, env_values: dict[str, str], role_model
         or configured_model.strip()
         or DEFAULT_OPENAI_MODEL
     )
+
+
+def _resolve_timeout_sec(env_values: dict[str, str], role_timeout_env_key: str, default: int) -> int:
+    raw_value = (
+        env_values.get(role_timeout_env_key, "").strip()
+        or env_values.get("SHOTGUNCV_OPENAI_TIMEOUT_SEC", "").strip()
+        or os.environ.get(role_timeout_env_key, "").strip()
+        or os.environ.get("SHOTGUNCV_OPENAI_TIMEOUT_SEC", "").strip()
+    )
+    return _safe_positive_int(raw_value, default)
 
 
 def _resolve_env_file_path(run_dir: Path, env_file: str) -> Path:
@@ -1443,6 +1488,7 @@ def _chat_completion(
     stage: str | None = None,
     operation: str = "chat_completion",
     provider: str = "openai",
+    timeout_sec: int | None = None,
 ) -> str:
     messages = [
         {"role": "system", "content": _build_system_prompt(expect_json=expect_json)},
@@ -1450,6 +1496,8 @@ def _chat_completion(
     ]
     last_output = ""
     last_error: Exception | None = None
+    effective_timeout_sec = timeout_sec or _resolve_timeout_sec({}, "SHOTGUNCV_OPENAI_TIMEOUT_SEC", DEFAULT_OPENAI_TIMEOUT_SEC)
+    prompt_chars = sum(len(str(message.get("content", ""))) for message in messages)
 
     for _ in range(DEFAULT_LLM_RETRY_TIMES):
         call_started = None
@@ -1460,6 +1508,8 @@ def _chat_completion(
                 operation=operation,
                 provider=provider,
                 model=model,
+                prompt_chars=prompt_chars,
+                timeout_sec=effective_timeout_sec,
             )
         payload = json.dumps(
             {
@@ -1478,10 +1528,15 @@ def _chat_completion(
                 },
                 method="POST",
             )
-            with request.urlopen(response, timeout=DEFAULT_OPENAI_TIMEOUT_SEC) as handle:
+            with request.urlopen(response, timeout=effective_timeout_sec) as handle:
                 body = json.loads(handle.read().decode("utf-8"))
         except Exception as exc:
-            last_error = exc
+            last_error = _model_provider_error_from_exception(
+                exc,
+                provider=provider,
+                model=model,
+                timeout_sec=effective_timeout_sec,
+            )
             if run_dir is not None and stage is not None and call_started is not None:
                 log_llm_call_failed(
                     run_dir,
@@ -1490,9 +1545,19 @@ def _chat_completion(
                     provider=provider,
                     model=model,
                     started=call_started,
-                    error=exc,
+                    error=last_error,
                     fallback_used=False,
+                    timeout_sec=effective_timeout_sec,
                 )
+            if isinstance(last_error, ModelProviderError) and last_error.code in {
+                "MODEL_CONFIG_INVALID",
+                "MODEL_PROVIDER_PERMISSION_DENIED",
+                "MODEL_AUTH_INVALID",
+                "MODEL_QUOTA_EXCEEDED",
+                "MODEL_UNAVAILABLE",
+                "MODEL_NETWORK_ERROR",
+            }:
+                raise last_error from exc
             continue
         usage = body.get("usage", {}) if isinstance(body, dict) else {}
         content = body["choices"][0]["message"]["content"].strip()
@@ -1532,12 +1597,110 @@ def _chat_completion(
                     started=call_started,
                     error=exc,
                     fallback_used=False,
+                    timeout_sec=effective_timeout_sec,
                 )
             continue
 
+    if isinstance(last_error, ModelProviderError):
+        raise last_error
     if last_error is not None:
         raise ValueError(f"LLM output failed Chinese dominance check: {last_output[:200]}") from last_error
     raise ValueError("LLM returned empty output.")
+
+
+def _model_provider_error_from_exception(
+    error: Exception,
+    *,
+    provider: str,
+    model: str,
+    timeout_sec: int | None = None,
+) -> Exception:
+    if isinstance(error, ModelProviderError):
+        return error
+    if isinstance(error, HTTPError):
+        status_code = int(error.code)
+        if status_code == 401:
+            return ModelProviderError(
+                "MODEL_AUTH_INVALID",
+                f"Model provider authentication failed with HTTP 401. Check API Key for `{provider}`.",
+                category="config_error",
+                provider=provider,
+                model=model,
+                status_code=status_code,
+            )
+        if status_code == 403:
+            return ModelProviderError(
+                "MODEL_PROVIDER_PERMISSION_DENIED",
+                f"Model provider permission denied with HTTP 403. Check API Key permissions, provider access, and model availability for `{model}`.",
+                category="model_error",
+                provider=provider,
+                model=model,
+                status_code=status_code,
+            )
+        if status_code == 429:
+            return ModelProviderError(
+                "MODEL_QUOTA_EXCEEDED",
+                f"Model provider quota or rate limit exceeded with HTTP 429 for `{provider}`.",
+                category="model_error",
+                provider=provider,
+                model=model,
+                status_code=status_code,
+            )
+        if status_code in {404, 410}:
+            return ModelProviderError(
+                "MODEL_UNAVAILABLE",
+                f"Model `{model}` is unavailable or not enabled for `{provider}` (HTTP {status_code}).",
+                category="model_error",
+                provider=provider,
+                model=model,
+                status_code=status_code,
+            )
+        if status_code >= 500:
+            return ModelProviderError(
+                "MODEL_UNAVAILABLE",
+                f"Model provider service is unavailable (HTTP {status_code}) for `{provider}`.",
+                category="model_error",
+                provider=provider,
+                model=model,
+                status_code=status_code,
+            )
+    if isinstance(error, (TimeoutError, URLError, OSError)):
+        return ModelProviderError(
+            "MODEL_NETWORK_ERROR",
+            _model_network_error_message(error, provider=provider, model=model, timeout_sec=timeout_sec),
+            category="model_error",
+            provider=provider,
+            model=model,
+        )
+    return error
+
+
+def _model_network_error_message(error: Exception, *, provider: str, model: str, timeout_sec: int | None) -> str:
+    raw = str(error).strip() or error.__class__.__name__
+    if _is_timeout_error(error):
+        suffix = f" after {timeout_sec}s" if timeout_sec else ""
+        return (
+            f"Model provider request timed out{suffix} for `{provider}` model `{model}`. "
+            "The structured analysis prompt may still be generating; try fewer JDs, a faster analyzer model, "
+            "or increase SHOTGUNCV_ANALYZER_TIMEOUT_SEC."
+        )
+    return f"Model provider network connection failed for `{provider}` model `{model}`: {raw}"
+
+
+def _is_timeout_error(error: Exception) -> bool:
+    if isinstance(error, TimeoutError):
+        return True
+    if isinstance(error, URLError) and isinstance(getattr(error, "reason", None), TimeoutError):
+        return True
+    return "timed out" in str(error).lower() or "timeout" in str(error).lower()
+
+
+def _safe_positive_int(value: object, default: int) -> int:
+    try:
+        numeric = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return numeric if numeric > 0 else default
 
 
 def _safe_optional_int(value: object) -> int | None:

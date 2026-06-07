@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 
 import { AppShell, Icon, MetricCard } from "../../../AppShell";
 import { loadRunDetail, loadRunReport } from "../../../../lib/runs";
+import { formatDecisionLabel, sanitizeUserFacingText } from "../../../../lib/user-facing";
 
 
 type PageProps = {
@@ -280,23 +281,30 @@ function uniqueItems(items: Array<SummaryItem | null>): SummaryItem[] {
 
 function sanitizeReportMarkdown(markdown: string): string {
   return markdown
+    .replace(/^- Candidate:.*$/gim, "")
+    .replace(/^- Run directory:.*$/gim, "")
     .replace(/来源：/g, "依据：")
     .replace(/ShotgunCV v[\d.]+ LLM Eval Summary/g, "评估摘要")
     .replace(/Ranked Application Strategy/g, "投递策略排序")
     .replace(/Top Evidence/g, "关键证据")
-    .replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => formatUserText(token));
+    .replace(/Apply decision:/g, "投递建议：")
+    .replace(/Why worth \/ not worth:/g, "判断依据：")
+    .replace(/Evidence that holds:/g, "关键证据：")
+    .replace(/Interview danger points:/g, "面试风险点：")
+    .replace(/If only revise 3 resume items:/g, "优先修改项：")
+    .replace(new RegExp(["Final", "score:"].join(" "), "g"), "最终得分：")
+    .replace(/Evidence mapping is limited\./g, "证据映射有限。")
+    .replace(/confidence/g, "置信度")
+    .replace(/via/g, "依据")
+    .replace(/[A-Z]:\\[^\s`，。；;）)]+/gi, "本地文件")
+    .replace(/\b(?:input_files|fixtures|runs|analyze|generate|evaluate|plan|report|review|config)[\\/][^\s`，。；;）)]+/gi, "本地产物")
+    .replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => formatUserText(token))
+    .replace(/\b[a-z]+(?:-[a-z0-9]+)+\b/g, (token) => formatUserText(token));
 }
 
 
 function formatDecision(value: string): string {
-  const labels: Record<string, string> = {
-    apply: "建议投递",
-    manual_review: "人工复核",
-    hold: "暂缓",
-    skip: "跳过",
-    review: "复核后决定",
-  };
-  return labels[value] ?? formatUserText(value);
+  return formatDecisionLabel(value);
 }
 
 
@@ -316,5 +324,5 @@ function formatUserText(value: string): string {
   if (labels[value]) {
     return labels[value];
   }
-  return value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " "));
+  return sanitizeUserFacingText(value.replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/g, (token) => labels[token] ?? token.replace(/_/g, " ")));
 }

@@ -14,17 +14,23 @@ from shotguncv_agents.providers import (
     build_judge_provider,
     build_planner_provider,
 )
+from shotguncv_core.errors import ModelProviderError, ParseInputError, StructuredAnalysisError
 from shotguncv_core.inputs import InputDocument, InputExtractionOptions, collect_input_documents
 from shotguncv_core.models import (
     ApplicationStrategy,
     CandidateProfile,
+    CustomizedResumeDocument,
     GapMap,
+    GeneratedResume,
     JDProfile,
     LLMFailure,
     LLMAssessment,
     PreflightGate,
     RankingExplanation,
     RequirementEvidence,
+    ResumeBasics,
+    ResumeEntry,
+    ResumeProvenance,
     ResumeVariant,
     ScoreCard,
 )
@@ -34,6 +40,7 @@ from shotguncv_core.run_logs import (
     log_fallback_used,
     log_input_extracted,
     log_input_resolved,
+    log_pipeline_stage_status,
     log_quality_gate_checked,
 )
 from shotguncv_core.run_status import update_quality_status
@@ -51,6 +58,7 @@ class AnalysisArtifacts:
 @dataclass(slots=True)
 class GenerationArtifacts:
     variants: list[ResumeVariant]
+    generated_resumes: list[GeneratedResume]
 
 
 @dataclass(slots=True)
@@ -150,6 +158,17 @@ class _UploadInputMetadata:
     size_bytes: int
 
 
+@dataclass(slots=True)
+class _TextQualityCheck:
+    status: str
+    reason: str
+    visible_chars: int
+    content_chars: int
+    mojibake_marker_hits: int
+    replacement_char_count: int
+    control_char_ratio: float
+
+
 def ingest_run(
     run_dir: Path,
     candidate_id: str,
@@ -179,6 +198,8 @@ def ingest_run(
     jd_paths = _resolve_jd_sources(jd_sources, jd_input_sources)
     candidate_inputs = collect_input_documents(candidate_paths, options=extraction_options)
     jd_inputs = collect_input_documents(jd_paths, options=extraction_options)
+    _apply_input_quality_checks(run_dir, "cv", candidate_inputs)
+    _apply_input_quality_checks(run_dir, "jd", jd_inputs)
     log_input_resolved(
         run_dir,
         cli_cv_sources=len(candidate_paths),
@@ -197,9 +218,19 @@ def ingest_run(
     if not jd_inputs:
         raise ValueError("At least one JD input is required for ingest.")
     if not _has_extractable_text(candidate_inputs):
-        raise ValueError("At least one CV input must contain extractable text.")
+        _log_parse_stage_status(run_dir, "parse_cv", "parse_error", "CV text quality check failed.")
+        raise ParseInputError(
+            "At least one CV input must contain extractable text. "
+            "CV text quality check failed: at least one CV input must contain readable, extractable text."
+        )
     if not _has_extractable_text(jd_inputs):
-        raise ValueError("At least one JD input must contain extractable text.")
+        _log_parse_stage_status(run_dir, "parse_jd", "parse_error", "JD text quality check failed.")
+        raise ParseInputError(
+            "At least one JD input must contain extractable text. "
+            "JD text quality check failed: at least one JD input must contain readable, extractable text."
+        )
+    _record_parse_quality_status(run_dir, "cv", candidate_inputs)
+    _record_parse_quality_status(run_dir, "jd", jd_inputs)
     candidate_resume_text = _join_input_text(candidate_inputs)
     primary_resume_path = candidate_inputs[0].source_value
     candidate_manifest_items = [
@@ -225,14 +256,25 @@ def analyze_run(run_dir: Path) -> AnalysisArtifacts:
     config = load_run_config(run_dir)
     manifest = load_json(run_dir / "ingest" / "manifest.json")
     analyzer = build_analyzer_provider(config, stage="analyze", run_dir=run_dir)
+    jd_inputs = _analysis_eligible_jd_inputs(manifest)
+    if not jd_inputs:
+        log_pipeline_stage_status(
+            run_dir,
+            stage_key="analyze_jd",
+            status="parse_error",
+            summary="No readable JD text remained after parse quality checks.",
+            error_code="PARSE_JD_FAILED",
+        )
+        raise ParseInputError("JD text quality check failed: no readable JD inputs remained for analysis.")
 
     feedback = analyzer.analyze(
         candidate_id=manifest["candidate_id"],
         candidate_resume_path=manifest["candidate_resume_path"],
         resume_text=manifest["candidate_resume_text"],
-        jd_inputs=manifest["jd_inputs"],
+        jd_inputs=jd_inputs,
     )
     feedback.candidate_profile = _sanitize_candidate_profile(feedback.candidate_profile)
+    _validate_analysis_artifacts(run_dir, feedback.candidate_profile, feedback.jd_profiles, feedback.evidence_map)
 
     analyze_directory = stage_dir(run_dir, "analyze")
     dump_json(analyze_directory / "candidate_profile.json", feedback.candidate_profile)
@@ -256,29 +298,32 @@ def generate_run(run_dir: Path) -> GenerationArtifacts:
     generator = build_generator_provider(config, stage="generate", run_dir=run_dir)
 
     variants: list[ResumeVariant] = []
+    generated_resumes: list[GeneratedResume] = []
     for jd in jd_profiles:
         gate = gate_index.get(jd.jd_id)
         if gate is not None and gate.status != "pass":
             continue
         jd_requirements = [item for item in requirement_matrix if item.jd_id == jd.jd_id]
-        variants.append(
-            ResumeVariant(
-                variant_id=f"variant-jd-{jd.jd_id}",
-                variant_type="jd-specific",
-                cluster=jd.cluster,
-                target_jd_ids=[jd.jd_id],
-                summary=generator.build_jd_summary(jd, candidate),
-                emphasized_strengths=_select_emphasized_strengths(candidate, jd),
-                stretch_points=_build_stretch_points(jd, candidate),
-                source_resume_path=candidate.base_resume_path,
-                safe_rewrites=_build_safe_rewrites(jd_requirements),
-                simulated_supplements=_build_simulated_supplements(jd_requirements),
-                forbidden_gaps=_build_forbidden_gaps(jd_requirements),
-            )
+        variant = ResumeVariant(
+            variant_id=f"variant-jd-{jd.jd_id}",
+            variant_type="jd-specific",
+            cluster=jd.cluster,
+            target_jd_ids=[jd.jd_id],
+            summary=generator.build_jd_summary(jd, candidate),
+            emphasized_strengths=_select_emphasized_strengths(candidate, jd),
+            stretch_points=_build_stretch_points(jd, candidate),
+            source_resume_path=candidate.base_resume_path,
+            safe_rewrites=_build_safe_rewrites(jd_requirements),
+            simulated_supplements=_build_simulated_supplements(jd_requirements),
+            forbidden_gaps=_build_forbidden_gaps(jd_requirements),
         )
+        variants.append(variant)
+        generated_resumes.append(_build_generated_resume(jd, candidate, variant, jd_requirements))
 
-    dump_json(stage_dir(run_dir, "generate") / "resume_variants.json", variants)
-    return GenerationArtifacts(variants=variants)
+    generate_directory = stage_dir(run_dir, "generate")
+    dump_json(generate_directory / "resume_variants.json", variants)
+    dump_json(generate_directory / "generated_resumes.json", generated_resumes)
+    return GenerationArtifacts(variants=variants, generated_resumes=generated_resumes)
 
 
 def evaluate_run(
@@ -321,6 +366,10 @@ def evaluate_run(
             try:
                 result = future.result()
             except Exception as exc:
+                if isinstance(exc, ModelProviderError):
+                    for pending in future_to_item:
+                        pending.cancel()
+                    raise
                 result = _build_fallback_task_result(
                     item=item,
                     candidate=candidate,
@@ -413,6 +462,13 @@ def evaluate_run(
     dump_json(evaluate_directory / "llm_failures.json", llm_failures)
     dump_json(evaluate_directory / "eval_summary.json", eval_summary)
     _record_evaluate_quality(run_dir, scorecards, llm_failures)
+    log_pipeline_stage_status(
+        run_dir,
+        stage_key="match_score",
+        status="success",
+        summary=f"Generated {len(scorecards)} scorecard(s).",
+        checks={"scorecard_count": len(scorecards), "llm_failure_count": len(llm_failures)},
+    )
     return EvaluationArtifacts(
         scorecards=scorecards,
         gap_maps=gap_maps,
@@ -482,6 +538,8 @@ def plan_run(run_dir: Path) -> PlanArtifacts:
                 guardrail_flags=scorecard.guardrail_flags,
                 assessment_failure_reason=_format_llm_failure_reason(assessment_failure),
             )
+        except ModelProviderError:
+            raise
         except Exception:
             feedback = fallback_planner.build_strategy(
                 jd=jd,
@@ -563,6 +621,13 @@ def report_run(run_dir: Path) -> Path:
 
     report_path = stage_dir(run_dir, "report") / "summary.md"
     report_path.write_text("\n".join(lines), encoding="utf-8")
+    log_pipeline_stage_status(
+        run_dir,
+        stage_key="generate_report",
+        status="success",
+        summary=f"Generated report for {len(strategies)} ranked strategy item(s).",
+        checks={"strategy_count": len(strategies), "scorecard_count": len(scorecards)},
+    )
     return report_path
 
 
@@ -1050,6 +1115,121 @@ def _build_safe_rewrites(requirements: list[RequirementEvidence]) -> list[str]:
     return [f"Use verified evidence for: {item}" for item in verified[:3]]
 
 
+def _build_generated_resume(
+    jd: JDProfile,
+    candidate: CandidateProfile,
+    variant: ResumeVariant,
+    requirements: list[RequirementEvidence],
+) -> GeneratedResume:
+    document = CustomizedResumeDocument(
+        basics=ResumeBasics(
+            full_name=candidate.candidate_id,
+            headline=jd.title,
+        ),
+        summary=variant.summary,
+        skills=_select_resume_skills(candidate, jd),
+        experiences=_build_resume_entries("exp", "Relevant Experience", candidate.experiences),
+        projects=_build_resume_entries("proj", "Relevant Project", candidate.projects),
+        education=_build_resume_entries("edu", "Education", _select_education_items(candidate)),
+        certifications=_select_certification_items(candidate),
+    )
+    return GeneratedResume(
+        resume_id=f"resume-{jd.jd_id}",
+        target_jd_id=jd.jd_id,
+        target_variant_id=variant.variant_id,
+        display_name=_build_generated_resume_display_name(jd),
+        status="deliverable",
+        document=document,
+        provenance=_build_resume_provenance(document, candidate, requirements),
+    )
+
+
+def _select_resume_skills(candidate: CandidateProfile, jd: JDProfile) -> list[str]:
+    candidate_skills = _dedupe_text_items(candidate.skills)
+    if not candidate_skills:
+        return _dedupe_text_items(jd.keywords)[:8]
+    keyword_matches = [
+        skill
+        for skill in candidate_skills
+        if any(keyword and keyword.split()[0].lower() in skill.lower() for keyword in jd.keywords)
+    ]
+    remaining = [skill for skill in candidate_skills if skill not in keyword_matches]
+    return (keyword_matches + remaining)[:10]
+
+
+def _build_resume_entries(prefix: str, fallback_title: str, items: list[str]) -> list[ResumeEntry]:
+    clean_items = _dedupe_text_items([item for item in items if not _is_resume_metadata_evidence(item)])
+    if not clean_items:
+        return []
+    return [
+        ResumeEntry(
+            id=f"{prefix}-001",
+            title=fallback_title,
+            bullets=clean_items[:5],
+        )
+    ]
+
+
+def _select_education_items(candidate: CandidateProfile) -> list[str]:
+    education_terms = ("degree", "bachelor", "master", "phd", "学历", "本科", "硕士", "博士", "大学")
+    return [
+        item
+        for item in _candidate_evidence_items(candidate)
+        if any(term in item.lower() for term in education_terms)
+    ][:3]
+
+
+def _select_certification_items(candidate: CandidateProfile) -> list[str]:
+    certification_terms = ("certificate", "certification", "certified", "证书", "认证")
+    return [
+        item
+        for item in _candidate_evidence_items(candidate)
+        if any(term in item.lower() for term in certification_terms)
+    ][:5]
+
+
+def _build_resume_provenance(
+    document: CustomizedResumeDocument,
+    candidate: CandidateProfile,
+    requirements: list[RequirementEvidence],
+) -> ResumeProvenance:
+    field_sources: dict[str, list[str]] = {}
+    summary_sources = _dedupe_text_items(candidate.verified_evidence + candidate.strengths + candidate.experiences)[:3]
+    if summary_sources:
+        field_sources["document.summary"] = summary_sources
+    for index, skill in enumerate(document.skills):
+        field_sources[f"document.skills.{index}"] = [skill]
+    for entry_index, entry in enumerate(document.experiences):
+        for bullet_index, bullet in enumerate(entry.bullets):
+            field_sources[f"document.experiences.{entry_index}.bullets.{bullet_index}"] = [bullet]
+    for entry_index, entry in enumerate(document.projects):
+        for bullet_index, bullet in enumerate(entry.bullets):
+            field_sources[f"document.projects.{entry_index}.bullets.{bullet_index}"] = [bullet]
+
+    to_verify_fields = [
+        f"requirement:{item.requirement_id}"
+        for item in requirements
+        if item.evidence_status in {"inferred", "simulatable"}
+    ]
+    forbidden_fields = [
+        item.requirement_text
+        for item in requirements
+        if item.fabrication_policy == "never_fabricate"
+        and item.evidence_status in {"missing", "mismatch", "forbidden_to_fabricate"}
+    ]
+    return ResumeProvenance(
+        field_sources=field_sources,
+        to_verify_fields=to_verify_fields,
+        forbidden_fields=forbidden_fields,
+    )
+
+
+def _build_generated_resume_display_name(jd: JDProfile) -> str:
+    if jd.company:
+        return f"{jd.company} 定制简历"
+    return f"{jd.title or jd.jd_id} 定制简历"
+
+
 def _build_simulated_supplements(requirements: list[RequirementEvidence]) -> list[str]:
     simulatable = [item.requirement_text for item in requirements if item.evidence_status == "simulatable"]
     return [f"待核实模拟补强：{item}" for item in simulatable[:3]]
@@ -1100,9 +1280,192 @@ def _resolve_jd_sources(
     return sources
 
 
+def _apply_input_quality_checks(run_dir: Path, role: str, documents: list[InputDocument]) -> None:
+    for document in documents:
+        check = _assess_text_quality(role, document)
+        document.text_quality_status = check.status
+        document.text_quality_error = check.reason
+        document.analysis_eligible = check.status == "ok"
+        log_quality_gate_checked(
+            run_dir,
+            stage="ingest",
+            gate=f"{role}_text_quality",
+            status=check.status,
+            checks={
+                "original_name": document.original_name,
+                "media_type": document.media_type,
+                "extraction_status": document.extraction_status,
+                "visible_chars": check.visible_chars,
+                "content_chars": check.content_chars,
+                "mojibake_marker_hits": check.mojibake_marker_hits,
+                "replacement_char_count": check.replacement_char_count,
+                "control_char_ratio": check.control_char_ratio,
+            },
+            action="continue" if check.status == "ok" else "exclude_or_fail",
+        )
+
+
+def _assess_text_quality(role: str, document: InputDocument) -> _TextQualityCheck:
+    text = document.text or ""
+    stripped = text.strip()
+    visible_chars = sum(1 for char in stripped if char.isprintable() and not char.isspace())
+    content_chars = sum(1 for char in stripped if char.isalnum() or "\u4e00" <= char <= "\u9fff")
+    control_chars = sum(1 for char in stripped if ord(char) < 32 and char not in "\r\n\t")
+    marker_hits = sum(stripped.count(marker) for marker in _MOJIBAKE_MARKERS)
+    replacement_chars = stripped.count("\ufffd")
+    control_ratio = round(control_chars / max(1, len(stripped)), 4)
+    minimum_visible = 18 if role == "cv" else 24
+    if document.extraction_status == "unparseable":
+        return _text_quality_failed(
+            document.extraction_error or "input extraction failed",
+            visible_chars,
+            content_chars,
+            marker_hits,
+            replacement_chars,
+            control_ratio,
+        )
+    if not stripped:
+        return _text_quality_failed("text is empty", visible_chars, content_chars, marker_hits, replacement_chars, control_ratio)
+    if visible_chars < minimum_visible:
+        return _text_quality_failed(
+            f"text is too short ({visible_chars} visible chars)",
+            visible_chars,
+            content_chars,
+            marker_hits,
+            replacement_chars,
+            control_ratio,
+        )
+    if _looks_like_mojibake(stripped) or marker_hits >= 3:
+        return _text_quality_failed(
+            "text appears to be mojibake or wrongly decoded",
+            visible_chars,
+            content_chars,
+            marker_hits,
+            replacement_chars,
+            control_ratio,
+        )
+    if replacement_chars / max(1, len(stripped)) > 0.03:
+        return _text_quality_failed(
+            "text contains too many replacement characters",
+            visible_chars,
+            content_chars,
+            marker_hits,
+            replacement_chars,
+            control_ratio,
+        )
+    if control_ratio > 0.03:
+        return _text_quality_failed(
+            "text contains too many control characters",
+            visible_chars,
+            content_chars,
+            marker_hits,
+            replacement_chars,
+            control_ratio,
+        )
+    if content_chars / max(1, visible_chars) < 0.55:
+        return _text_quality_failed(
+            "text has too little recognizable Chinese or English content",
+            visible_chars,
+            content_chars,
+            marker_hits,
+            replacement_chars,
+            control_ratio,
+        )
+    return _TextQualityCheck(
+        status="ok",
+        reason="",
+        visible_chars=visible_chars,
+        content_chars=content_chars,
+        mojibake_marker_hits=marker_hits,
+        replacement_char_count=replacement_chars,
+        control_char_ratio=control_ratio,
+    )
+
+
+def _text_quality_failed(
+    reason: str,
+    visible_chars: int,
+    content_chars: int,
+    marker_hits: int,
+    replacement_chars: int,
+    control_ratio: float,
+) -> _TextQualityCheck:
+    return _TextQualityCheck(
+        status="failed",
+        reason=reason,
+        visible_chars=visible_chars,
+        content_chars=content_chars,
+        mojibake_marker_hits=marker_hits,
+        replacement_char_count=replacement_chars,
+        control_char_ratio=control_ratio,
+    )
+
+
+def _record_parse_quality_status(run_dir: Path, role: str, documents: list[InputDocument]) -> None:
+    failed = [document for document in documents if not document.analysis_eligible]
+    eligible = [document for document in documents if document.analysis_eligible]
+    stage_key = "parse_cv" if role == "cv" else "parse_jd"
+    if not failed:
+        _log_parse_stage_status(
+            run_dir,
+            stage_key,
+            "success",
+            f"{len(eligible)} {role.upper()} input(s) are readable.",
+            checks={"eligible_count": len(eligible), "failed_count": 0},
+        )
+        return
+    if eligible:
+        summary = f"{len(failed)} {role.upper()} input(s) failed text quality checks and were excluded."
+        _log_parse_stage_status(
+            run_dir,
+            stage_key,
+            "partial_failed",
+            summary,
+            error_code=f"PARSE_{role.upper()}_PARTIAL_FAILED",
+            checks={"eligible_count": len(eligible), "failed_count": len(failed)},
+        )
+        update_quality_status(
+            run_dir,
+            "warning",
+            summary,
+            status_kind="partial_failed",
+            error_code=f"PARSE_{role.upper()}_PARTIAL_FAILED",
+            error_stage="ingest",
+        )
+        return
+    _log_parse_stage_status(
+        run_dir,
+        stage_key,
+        "parse_error",
+        f"All {role.upper()} inputs failed text quality checks.",
+        error_code=f"PARSE_{role.upper()}_FAILED",
+        checks={"eligible_count": 0, "failed_count": len(failed)},
+    )
+
+
+def _log_parse_stage_status(
+    run_dir: Path,
+    stage_key: str,
+    status: str,
+    summary: str,
+    error_code: str | None = None,
+    checks: dict[str, object] | None = None,
+) -> None:
+    log_pipeline_stage_status(
+        run_dir,
+        stage_key=stage_key,
+        status=status,
+        summary=summary,
+        error_code=error_code,
+        checks=checks,
+    )
+
+
 def _join_input_text(documents: list[InputDocument]) -> str:
     chunks = []
     for document in documents:
+        if not document.analysis_eligible:
+            continue
         text = document.text.strip()
         if text:
             chunks.append(f"Source: {document.source_value}\n{text}")
@@ -1133,6 +1496,107 @@ def _log_input_document_extracted(run_dir: Path, role: str, document: InputDocum
             from_provider=fallback_from,
             to_provider=document.extraction_provider,
             reason=warning or f"{document.extraction_status} fallback used",
+        )
+
+
+def _analysis_eligible_jd_inputs(manifest: dict[str, object]) -> list[dict[str, str]]:
+    jd_inputs = manifest.get("jd_inputs", [])
+    if not isinstance(jd_inputs, list):
+        return []
+    eligible: list[dict[str, str]] = []
+    for item in jd_inputs:
+        if not isinstance(item, dict):
+            continue
+        if item.get("analysis_eligible") is False:
+            continue
+        content = str(item.get("content") or item.get("text") or "").strip()
+        if not content:
+            continue
+        copied = {str(key): str(value) for key, value in item.items() if value is not None}
+        copied["content"] = content
+        eligible.append(copied)
+    return eligible
+
+
+def _validate_analysis_artifacts(
+    run_dir: Path,
+    candidate: CandidateProfile,
+    jd_profiles: list[JDProfile],
+    evidence_map: dict[str, object],
+) -> None:
+    cv_missing: list[str] = []
+    if not candidate.candidate_id.strip():
+        cv_missing.append("candidate_profile.candidate_id")
+    if not candidate.base_resume_path.strip():
+        cv_missing.append("candidate_profile.base_resume_path")
+    if not (candidate.experiences or candidate.projects or candidate.verified_evidence or candidate.core_claims):
+        cv_missing.append("candidate_profile.work_experience/projects/match_evidence")
+    if not candidate.skills:
+        cv_missing.append("candidate_profile.skills")
+
+    jd_missing: list[str] = []
+    if not jd_profiles:
+        jd_missing.append("jd_profiles")
+    for index, jd in enumerate(jd_profiles, start=1):
+        prefix = f"jd_profiles[{index}]"
+        if not jd.jd_id.strip():
+            jd_missing.append(f"{prefix}.jd_id")
+        if not jd.title.strip():
+            jd_missing.append(f"{prefix}.target_role")
+        if not (jd.requirements or jd.responsibilities or jd.must_have_requirements):
+            jd_missing.append(f"{prefix}.jd_requirements")
+        if not jd.keywords:
+            jd_missing.append(f"{prefix}.hard_requirements/keywords")
+    if not isinstance(evidence_map, dict):
+        jd_missing.append("match_evidence")
+
+    if cv_missing:
+        log_pipeline_stage_status(
+            run_dir,
+            stage_key="analyze_cv",
+            status="model_error",
+            summary="Structured CV analysis is missing required fields.",
+            error_code="STRUCTURED_CV_SCHEMA_INVALID",
+            checks={"missing_fields": cv_missing},
+        )
+    else:
+        log_pipeline_stage_status(
+            run_dir,
+            stage_key="analyze_cv",
+            status="success",
+            summary="Structured CV analysis passed required field checks.",
+            checks={
+                "experience_count": len(candidate.experiences),
+                "project_count": len(candidate.projects),
+                "skill_count": len(candidate.skills),
+                "evidence_count": len(candidate.verified_evidence),
+            },
+        )
+
+    if jd_missing:
+        log_pipeline_stage_status(
+            run_dir,
+            stage_key="analyze_jd",
+            status="model_error",
+            summary="Structured JD analysis is missing required fields.",
+            error_code="STRUCTURED_JD_SCHEMA_INVALID",
+            checks={"missing_fields": jd_missing},
+        )
+    else:
+        log_pipeline_stage_status(
+            run_dir,
+            stage_key="analyze_jd",
+            status="success",
+            summary="Structured JD analysis passed required field checks.",
+            checks={"jd_count": len(jd_profiles)},
+        )
+
+    missing = cv_missing + jd_missing
+    if missing:
+        raise StructuredAnalysisError(
+            "Structured analysis validation failed: missing required fields "
+            + ", ".join(missing[:8])
+            + ("." if len(missing) <= 8 else ", ...")
         )
 
 
@@ -1336,22 +1800,24 @@ def _record_evaluate_quality(run_dir: Path, scorecards: list[ScoreCard], llm_fai
 
 
 def _has_extractable_text(documents: list[InputDocument]) -> bool:
-    return any(document.text.strip() for document in documents)
+    return any(document.analysis_eligible and document.text.strip() for document in documents)
 
 
 def _build_input_warnings(items: list[dict[str, object]]) -> list[dict[str, object]]:
     warnings: list[dict[str, object]] = []
     for item in items:
-        if item.get("extraction_status") != "unparseable":
+        if item.get("extraction_status") != "unparseable" and item.get("text_quality_status") != "failed":
             continue
-        warnings.append(
-            {
-                "role": item.get("role", ""),
-                "relative_path": item.get("relative_path", ""),
-                "original_name": item.get("original_name", ""),
-                "extraction_error": item.get("extraction_error", ""),
-            }
-        )
+        warning = {
+            "role": item.get("role", ""),
+            "relative_path": item.get("relative_path", ""),
+            "original_name": item.get("original_name", ""),
+            "extraction_error": item.get("extraction_error", ""),
+        }
+        if item.get("extraction_status") != "unparseable":
+            warning["text_quality_error"] = item.get("text_quality_error", "")
+            warning["analysis_eligible"] = item.get("analysis_eligible", True)
+        warnings.append(warning)
     return warnings
 
 
@@ -1379,6 +1845,9 @@ def _input_document_to_manifest_item(
         "extraction_status": document.extraction_status,
         "extraction_provider": document.extraction_provider,
         "extraction_error": document.extraction_error,
+        "text_quality_status": document.text_quality_status,
+        "text_quality_error": document.text_quality_error,
+        "analysis_eligible": document.analysis_eligible,
     }
 
 
@@ -1861,6 +2330,8 @@ def _evaluate_work_item(
     try:
         judge_feedback = judge.review(item.jd, candidate, item.variant, rule_eval.overall_score)
         judge_rationale = judge_feedback.rationale
+    except ModelProviderError:
+        raise
     except Exception:
         judge_rationale = f"Review unavailable; fallback to rules with score {rule_eval.overall_score:.2f}."
 
@@ -1876,6 +2347,8 @@ def _evaluate_work_item(
                 error=ValueError("assessment payload missing core fields"),
             )
             assessment = None
+    except ModelProviderError:
+        raise
     except Exception as exc:
         assessment_failure = _build_llm_failure(
             jd_id=item.jd.jd_id,
