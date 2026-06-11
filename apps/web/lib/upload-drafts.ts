@@ -434,7 +434,7 @@ function buildNextCommand(runId: string, candidateId: string): string {
 
 async function writeDefaultRunConfig(runDir: string, label: string): Promise<void> {
   const config = {
-    analyzer: { provider: "openai", model: "" },
+    analyzer: { provider: "deterministic", model: "" },
     generator: { provider: "openai", model: "" },
     judge: { provider: "openai", model: "" },
     planner: { provider: "openai", model: "" },

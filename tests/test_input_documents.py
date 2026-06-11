@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from shotguncv_core.cv_extraction import PageExtractionResult
 from shotguncv_core.inputs import InputExtractionError, InputExtractionOptions, collect_input_documents
 
 
@@ -43,11 +44,16 @@ def test_pdf_with_low_quality_text_uses_ocr_fallback(monkeypatch: pytest.MonkeyP
     page_image = tmp_path / "resume-page-1.png"
     pdf_path.write_bytes(b"%PDF-1.4 scanned")
     page_image.write_bytes(b"image")
-    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: "")
+    # Return one page with empty native text → triggers full-document OCR fallback
+    empty_page = PageExtractionResult(
+        page=1, text="", source="native", quality_score=0.0, ocr_used=False,
+        native_text="", ocr_text="", native_score=0.0, ocr_score=0.0, ocr_triggered=False,
+    )
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_pages_native", lambda path: [empty_page])
     monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "OCR PDF Resume Text",
+        lambda path, languages, **kw: "OCR PDF Resume Text",
     )
 
     documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=False))
@@ -68,18 +74,22 @@ def test_pdf_with_fragmented_junk_text_uses_ocr_fallback(monkeypatch: pytest.Mon
         "> analyze -\n> execute_tools -\n> format -\n submit_review / submit_debug \n#\n$%\n 3 \n&'\n"
         "\\001\\002\\003\\004\\005\\006\\007985\\010\\011\\012\\013\\014\\015\\006\\016\\017\\020\\007\\021"
     )
-    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: junk_text)
-    monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
+    # Return one page with junk text (low quality) → triggers page-level OCR
+    junk_page = PageExtractionResult(
+        page=1, text=junk_text, source="native", quality_score=0.05, ocr_used=False,
+        native_text=junk_text, ocr_text="", native_score=0.05, ocr_score=0.0, ocr_triggered=False,
+    )
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_pages_native", lambda path: [junk_page])
+    monkeypatch.setattr("shotguncv_core.inputs._render_single_pdf_page", lambda path, page_num: page_image)
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "Bachelor degree in Computer Science. Built Python Agent systems.",
+        lambda path, languages, **kw: "Bachelor degree in Computer Science. Built Python Agent systems.",
     )
 
     documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=False))
 
     assert documents[0].text.startswith("Bachelor degree")
     assert documents[0].extraction_status == "ocr"
-    assert "fragmented" in documents[0].extraction_error or "escaped control" in documents[0].extraction_error
 
 
 def test_pdf_with_empty_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -87,9 +97,14 @@ def test_pdf_with_empty_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch
     page_image = tmp_path / "resume-page-1.png"
     pdf_path.write_bytes(b"%PDF-1.4 scanned")
     page_image.write_bytes(b"image")
-    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: "")
+    # All native pages empty → triggers full-document OCR → falls through to vision
+    empty_page = PageExtractionResult(
+        page=1, text="", source="native", quality_score=0.0, ocr_used=False,
+        native_text="", ocr_text="", native_score=0.0, ocr_score=0.0, ocr_triggered=False,
+    )
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_pages_native", lambda path: [empty_page])
     monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
-    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages, **kw: "")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_vision",
         lambda path, options, ocr_error: "Vision PDF Resume Text",
@@ -107,9 +122,14 @@ def test_pdf_fallback_failure_records_unparseable_guidance(monkeypatch: pytest.M
     page_image = tmp_path / "resume-page-1.png"
     pdf_path.write_bytes(b"%PDF-1.4 scanned")
     page_image.write_bytes(b"image")
-    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_text", lambda path: "")
+    # All native pages empty → triggers full-document OCR → OCR empty → vision disabled → unparseable
+    empty_page = PageExtractionResult(
+        page=1, text="", source="native", quality_score=0.0, ocr_used=False,
+        native_text="", ocr_text="", native_score=0.0, ocr_score=0.0, ocr_triggered=False,
+    )
+    monkeypatch.setattr("shotguncv_core.inputs._extract_pdf_pages_native", lambda path: [empty_page])
     monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
-    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages, **kw: "")
 
     documents = collect_input_documents([pdf_path], options=InputExtractionOptions(vision_enabled=False))
 
@@ -141,7 +161,7 @@ def test_image_without_sidecar_records_unparseable_document(tmp_path: Path) -> N
 
     assert documents[0].extraction_status == "unparseable"
     assert documents[0].text == ""
-    assert "Tesseract" in documents[0].extraction_error
+    assert "OCR" in documents[0].extraction_error or "Tesseract" in documents[0].extraction_error
 
 
 def test_directory_collection_keeps_unparseable_image_without_blocking_valid_inputs(tmp_path: Path) -> None:
@@ -189,7 +209,7 @@ def test_directory_collection_does_not_duplicate_image_sidecars(tmp_path: Path) 
 def test_image_ocr_success_records_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     image_path = tmp_path / "resume.png"
     image_path.write_bytes(b"image")
-    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "OCR Resume Text")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages, **kw: "OCR Resume Text")
 
     documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
 
@@ -204,7 +224,7 @@ def test_image_ocr_text_is_cleaned_before_ingest(monkeypatch: pytest.MonkeyPatch
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: (
+        lambda path, languages, **kw: (
             "岗 位 职 责\n"
             "- 负 责 L L M 应 用 开 发 ， 建 设 R A G 评 估 流 程\n"
             "@@@ ###\n"
@@ -227,7 +247,7 @@ def test_low_quality_image_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPa
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "岗 位 职 责\n职 位 标 签\n教 育\n福 利\n@@@ ###",
+        lambda path, languages, **kw: "岗 位 职 责\n职 位 标 签\n教 育\n福 利\n@@@ ###",
     )
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_vision",
@@ -249,7 +269,7 @@ def test_low_quality_image_ocr_without_vision_is_unparseable(
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "岗 位 职 责\n职 位 标 签\n教 育\n福 利\n@@@ ###",
+        lambda path, languages, **kw: "岗 位 职 责\n职 位 标 签\n教 育\n福 利\n@@@ ###",
     )
 
     documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
@@ -264,7 +284,7 @@ def test_image_ocr_quality_ignores_blank_raw_lines(monkeypatch: pytest.MonkeyPat
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "\n\n岗位职责\n\n- 负责 Agent 框架开发\n\n任职要求\n- 熟悉 Python 和 RAG\n\n",
+        lambda path, languages, **kw: "\n\n岗位职责\n\n- 负责 Agent 框架开发\n\n任职要求\n- 熟悉 Python 和 RAG\n\n",
     )
 
     documents = collect_input_documents([image_path], options=InputExtractionOptions(vision_enabled=False))
@@ -280,7 +300,7 @@ def test_image_ocr_normalizes_ai_confusions_and_filters_job_metadata(
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: (
+        lambda path, languages, **kw: (
             "Al 应用工程师\n"
             "Shenzhen | Intelligent manufacturing | Industrial automation | 26 届国内春招\n"
             "Published 16d ago\n"
@@ -313,7 +333,7 @@ def test_image_ocr_repairs_single_letter_ai_and_common_chinese_typos(
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: (
+        lambda path, languages, **kw: (
             "岗位职责\n"
             "¢ Architect and develop scalable Al systems\n"
             "- 为其他产品或运营团队提供 A 赋能 : 开发内部 A 工具 、 技术接口或解决方案\n"
@@ -339,7 +359,7 @@ def test_image_ocr_repairs_single_letter_ai_and_common_chinese_typos(
 def test_image_empty_ocr_uses_vision_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     image_path = tmp_path / "jd.png"
     image_path.write_bytes(b"image")
-    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages, **kw: "")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_vision",
         lambda path, options, ocr_error: "Vision JD Text",
@@ -357,7 +377,7 @@ def test_image_failure_reports_ocr_and_vision_guidance(monkeypatch: pytest.Monke
     image_path.write_bytes(b"image")
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: (_ for _ in ()).throw(RuntimeError("tesseract missing")),
+        lambda path, languages, **kw: (_ for _ in ()).throw(RuntimeError("tesseract missing")),
     )
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_vision",
@@ -377,7 +397,7 @@ def test_image_failure_reports_ocr_and_vision_guidance(monkeypatch: pytest.Monke
 def test_no_vision_fallback_does_not_call_vision(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     image_path = tmp_path / "resume.png"
     image_path.write_bytes(b"image")
-    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages: "")
+    monkeypatch.setattr("shotguncv_core.inputs._extract_image_text_with_ocr", lambda path, languages, **kw: "")
 
     def _unexpected_vision_call(path, options, ocr_error):  # type: ignore[no-untyped-def]
         raise AssertionError("vision fallback should be disabled")

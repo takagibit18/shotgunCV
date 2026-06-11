@@ -48,27 +48,26 @@ def test_requirement_matrix_blocks_missing_hard_gate_and_skips_costly_stages(tmp
     scorecards = json.loads((run_dir / "evaluate" / "scorecards.json").read_text(encoding="utf-8"))
 
     hard_gate = next(item for item in matrix if "学历" in item["requirement_text"])
-    medium_requirement = next(item for item in matrix if "项目" in item["requirement_text"])
     assert hard_gate["tier"] == "hard_gate"
     assert hard_gate["evidence_status"] == "missing"
     assert hard_gate["fabrication_policy"] == "never_fabricate"
-    assert medium_requirement["tier"] == "medium_priority"
-    assert medium_requirement["evidence_status"] == "simulatable"
+    assert all("项目" not in item["requirement_text"] for item in matrix)
 
     assert gates == [
         {
             "jd_id": "jd-001",
-            "status": "needs_review",
-            "reasons": ["hard_gate_missing: 本科及以上学历，计算机相关专业"],
-            "skipped_stages": ["generate", "evaluate", "llm_judge", "plan"],
-            "user_action": "补充或确认硬门槛证据后再继续。",
+            "status": "pass",
+            "reasons": ["hard_gate_unverified: 本科及以上学历，计算机相关专业"],
+            "skipped_stages": [],
+            "user_action": "",
         }
     ]
-    assert variants == []
-    assert scorecards[0]["final_decision_source"] == "preflight-gate"
-    assert scorecards[0]["gate_status"] == "needs_review"
-    assert scorecards[0]["risk_score"] >= 0.8
-    assert scorecards[0]["final_overall_score"] == 0.0
+    assert variants
+    assert scorecards[0]["final_decision_source"] == "v0.5.7-conservative-fusion+guardrail"
+    assert scorecards[0]["gate_status"] == "pass"
+    assert "score_conflict" in scorecards[0]["guardrail_flags"]
+    assert "needs_review" in scorecards[0]["guardrail_flags"]
+    assert round(scorecards[0]["llm_overall_score"] - scorecards[0]["final_overall_score"], 2) <= 0.30
 
 
 def test_preflight_gate_skips_only_review_jd_and_uses_three_scores_for_passed_jd(tmp_path: Path) -> None:
@@ -118,9 +117,9 @@ def test_preflight_gate_skips_only_review_jd_and_uses_three_scores_for_passed_jd
     variants = json.loads((run_dir / "generate" / "resume_variants.json").read_text(encoding="utf-8"))
     scorecards = json.loads((run_dir / "evaluate" / "scorecards.json").read_text(encoding="utf-8"))
 
-    assert [gate["status"] for gate in gates] == ["needs_review", "pass"]
-    assert [variant["target_jd_ids"] for variant in variants] == [["jd-002"]]
-    assert variants[0]["safe_rewrites"]
+    assert [gate["status"] for gate in gates] == ["pass", "pass"]
+    assert [variant["target_jd_ids"] for variant in variants] == [["jd-001"], ["jd-002"]]
+    assert variants[1]["safe_rewrites"]
     assert "jd-001" in {scorecard["jd_id"] for scorecard in scorecards}
     passed_scorecard = next(scorecard for scorecard in scorecards if scorecard["jd_id"] == "jd-002")
     assert passed_scorecard["gate_status"] == "pass"

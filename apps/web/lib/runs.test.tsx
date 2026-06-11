@@ -25,6 +25,9 @@ import {
   POST as postResumeEditRoute,
 } from "../app/api/runs/[runId]/resume-edits/route";
 import {
+  GET as getRunStatusRoute,
+} from "../app/api/runs/[runId]/route";
+import {
   GET as getDependencyRoute,
   POST as postDependencyRoute,
 } from "../app/api/settings/dependencies/route";
@@ -334,6 +337,30 @@ describe("run viewer data loading", () => {
     expect(html).not.toContain("Guardrail");
     expect(html).not.toContain("hard_gate_missing");
     expect(html).not.toContain("risk score");
+  });
+
+  it("renders report reliability warning for score conflicts", async () => {
+    const runsDir = await createTempRunsDir();
+    await createCompleteRun(runsDir, "demo-conflict", { includeV057Artifacts: true });
+    const runDir = path.join(runsDir, "demo-conflict");
+    await writeJson(path.join(runDir, "run_status.json"), {
+      status: "done",
+      quality_status: "warning",
+      quality_summary: "Evaluation used fallback, score conflict, or score consistency warnings.",
+    });
+    const scorecards = JSON.parse(await readFile(path.join(runDir, "evaluate", "scorecards.json"), "utf-8"));
+    scorecards[0].llm_overall_score = 0.83;
+    scorecards[0].final_overall_score = 0.53;
+    scorecards[0].final_decision_source = "v0.5.7-conservative-fusion+guardrail";
+    scorecards[0].guardrail_flags = ["score_conflict", "needs_review"];
+    await writeJson(path.join(runDir, "evaluate", "scorecards.json"), scorecards);
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+
+    const html = renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ runId: "demo-conflict" }) }));
+
+    expect(html).toContain("最终分数需复核/可靠性较低");
+    expect(html).toContain("评分冲突");
+    expect(html).not.toContain("score_conflict");
   });
 
   it("creates a draft run with uploaded files and a metadata-only manifest", async () => {
@@ -653,6 +680,32 @@ describe("run viewer data loading", () => {
     expect(detail.completedStages).not.toContain("ingest");
   });
 
+  it("renders a productized draft launch panel without exposing the advanced edit form by default", async () => {
+    const runsDir = await createTempRunsDir();
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    const draft = await createRunDraft({
+      candidateId: "cand-001",
+      label: "PM draft batch",
+      cvFiles: [new File(["resume"], "resume.md", { type: "text/markdown" })],
+      jdFiles: [new File(["jd"], "jd.md", { type: "text/markdown" })],
+      jdFileDisplayNames: ["Example - Product Manager"],
+      now: new Date("2026-04-25T08:30:00.000Z"),
+    });
+
+    const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: draft.runId }) }));
+
+    expect(html).toContain("draft-launch-panel");
+    expect(html).toContain("投递草稿摘要");
+    expect(html).toContain("当前简历");
+    expect(html).toContain("目标岗位");
+    expect(html).toContain("开始评估");
+    expect(html).toContain("高级编辑：替换简历、修改岗位或追加岗位");
+    expect(html).not.toContain("投递名称");
+    expect(html).not.toContain("岗位显示名");
+    expect(html).not.toContain("source_id");
+    expect(html).not.toContain("artifact path");
+  });
+
   it("loads run status file and builds stage statuses", async () => {
     const runsDir = await createTempRunsDir();
     await createIncompleteRun(runsDir, "demo");
@@ -675,6 +728,58 @@ describe("run viewer data loading", () => {
     expect(detail.stageStatuses).toContainEqual({ stage: "analyze", status: "complete" });
     expect(detail.stageStatuses).toContainEqual({ stage: "generate", status: "failed" });
     expect(runs[0].draftStatus).toBe("failed");
+  });
+
+  it("serves a lightweight run status snapshot for polling active and terminal runs", async () => {
+    const runsDir = await createTempRunsDir();
+    await createIncompleteRun(runsDir, "polling-run");
+    process.env.SHOTGUNCV_RUNS_DIR = runsDir;
+    await writeJson(path.join(runsDir, "polling-run", "run_status.json"), {
+      status: "partial_running",
+      status_kind: "running",
+      current_stage: "generate",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: null,
+      error_stage: null,
+      error_summary: null,
+      last_action: "run",
+    });
+
+    const activeResponse = await getRunStatusRoute(new Request("http://localhost/api/runs/polling-run"), {
+      params: Promise.resolve({ runId: "polling-run" }),
+    });
+    const activeBody = await activeResponse.json();
+
+    expect(activeResponse.status).toBe(200);
+    expect(activeBody).toMatchObject({
+      draftStatus: "partial_running",
+      hasResults: false,
+      hasReport: false,
+    });
+    expect(activeBody.stageStatuses).toContainEqual({ stage: "generate", status: "running" });
+
+    await createCompleteRun(runsDir, "completed-run", { includeV057Artifacts: true });
+    await writeJson(path.join(runsDir, "completed-run", "run_status.json"), {
+      status: "done",
+      status_kind: "success",
+      current_stage: "report",
+      started_at: "2026-05-03T08:00:00.000Z",
+      finished_at: "2026-05-03T08:03:00.000Z",
+      error_stage: null,
+      error_summary: null,
+      last_action: "run",
+    });
+
+    const doneResponse = await getRunStatusRoute(new Request("http://localhost/api/runs/completed-run"), {
+      params: Promise.resolve({ runId: "completed-run" }),
+    });
+    const doneBody = await doneResponse.json();
+
+    expect(doneBody).toMatchObject({
+      draftStatus: "done",
+      hasResults: true,
+      hasReport: true,
+    });
   });
 
   it("renders model permission errors with an explicit configuration cue", async () => {
@@ -1456,7 +1561,9 @@ describe("run viewer pages", () => {
     const html = renderToStaticMarkup(await RunPage({ params: Promise.resolve({ runId: draft.runId }) }));
 
     expect(html).toContain("开始评估");
-    expect(html).toContain("投递名称");
+    expect(html).toContain("投递草稿摘要");
+    expect(html).toContain("当前简历");
+    expect(html).toContain("高级编辑：替换简历、修改岗位或追加岗位");
     expect(html).toContain("Example - Draft Role");
     expect(html).toContain("草稿");
     expect(html).not.toContain("JD 详情");

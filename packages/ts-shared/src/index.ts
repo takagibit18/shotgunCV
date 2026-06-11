@@ -245,7 +245,15 @@ export type EvalSummaryItem = {
   top_reasons: string[];
 };
 
-export type RunDraftStatus = "draft" | "queued" | "running" | "done" | "failed" | "partial_failed" | "ingest-ready";
+export type RunDraftStatus =
+  | "draft"
+  | "queued"
+  | "running"
+  | "partial_running"
+  | "done"
+  | "failed"
+  | "partial_failed"
+  | "ingest-ready";
 
 export type StageName = "ingest" | "analyze" | "generate" | "evaluate" | "plan" | "report";
 export type TimelineStageName = StageName | "review";
@@ -256,7 +264,7 @@ export type StageStatus = {
 };
 
 export type RunStatusFile = {
-  status: "draft" | "queued" | "running" | "done" | "failed" | "partial_failed";
+  status: "draft" | "queued" | "running" | "partial_running" | "done" | "failed" | "partial_failed";
   status_kind?: "success" | "running" | "failed" | "partial_failed" | "config_error" | "model_error" | "parse_error" | string;
   current_stage: StageName | null;
   started_at: string | null;

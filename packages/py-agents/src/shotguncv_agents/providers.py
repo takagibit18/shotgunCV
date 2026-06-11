@@ -581,12 +581,12 @@ class OpenAIAnalyzeProvider:
                 )
             )
         evidence_map = payload.get("evidence_map", {})
-        missing_cv = not candidate.experiences and not candidate.projects
+        missing_cv = not candidate.experiences and not candidate.projects and not candidate.strengths
         missing_jd = not jd_profiles
         if missing_cv and missing_jd:
             raise StructuredAnalysisError("Structured analysis validation failed: CV and JD structured outputs are missing.")
         if missing_cv:
-            raise StructuredAnalysisError("Structured analysis validation failed: CV structured output is missing both work experience and project evidence — at least one is required.")
+            raise StructuredAnalysisError("Structured analysis validation failed: CV structured output is missing work experience, projects, and strengths — at least one is required.")
         if missing_jd:
             raise StructuredAnalysisError("Structured analysis validation failed: JD structured output is missing required job profiles.")
         return AnalyzeFeedback(candidate_profile=candidate, jd_profiles=jd_profiles, evidence_map=evidence_map if isinstance(evidence_map, dict) else {})

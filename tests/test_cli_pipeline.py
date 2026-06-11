@@ -406,7 +406,7 @@ def test_cli_run_accepts_image_cv_with_mock_ocr(monkeypatch: pytest.MonkeyPatch,
     )
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "- Built LLM workflow tools\n- Shipped ranking diagnostics",
+        lambda path, languages, **kw: "- Built LLM workflow tools\n- Shipped ranking diagnostics",
     )
 
     exit_code, output = run(

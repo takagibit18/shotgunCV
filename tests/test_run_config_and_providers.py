@@ -38,7 +38,7 @@ def test_cli_ingest_writes_default_openai_run_config(tmp_path: Path) -> None:
 
     assert exit_code == 0, output
     config_payload = json.loads((run_dir / "config" / "run_config.json").read_text(encoding="utf-8"))
-    assert config_payload["analyzer"]["provider"] == "openai"
+    assert config_payload["analyzer"]["provider"] == "deterministic"
     assert config_payload["generator"]["provider"] == "openai"
     assert config_payload["judge"]["provider"] == "openai"
     assert config_payload["planner"]["provider"] == "openai"

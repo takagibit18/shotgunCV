@@ -46,11 +46,12 @@ class RunConfig:
 
 RUN_CONFIG_PATH = Path("config") / "run_config.json"
 DEFAULT_PROVIDER = "openai"
+DEFAULT_ANALYZER_PROVIDER = "deterministic"  # fast, reliable CV/JD extraction without LLM
 
 
 def default_run_config() -> RunConfig:
     return RunConfig(
-        analyzer=ProviderConfig(provider=DEFAULT_PROVIDER),
+        analyzer=ProviderConfig(provider=DEFAULT_ANALYZER_PROVIDER),
         generator=ProviderConfig(provider=DEFAULT_PROVIDER),
         judge=ProviderConfig(provider=DEFAULT_PROVIDER),
         planner=ProviderConfig(provider=DEFAULT_PROVIDER),
@@ -134,7 +135,7 @@ def _from_payload(payload: Any) -> RunConfig:
     metadata_data = payload.get("run_metadata")
 
     analyzer = ProviderConfig(
-        provider=str(analyzer_data.get("provider", DEFAULT_PROVIDER)) if isinstance(analyzer_data, dict) else DEFAULT_PROVIDER,
+        provider=str(analyzer_data.get("provider", DEFAULT_ANALYZER_PROVIDER)) if isinstance(analyzer_data, dict) else DEFAULT_ANALYZER_PROVIDER,
         model=str(analyzer_data.get("model", "")) if isinstance(analyzer_data, dict) else "",
     )
     generator = ProviderConfig(

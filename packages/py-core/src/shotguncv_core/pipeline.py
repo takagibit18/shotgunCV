@@ -124,6 +124,17 @@ _GENERIC_REQUIREMENT_TOKENS = {
     "负责",
 }
 _MOJIBAKE_MARKERS = ("锛", "鏄", "鐨", "杩", "妫", "绱", "€", "�")
+_SEMANTIC_TOKEN_GROUPS = {
+    "agent": ("agent", "ai agent", "tool calling", "react loop", "工具调用", "编排", "工作流"),
+    "llm": ("llm", "large language model", "openai-compatible", "大模型", "技术栈"),
+    "rag": ("rag", "retrieval", "qdrant", "bm25", "ragas", "检索"),
+    "langchain": ("langchain",),
+    "langgraph": ("langgraph",),
+    "backend": ("server", "backend", "fastapi", "redis", "docker", "api", "服务端", "后端"),
+    "python": ("python",),
+    "personal_project": ("个人项目", "个人产品", "开源项目", "项目经验", "github", "9.5k", "项目累计", "mergewarden"),
+    "ai_app": ("ai app", "ai application", "应用", "产品"),
+}
 
 
 @dataclass(slots=True)
@@ -601,11 +612,27 @@ def report_run(run_dir: Path) -> Path:
         "## Ranked Application Strategy",
         "",
     ]
+    reliability_warnings = _report_reliability_warnings(run_dir, scorecards)
+    if reliability_warnings:
+        lines.extend(
+            [
+                "## Reliability Warning",
+                "",
+                "该最终分数需复核/可靠性较低：评分器发现输入质量或分数一致性问题。",
+                *[f"- {warning}" for warning in reliability_warnings],
+                "",
+            ]
+        )
 
     for strategy in strategies:
         jd = jd_index[strategy.jd_id]
         scorecard = score_index[(strategy.jd_id, strategy.recommended_variant_id)]
         explanation = explanation_index[(strategy.jd_id, strategy.recommended_variant_id)]
+        score_note = (
+            " Final score requires manual review because requirement evidence matching conflicted with the LLM assessment."
+            if "score_conflict" in scorecard.guardrail_flags
+            else ""
+        )
         lines.extend(
             [
                 f"### {strategy.priority_rank}. {jd.title} @ {jd.company}",
@@ -614,7 +641,7 @@ def report_run(run_dir: Path) -> Path:
                 f"- Evidence that holds: {', '.join(explanation.evidence_refs[:3]) or 'Evidence mapping is limited.'}",
                 f"- Interview danger points: {', '.join(strategy.watchouts[:4])}",
                 f"- If only revise 3 resume items: {', '.join(strategy.resume_revision_tasks[:3]) or ', '.join(strategy.recommended_actions[:3])}",
-                f"- Final score: `{(scorecard.final_overall_score or scorecard.overall_score):.2f}` via `{scorecard.final_decision_source}`",
+                f"- Final score: `{(scorecard.final_overall_score or scorecard.overall_score):.2f}` via `{scorecard.final_decision_source}`.{score_note}",
                 "",
             ]
         )
@@ -629,6 +656,26 @@ def report_run(run_dir: Path) -> Path:
         checks={"strategy_count": len(strategies), "scorecard_count": len(scorecards)},
     )
     return report_path
+
+
+def _report_reliability_warnings(run_dir: Path, scorecards: list[ScoreCard]) -> list[str]:
+    warnings: list[str] = []
+    status_path = run_dir / "run_status.json"
+    if status_path.exists():
+        status = load_json(status_path)
+        if status.get("quality_status") == "warning":
+            summary = str(status.get("quality_summary") or "Run quality status is warning.")
+            warnings.append(summary)
+    conflict_cards = [
+        scorecard
+        for scorecard in scorecards
+        if "score_conflict" in scorecard.guardrail_flags or scorecard.final_decision_source.startswith("v0.5.7-conservative-fusion")
+    ]
+    if conflict_cards:
+        warnings.append(
+            f"{len(conflict_cards)} scorecard(s) have score_conflict: LLM score and requirement-score diverged by more than 0.30."
+        )
+    return _dedupe_text_items(warnings)
 
 
 def _build_requirement_matrix(candidate: CandidateProfile, jd_profiles: list[JDProfile]) -> list[RequirementEvidence]:
@@ -654,6 +701,7 @@ def _build_requirement_matrix(candidate: CandidateProfile, jd_profiles: list[JDP
 
 
 def _build_preflight_gates(requirement_matrix: list[RequirementEvidence]) -> list[PreflightGate]:
+    """Build preflight gates. Only explicit mismatches block; missing evidence flows to LLM judge."""
     gates: list[PreflightGate] = []
     jd_ids = sorted({item.jd_id for item in requirement_matrix})
     for jd_id in jd_ids:
@@ -673,13 +721,15 @@ def _build_preflight_gates(requirement_matrix: list[RequirementEvidence]) -> lis
                 )
             )
         elif missing:
+            # Hard gate evidence can't be verified from CV text alone —
+            # let the LLM judge decide downstream instead of blocking.
             gates.append(
                 PreflightGate(
                     jd_id=jd_id,
-                    status="needs_review",
-                    reasons=[f"hard_gate_missing: {item.requirement_text}" for item in missing],
-                    skipped_stages=GATED_SKIP_STAGES,
-                    user_action="补充或确认硬门槛证据后再继续。",
+                    status="pass",
+                    reasons=[f"hard_gate_unverified: {item.requirement_text}" for item in missing],
+                    skipped_stages=[],
+                    user_action="",
                 )
             )
         else:
@@ -745,9 +795,15 @@ def _evaluate_requirement_evidence(
     refs = _matching_evidence_refs(requirement_text, candidate_evidence)
     if tier == "hard_gate":
         status = _evaluate_hard_gate(requirement_text, candidate_text)
-        if status in {"verified", "inferred"} and refs:
-            return status, refs
-        return ("missing" if status in {"verified", "inferred"} else status), []
+        if status == "verified":
+            refs = refs or _hard_gate_evidence_refs(requirement_text, candidate_evidence)
+            return "verified", refs
+        if status == "inferred":
+            refs = refs or _hard_gate_evidence_refs(requirement_text, candidate_evidence)
+            return "inferred", refs
+        # mismatch: explicit contradiction (e.g. requires master's, has bachelor's)
+        # missing:  can't verify from text — let LLM judge decide downstream
+        return status, []
     if refs:
         return "verified", refs
     if tier == "medium_priority":
@@ -777,8 +833,42 @@ def _evaluate_hard_gate(requirement: str, candidate_text: str) -> str:
     return "verified" if all(checks) else "missing"
 
 
+def _hard_gate_evidence_refs(requirement: str, candidate_items: list[str]) -> list[str]:
+    refs: list[str] = []
+    for item in candidate_items:
+        text = item.strip()
+        lowered = text.lower()
+        if not text or _is_resume_metadata_evidence(text):
+            continue
+        if _hard_gate_item_supports(requirement, lowered):
+            refs.append(text)
+        if len(refs) >= 3:
+            break
+    return refs
+
+
+def _hard_gate_item_supports(requirement: str, evidence: str) -> bool:
+    checks: list[bool] = []
+    if any(item in requirement for item in ["学历", "本科", "bachelor", "degree"]):
+        checks.append(any(item in evidence for item in ["本科", "bachelor", "degree", "硕士", "master", "phd", "博士"]))
+    if any(item in requirement for item in ["硕士", "master"]) and not any(item in requirement for item in ["本科", "bachelor"]):
+        checks.append(any(item in evidence for item in ["硕士", "master", "博士", "phd"]))
+    if any(item in requirement for item in ["计算机", "专业", "computer", "cs"]):
+        checks.append(any(item in evidence for item in ["计算机", "computer", "computer science", "cs", "software", "软件"]))
+    if any(item in requirement for item in ["证书", "认证", "certificate", "certification", "pmp"]):
+        cert_tokens = [token for token in ["pmp", "aws", "cpa", "cfa"] if token in requirement]
+        checks.append(
+            any(token in evidence for token in cert_tokens)
+            if cert_tokens
+            else any(item in evidence for item in ["证书", "认证", "certificate", "certification", "certified"])
+        )
+    if _has_explicit_year_requirement(requirement):
+        checks.append(_extract_required_years(evidence) > 0)
+    return bool(checks) and all(checks)
+
+
 def _matching_evidence_refs(requirement: str, candidate_items: list[str]) -> list[str]:
-    tokens = _distinctive_requirement_tokens(requirement)
+    tokens = _expanded_match_tokens(requirement)
     if len(tokens) < 2:
         return []
     strong_refs: list[str] = []
@@ -801,7 +891,7 @@ def _matching_evidence_refs(requirement: str, candidate_items: list[str]) -> lis
             strong_refs.append(item)
         else:
             weak_refs.append(item)
-    if len(aggregate_overlap) < 2:
+    if len(aggregate_overlap) < 2 and not (aggregate_overlap & {"agent", "personal_project"}):
         return []
     return (strong_refs or weak_refs)[:3]
 
@@ -812,6 +902,7 @@ def _normalize_jd_requirement_item(item: str) -> str:
 
 def _is_jd_ui_noise(item: str) -> bool:
     text = item.strip().lower()
+    compact = re.sub(r"\s+", "", text)
     if not text:
         return True
     if text.startswith("@"):
@@ -830,10 +921,24 @@ def _is_jd_ui_noise(item: str) -> bool:
         "skills",
         "tech-stack",
         "education",
+        "岗位职责",
+        "任职要求",
+        "加分项",
+        "我们提供",
     }
-    if text in exact_noise:
+    label_text = text.strip("[]【】()（）:：")
+    if text in exact_noise or label_text in exact_noise:
         return True
     noise_patterns = [
+        r"该职位来源于",
+        r"职位来源",
+        r"工作地点[:：]",
+        r"办公地点[:：]",
+        r"招聘批次",
+        r"\b\d{4}\s*届",
+        r"\d{4}届.*招聘",
+        r"校园招聘",
+        r"社会招聘",
         r"\bpublished\b",
         r"\bposted\b",
         r"\bago\b",
@@ -843,7 +948,9 @@ def _is_jd_ui_noise(item: str) -> bool:
         r"\bmid[- ]level\b",
         r"\bsenior[- ]level\b",
     ]
-    return any(re.search(pattern, text) for pattern in noise_patterns)
+    if any(re.search(pattern, text) for pattern in noise_patterns):
+        return True
+    return compact in {"【岗位职责】", "【任职要求】", "【加分项】", "【我们提供】"}
 
 
 def _is_hard_gate_requirement(text: str) -> bool:
@@ -889,7 +996,7 @@ def _is_low_quality_requirement(item: str) -> bool:
         return True
     if _looks_like_mojibake(text) or _looks_like_ocr_spaced_cjk(text):
         return True
-    tokens = _distinctive_requirement_tokens(text)
+    tokens = _expanded_match_tokens(text)
     if len(tokens) < 2 and not _has_hard_gate_keyword(lowered):
         return True
     return False
@@ -1009,10 +1116,20 @@ def _evidence_has_minimum_overlap(requirement_tokens: list[str], evidence: str) 
 
 
 def _evidence_token_overlap(requirement_tokens: list[str], evidence: str) -> set[str]:
-    evidence_tokens = set(_content_tokens(evidence))
+    evidence_tokens = set(_expanded_match_tokens(evidence))
     if not evidence_tokens:
         return set()
     return {token for token in requirement_tokens if token in evidence_tokens}
+
+
+def _expanded_match_tokens(text: str) -> list[str]:
+    tokens = _content_tokens(text)
+    token_set = set(tokens)
+    lowered = text.lower()
+    for semantic_token, aliases in _SEMANTIC_TOKEN_GROUPS.items():
+        if any(alias in lowered for alias in aliases):
+            token_set.add(semantic_token)
+    return [token for token in tokens + sorted(token_set - set(tokens)) if token]
 
 
 def _candidate_evidence_items(candidate: CandidateProfile) -> list[str]:
@@ -1525,16 +1642,18 @@ def _validate_analysis_artifacts(
     evidence_map: dict[str, object],
 ) -> None:
     cv_missing: list[str] = []
+    cv_warnings: list[str] = []
     if not candidate.candidate_id.strip():
         cv_missing.append("candidate_profile.candidate_id")
     if not candidate.base_resume_path.strip():
         cv_missing.append("candidate_profile.base_resume_path")
-    if not (candidate.experiences or candidate.projects or candidate.verified_evidence or candidate.core_claims):
-        cv_missing.append("candidate_profile.work_experience/projects/match_evidence")
+    if not (candidate.experiences or candidate.projects or candidate.strengths or candidate.verified_evidence or candidate.core_claims):
+        cv_missing.append("candidate_profile.work_experience/projects/strengths/evidence")
     if not candidate.skills:
-        cv_missing.append("candidate_profile.skills")
+        cv_warnings.append("candidate_profile.skills (model did not extract; downstream stages will derive from other fields)")
 
     jd_missing: list[str] = []
+    jd_warnings: list[str] = []
     if not jd_profiles:
         jd_missing.append("jd_profiles")
     for index, jd in enumerate(jd_profiles, start=1):
@@ -1542,54 +1661,50 @@ def _validate_analysis_artifacts(
         if not jd.jd_id.strip():
             jd_missing.append(f"{prefix}.jd_id")
         if not jd.title.strip():
-            jd_missing.append(f"{prefix}.target_role")
+            jd_warnings.append(f"{prefix}.target_role (model did not extract; downstream will use JD source text)")
         if not (jd.requirements or jd.responsibilities or jd.must_have_requirements):
             jd_missing.append(f"{prefix}.jd_requirements")
         if not jd.keywords:
-            jd_missing.append(f"{prefix}.hard_requirements/keywords")
+            jd_warnings.append(f"{prefix}.hard_requirements/keywords (model did not extract; downstream will derive from requirements)")
     if not isinstance(evidence_map, dict):
         jd_missing.append("match_evidence")
 
-    if cv_missing:
-        log_pipeline_stage_status(
-            run_dir,
-            stage_key="analyze_cv",
-            status="model_error",
-            summary="Structured CV analysis is missing required fields.",
-            error_code="STRUCTURED_CV_SCHEMA_INVALID",
-            checks={"missing_fields": cv_missing},
-        )
-    else:
-        log_pipeline_stage_status(
-            run_dir,
-            stage_key="analyze_cv",
-            status="success",
-            summary="Structured CV analysis passed required field checks.",
-            checks={
-                "experience_count": len(candidate.experiences),
-                "project_count": len(candidate.projects),
-                "skill_count": len(candidate.skills),
-                "evidence_count": len(candidate.verified_evidence),
-            },
-        )
+    cv_status = "model_error" if cv_missing else ("warning" if cv_warnings else "success")
+    cv_summary = (
+        "Structured CV analysis is missing required fields."
+        if cv_missing
+        else ("Structured CV analysis passed with warnings." if cv_warnings else "Structured CV analysis passed required field checks.")
+    )
+    log_pipeline_stage_status(
+        run_dir,
+        stage_key="analyze_cv",
+        status=cv_status,
+        summary=cv_summary,
+        error_code="STRUCTURED_CV_SCHEMA_INVALID" if cv_missing else None,
+        checks={
+            "missing_fields": cv_missing or None,
+            "warnings": cv_warnings or None,
+            "experience_count": len(candidate.experiences),
+            "project_count": len(candidate.projects),
+            "skill_count": len(candidate.skills),
+            "evidence_count": len(candidate.verified_evidence),
+        },
+    )
 
-    if jd_missing:
-        log_pipeline_stage_status(
-            run_dir,
-            stage_key="analyze_jd",
-            status="model_error",
-            summary="Structured JD analysis is missing required fields.",
-            error_code="STRUCTURED_JD_SCHEMA_INVALID",
-            checks={"missing_fields": jd_missing},
-        )
-    else:
-        log_pipeline_stage_status(
-            run_dir,
-            stage_key="analyze_jd",
-            status="success",
-            summary="Structured JD analysis passed required field checks.",
-            checks={"jd_count": len(jd_profiles)},
-        )
+    jd_status = "model_error" if jd_missing else ("warning" if jd_warnings else "success")
+    jd_summary = (
+        "Structured JD analysis is missing required fields."
+        if jd_missing
+        else ("Structured JD analysis passed with warnings." if jd_warnings else "Structured JD analysis passed required field checks.")
+    )
+    log_pipeline_stage_status(
+        run_dir,
+        stage_key="analyze_jd",
+        status=jd_status,
+        summary=jd_summary,
+        error_code="STRUCTURED_JD_SCHEMA_INVALID" if jd_missing else None,
+        checks={"missing_fields": jd_missing or None, "warnings": jd_warnings or None, "jd_count": len(jd_profiles)},
+    )
 
     missing = cv_missing + jd_missing
     if missing:
@@ -1766,13 +1881,14 @@ def _dedupe_evidence_refs(refs: list[str]) -> list[str]:
 
 def _record_evaluate_quality(run_dir: Path, scorecards: list[ScoreCard], llm_failures: list[LLMFailure]) -> None:
     fallback_count = sum(1 for scorecard in scorecards if scorecard.final_decision_source == "guardrail-fallback")
+    score_conflict_count = sum(1 for scorecard in scorecards if "score_conflict" in scorecard.guardrail_flags)
     weak_high_score_count = sum(
         1
         for scorecard in scorecards
         if (scorecard.overall_score >= 0.85 and scorecard.llm_evidence_score <= 0.35)
         or "llm_assessment_missing" in scorecard.guardrail_flags
     )
-    status = "warning" if fallback_count or weak_high_score_count or llm_failures else "ok"
+    status = "warning" if fallback_count or score_conflict_count or weak_high_score_count or llm_failures else "ok"
     log_quality_gate_checked(
         run_dir,
         stage="evaluate",
@@ -1781,6 +1897,7 @@ def _record_evaluate_quality(run_dir: Path, scorecards: list[ScoreCard], llm_fai
         checks={
             "scorecard_count": len(scorecards),
             "fallback_count": fallback_count,
+            "score_conflict_count": score_conflict_count,
             "llm_failure_count": len(llm_failures),
             "weak_high_score_count": weak_high_score_count,
         },
@@ -1796,7 +1913,7 @@ def _record_evaluate_quality(run_dir: Path, scorecards: list[ScoreCard], llm_fai
             reason=f"{failure.error_type}: {failure.error_message}",
         )
     if status == "warning":
-        update_quality_status(run_dir, "warning", "Evaluation used fallback or score consistency warnings.")
+        update_quality_status(run_dir, "warning", "Evaluation used fallback, score conflict, or score consistency warnings.")
 
 
 def _has_extractable_text(documents: list[InputDocument]) -> bool:
@@ -2076,7 +2193,16 @@ def _build_scorecard(
         final_score = min(final_score, 0.79)
         flags.append("missing_must_have_requirements")
 
-    final_decision_source = "v0.5.7-requirement-score" if not flags else "v0.5.7-requirement-score+guardrail"
+    score_delta = llm_overall - final_score
+    score_conflict = score_delta > 0.30
+    if score_conflict:
+        flags.extend(["score_conflict", "needs_review"])
+        final_score = max(final_score, round(llm_overall - 0.30, 2))
+
+    if score_conflict:
+        final_decision_source = "v0.5.7-conservative-fusion+guardrail"
+    else:
+        final_decision_source = "v0.5.7-requirement-score" if not flags else "v0.5.7-requirement-score+guardrail"
 
     return ScoreCard(
         jd_id=jd.jd_id,

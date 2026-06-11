@@ -80,7 +80,7 @@ export class RunActionError extends Error {
 export async function startRunAction(runId: string, action: RunAction, spawnRunner: SpawnRunner = defaultSpawnRunner) {
   const runDir = resolveRunDir(runId);
   const current = await readRunStatus(runDir);
-  if (current?.status === "running" || current?.status === "queued") {
+  if (isActiveRunStatus(current?.status)) {
     throw new RunActionError("run_busy", "该运行批次已在排队或运行中。", 409);
   }
   if (action === "resume_failed" && current?.status !== "failed") {
@@ -220,7 +220,7 @@ export async function deleteRun(runId: string) {
   const runDir = resolveRunDir(runId);
   const current = await readRunStatus(runDir);
   const inferred = current?.status ?? (await inferStatus(runDir));
-  if (inferred === "running" || inferred === "queued") {
+  if (isActiveRunStatus(inferred)) {
     throw new RunActionError("run_busy", "正在运行的批次不能删除。", 409);
   }
   if (inferred !== "draft" && inferred !== "failed") {
@@ -586,6 +586,10 @@ function expectedOutputPaths(runDir: string) {
   return {
     report: path.join(runDir, "report", "summary.md"),
   };
+}
+
+function isActiveRunStatus(status: string | null | undefined): boolean {
+  return status === "queued" || status === "running" || status === "partial_running";
 }
 
 function summarizeRunStatus(status: RunStatusFile | null) {

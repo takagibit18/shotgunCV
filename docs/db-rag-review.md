@@ -122,7 +122,7 @@ Indeed MCP 岗位导入属于 RAG、数据库投影、LangGraph 复盘 Agent 等
 
 从本节开始，正式 baseline 记录只以 `baseline-formal-*` run 为准；更早的 `baseline-rag-*`、`baseline-next-*`、`baseline-ocr-*` run 和对应 JSON 已删除，不进入后续优化前后对比。
 
-当前 raw JD 素材库统一为 `baseline/jd_corpus_supplement_20260520/`。该目录现在包含 19 个文本 JD、1 个 PDF JD 和 7 张图片 JD。PDF `量化派AI Native 全栈工程师如LLM  Agent AI应用开发.pdf` 已通过 `local_pdf` 提取出可用文本；图片 JD 已通过本机 Tesseract OCR 以 `eng+chi_sim` 抽取文本。本轮不启用 vision fallback。
+当前 raw JD 素材库统一为 `baseline/jd_corpus_supplement_20260520/`。该目录现在包含 19 个文本 JD、1 个 PDF JD 和 7 张图片 JD。PDF `量化派AI Native 全栈工程师如LLM  Agent AI应用开发.pdf` 已通过 `local_pdf` 提取出可用文本；图片 JD 已通过本地 OCR（RapidOCR 默认 / Tesseract `eng+chi_sim`）抽取文本。本轮不启用 vision fallback。
 
 正式 baseline 采用 7 个组合模板，每个模板重复 3 次，共 21 个 deterministic CLI run，并在每个 run 后执行 `shotguncv review`：
 

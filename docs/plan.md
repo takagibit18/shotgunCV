@@ -152,7 +152,7 @@ v0.5 目标是把现有 Web 草稿入口推进到 `Draft-to-Run` 最小闭环：
 - `final_overall_score` 默认公式为 `verified_fit_score * 0.65 + rewrite_potential_score * 0.20 + (1 - risk_score) * 0.15`；blocked/needs_review JD 使用 `final_decision_source = preflight-gate`，不计算普通 final。
 - generate 阶段读取 preflight/evidence matrix，严禁编造学历、专业、证书、公司、工作年限、论文、奖项等硬事实；经历/项目类中优先级要求可生成“待核实模拟补强”，但必须标注，且不能计入真实匹配分。
 - Web 详情页展示硬门槛状态、blocked/needs_review 原因、跳过的 JD、真实匹配分、改写潜力分和风险分，避免单一综合分误导。
-- CV PDF 解析质量增强：PDF 先走 `pypdf` 文本抽取；文本为空、有效字符过少或乱码比例高时，用 PyMuPDF 渲染页面，再复用本地 OCR/vision fallback。PDF OCR/vision 结果继续落入 `ingest/manifest.json` 的既有字段，不新增 manifest schema。
+- CV PDF 解析质量增强：PDF 先走 `pypdf` 逐页文本抽取；对每页做 quality score + CJK bigram 语义质量检测。低质量页单独触发 OCR 降级（PyMuPDF 渲染 + RapidOCR/Tesseract），OCR 结果仅在得分显著优于 native 时替换。PDF 提取结果继续落入 `ingest/manifest.json` 的既有字段，不新增 manifest schema。
 - CV profile 结构化增强：deterministic analyze 不再只依赖 bullet 行，增加章节/段落解析，覆盖教育、工作经历、项目、技能、证书、语言等信息；OpenAI analyze prompt 要求完整保留可追溯硬事实，支撑 v0.5.7 hard gate 判断。
 
 验收标准：
@@ -182,7 +182,7 @@ v0.5.7 计划新增以下评分与门禁产物：
 - `run_dir/analyze/preflight_gates.json`：每个 JD 的 gate status：`pass | blocked | needs_review`，以及原因、跳过阶段和用户可操作建议。
 - `run_dir/evaluate/scorecards.json`：在旧字段基础上新增 `verified_fit_score`、`rewrite_potential_score`、`risk_score`、`gate_status`、`gate_reasons`；blocked/needs_review JD 使用 `final_decision_source = preflight-gate`。
 - `run_dir/generate/resume_variants.json`：在旧字段基础上新增 `safe_rewrites`、`simulated_supplements`、`forbidden_gaps`，用于区分可安全改写、待核实模拟补强和严禁编造的缺口。
-- `pyproject.toml`：v0.5.7 CV PDF 解析增强新增 `PyMuPDF>=1.24`，用于低质量/扫描 PDF 的页面渲染；本地 OCR 和 vision fallback 沿用既有配置。
+- `pyproject.toml`：v0.5.7 CV PDF 解析增强新增 `PyMuPDF>=1.24`，用于低质量/扫描 PDF 的单页渲染；v0.10+ 新增 `rapidocr-onnxruntime>=1.4` 作为默认 OCR 引擎，支持逐页质量评分与 CJK 语义检测。
 
 v0.5.6 计划扩展以下日志和状态契约：
 

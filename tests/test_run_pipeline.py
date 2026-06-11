@@ -5,12 +5,14 @@ from pathlib import Path
 
 from shotguncv_core.pipeline import (
     _build_requirement_matrix,
+    _build_scorecard,
     _candidate_search_text,
     _collect_jd_requirements,
     _evaluate_requirement_evidence,
     _is_resume_metadata_evidence,
     _matching_evidence_refs,
     _record_analyze_quality,
+    _requirement_matrix_quality_checks,
     _select_relevant_variants,
     _sanitize_candidate_profile,
     analyze_run,
@@ -22,7 +24,8 @@ from shotguncv_core.pipeline import (
     report_run,
 )
 from shotguncv_agents.providers import AnalyzeFeedback
-from shotguncv_core.models import CandidateProfile, JDProfile, RequirementEvidence
+from shotguncv_core.models import CandidateProfile, JDProfile, LLMAssessment, RequirementEvidence, ResumeVariant
+from shotguncv_evals.rules import RuleEvaluation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -288,7 +291,7 @@ def test_ingest_run_logs_pdf_fallback_chain(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr("shotguncv_core.inputs._render_pdf_pages_to_images", lambda path: [page_image])
     monkeypatch.setattr(
         "shotguncv_core.inputs._extract_image_text_with_ocr",
-        lambda path, languages: "Bachelor degree in Computer Science. Built Python Agent systems.",
+        lambda path, languages, **kw: "Bachelor degree in Computer Science. Built Python Agent systems.",
     )
 
     ingest_run(
@@ -773,6 +776,375 @@ def test_requirement_evidence_requires_distinctive_overlap_not_single_token() ->
 
     assert status == "missing"
     assert refs == []
+
+
+def test_verified_hard_gate_keeps_traceable_evidence_refs() -> None:
+    candidate = CandidateProfile(
+        candidate_id="cand-sean",
+        base_resume_path="cv.pdf",
+        experiences=[],
+        projects=[],
+        skills=["Python"],
+        industry_tags=[],
+        strengths=[],
+        constraints=[],
+        preferences=[],
+        core_claims=["中央民族大学（985）｜计算机科学与技术（本科）"],
+        verified_evidence=[
+            "中央民族大学（985）｜计算机科学与技术（本科）",
+            "核心课程：数据结构、操作系统、计算机网络、数据库系统、软件工程",
+        ],
+    )
+    jd = JDProfile(
+        jd_id="jd-pdd",
+        title="后端研发工程师",
+        company="PDD",
+        cluster="backend",
+        responsibilities=[],
+        requirements=["本科及以上学历，计算机相关专业"],
+        keywords=[],
+        seniority="new-grad",
+        bonuses=[],
+        risk_signals=[],
+        source_type="text",
+        source_value="pdd.txt",
+        must_have_requirements=["本科及以上学历，计算机相关专业"],
+    )
+
+    matrix = _build_requirement_matrix(candidate, [jd])
+    hard_gate = matrix[0]
+    checks = _requirement_matrix_quality_checks([jd], matrix)
+
+    assert hard_gate.evidence_status == "verified"
+    assert hard_gate.evidence_refs == ["中央民族大学（985）｜计算机科学与技术（本科）"]
+    assert checks["verified_without_valid_refs_count"] == 0
+
+
+def test_collect_jd_requirements_filters_chinese_platform_noise_and_section_labels() -> None:
+    jd = JDProfile(
+        jd_id="jd-wave",
+        title="AI Agent 服务端开发工程师",
+        company="Wave",
+        cluster="ai-agent",
+        responsibilities=[
+            "该职位来源于BOSS直聘",
+            "【岗位职责】",
+            "工作地点：北京",
+            "2026届校园招聘",
+            "负责 AI Agent 服务端开发，建设可复用 Agent 工作流与工具调用能力",
+        ],
+        requirements=[
+            "【任职要求】",
+            "熟悉 LLM 技术栈，了解 LangChain / LangGraph / RAG 等框架或方法",
+            "有 AI Agent / AI App 项目经验",
+        ],
+        keywords=["AI Agent", "LLM", "LangGraph"],
+        seniority="mid",
+        bonuses=["【加分项】", "有个人产品或开源项目"],
+        risk_signals=[],
+        source_type="text",
+        source_value="wave.txt",
+        nice_to_have_requirements=["【我们提供】"],
+    )
+
+    requirements = _collect_jd_requirements(jd)
+
+    assert "该职位来源于BOSS直聘" not in requirements
+    assert "【岗位职责】" not in requirements
+    assert "【任职要求】" not in requirements
+    assert "【加分项】" not in requirements
+    assert "【我们提供】" not in requirements
+    assert "工作地点：北京" not in requirements
+    assert "2026届校园招聘" not in requirements
+    assert requirements == [
+        "熟悉 LLM 技术栈，了解 LangChain / LangGraph / RAG 等框架或方法",
+        "有 AI Agent / AI App 项目经验",
+        "负责 AI Agent 服务端开发，建设可复用 Agent 工作流与工具调用能力",
+        "有个人产品或开源项目",
+    ]
+
+
+def test_wave_agent_requirements_match_candidate_profile_skills_projects_and_claims() -> None:
+    candidate = CandidateProfile(
+        candidate_id="cand-sean",
+        base_resume_path="cv.pdf",
+        experiences=[],
+        projects=[
+            "MergeWarden 代码审查与调试 Agent",
+            "面向本地仓库、PR patch 与错误日志构建代码审查 / 调试 Agent，输出结构化 JSON",
+            "设计 5 阶段 Agent 编排循环：prepare -> analyze -> execute_tools -> format -> continue/stop",
+        ],
+        skills=["Python", "FastAPI", "Redis", "LangChain", "LangGraph", "Qdrant", "RAG", "LLM", "Docker"],
+        industry_tags=[],
+        strengths=["MergeWarden 代码审查与调试 Agent"],
+        constraints=[],
+        preferences=[],
+        core_claims=["个人项目 MergeWarden，覆盖 Agent 编排、工具调用、评测与测试模块"],
+        verified_evidence=[
+            "技术栈：Python、OpenAI-compatible API、Tool Calling、ReAct Loop、Docker、Pytest",
+            "项目累计约 9.5K 行 Python，覆盖 Agent 编排、工具系统、评测与测试模块",
+        ],
+    )
+    jd = JDProfile(
+        jd_id="jd-wave",
+        title="AI Agent 服务端开发工程师",
+        company="Wave",
+        cluster="ai-agent",
+        responsibilities=["负责 AI Agent 服务端开发，建设可复用 Agent 工作流与工具调用能力"],
+        requirements=[
+            "熟悉 LLM 技术栈，了解 LangChain / LangGraph / RAG 等框架或方法",
+            "有 AI Agent / AI App 项目经验",
+        ],
+        keywords=["AI Agent", "LLM", "LangGraph"],
+        seniority="mid",
+        bonuses=["有个人产品或开源项目"],
+        risk_signals=[],
+        source_type="text",
+        source_value="wave.txt",
+    )
+
+    matrix = _build_requirement_matrix(candidate, [jd])
+
+    by_text = {item.requirement_text: item for item in matrix}
+    assert by_text["负责 AI Agent 服务端开发，建设可复用 Agent 工作流与工具调用能力"].evidence_status == "verified"
+    assert _evaluate_requirement_evidence(
+        "开发全球领先的 AI Agent / AI APP",
+        "high_priority",
+        candidate,
+        _candidate_search_text(candidate),
+    )[0] == "verified"
+    assert by_text["熟悉 LLM 技术栈，了解 LangChain / LangGraph / RAG 等框架或方法"].evidence_status == "verified"
+    assert by_text["有 AI Agent / AI App 项目经验"].evidence_status == "verified"
+    assert by_text["有个人产品或开源项目"].evidence_status == "verified"
+
+
+def test_score_conflict_marks_needs_review_and_uses_conservative_fusion() -> None:
+    jd = JDProfile(
+        jd_id="jd-wave",
+        title="AI Agent 服务端开发工程师",
+        company="Wave",
+        cluster="ai-agent",
+        responsibilities=[],
+        requirements=[],
+        keywords=["AI Agent"],
+        seniority="mid",
+        bonuses=[],
+        risk_signals=[],
+        source_type="text",
+        source_value="wave.txt",
+    )
+    candidate = CandidateProfile(
+        candidate_id="cand-sean",
+        base_resume_path="cv.pdf",
+        experiences=[],
+        projects=["MergeWarden Agent project"],
+        skills=["Python", "LLM"],
+        industry_tags=[],
+        strengths=[],
+        constraints=[],
+        preferences=[],
+    )
+    variant = ResumeVariant(
+        variant_id="variant-jd-wave",
+        variant_type="jd-specific",
+        cluster="ai-agent",
+        target_jd_ids=["jd-wave"],
+        summary="Agent resume",
+        emphasized_strengths=[],
+        stretch_points=[],
+        source_resume_path="cv.pdf",
+    )
+    rule_eval = RuleEvaluation(
+        keyword_coverage=0.9,
+        evidence_binding=0.9,
+        untraceable_claim_flags=[],
+        rewrite_distance=0.2,
+        cluster_reuse_efficiency=0.8,
+        fit_score=0.96,
+        ats_score=0.96,
+        evidence_score=0.96,
+        stretch_score=0.9,
+        gap_risk_score=0.1,
+        rewrite_cost_score=0.4,
+        overall_score=0.96,
+        gaps=[],
+    )
+    assessment = LLMAssessment(
+        jd_id="jd-wave",
+        variant_id="variant-jd-wave",
+        role_fit=0.85,
+        evidence_quality=0.9,
+        persuasiveness=0.8,
+        interview_pressure_risk=0.25,
+        application_worthiness="apply",
+        evidence_citations=["MergeWarden Agent project"],
+        decision_rationale="Strong Agent evidence.",
+    )
+    low_quality_matrix = [
+        RequirementEvidence(
+            jd_id="jd-wave",
+            requirement_id="jd-wave-req-001",
+            tier="high_priority",
+            requirement_text="AI Agent 服务端开发",
+            evidence_status="missing",
+            risk_weight=0.7,
+        )
+    ]
+
+    scorecard = _build_scorecard(
+        jd,
+        candidate,
+        variant,
+        rule_eval,
+        assessment,
+        "review",
+        low_quality_matrix,
+        "deterministic",
+        "test",
+    )
+
+    assert scorecard.llm_overall_score - scorecard.final_overall_score <= 0.30
+    assert "score_conflict" in scorecard.guardrail_flags
+    assert "needs_review" in scorecard.guardrail_flags
+    assert scorecard.final_decision_source == "v0.5.7-conservative-fusion+guardrail"
+
+
+def test_report_run_surfaces_quality_warning_and_score_conflict(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    for stage in ["config", "analyze", "evaluate", "generate", "plan", "report"]:
+        (run_dir / stage).mkdir(parents=True, exist_ok=True)
+    (run_dir / "config" / "run_config.json").write_text(
+        json.dumps(
+            {
+                "analyzer": {"provider": "deterministic", "model": ""},
+                "generator": {"provider": "deterministic", "model": ""},
+                "judge": {"provider": "deterministic", "model": ""},
+                "planner": {"provider": "deterministic", "model": ""},
+                "openai": {"base_url": None, "api_key_env": "OPENAI_API_KEY", "env_file": ".env"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "run_status.json").write_text(
+        json.dumps({"status": "done", "quality_status": "warning", "quality_summary": "CV extraction quality is low."}),
+        encoding="utf-8",
+    )
+    (run_dir / "analyze" / "candidate_profile.json").write_text(
+        json.dumps(
+            {
+                "candidate_id": "cand-sean",
+                "base_resume_path": "cv.pdf",
+                "experiences": [],
+                "projects": ["MergeWarden Agent project"],
+                "skills": ["Python", "LLM"],
+                "industry_tags": [],
+                "strengths": [],
+                "constraints": [],
+                "preferences": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "analyze" / "jd_profiles.json").write_text(
+        json.dumps(
+            [
+                {
+                    "jd_id": "jd-wave",
+                    "title": "AI Agent 服务端开发工程师",
+                    "company": "Wave",
+                    "cluster": "ai-agent",
+                    "responsibilities": [],
+                    "requirements": [],
+                    "keywords": ["AI Agent"],
+                    "seniority": "mid",
+                    "bonuses": [],
+                    "risk_signals": [],
+                    "source_type": "text",
+                    "source_value": "wave.txt",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "generate" / "resume_variants.json").write_text("[]", encoding="utf-8")
+    (run_dir / "evaluate" / "gap_maps.json").write_text("[]", encoding="utf-8")
+    (run_dir / "evaluate" / "scorecards.json").write_text(
+        json.dumps(
+            [
+                {
+                    "jd_id": "jd-wave",
+                    "variant_id": "variant-jd-wave",
+                    "fit_score": 0.96,
+                    "ats_score": 0.96,
+                    "evidence_score": 0.96,
+                    "stretch_score": 0.9,
+                    "gap_risk_score": 0.1,
+                    "rewrite_cost_score": 0.4,
+                    "overall_score": 0.96,
+                    "ranking_version": "v0.3.0-llm-eval",
+                    "judge_rationale": "Strong Agent evidence.",
+                    "llm_overall_score": 0.83,
+                    "final_overall_score": 0.53,
+                    "final_decision_source": "v0.5.7-conservative-fusion+guardrail",
+                    "guardrail_flags": ["score_conflict", "needs_review"],
+                    "verified_fit_score": 0.0,
+                    "rewrite_potential_score": 0.0,
+                    "risk_score": 0.48,
+                    "gate_status": "pass",
+                    "gate_reasons": [],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "evaluate" / "ranking_explanations.json").write_text(
+        json.dumps(
+            [
+                {
+                    "jd_id": "jd-wave",
+                    "variant_id": "variant-jd-wave",
+                    "ranking_version": "v0.3.0-llm-eval",
+                    "dimension_reasons": {"overall": "Strong Agent evidence; requirement scorer needs review."},
+                    "positive_signals": ["real Agent project evidence"],
+                    "risk_flags": ["score_conflict"],
+                    "evidence_refs": ["MergeWarden Agent project"],
+                    "decision_summary": "Strong Agent evidence; requirement scorer needs review.",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "plan" / "application_strategies.json").write_text(
+        json.dumps(
+            [
+                {
+                    "jd_id": "jd-wave",
+                    "recommended_variant_id": "variant-jd-wave",
+                    "priority_rank": 1,
+                    "apply_decision": "manual_review",
+                    "reason_summary": "岗位真实短板需与评分器证据漏判分开复核。",
+                    "needs_jd_specific_variant": True,
+                    "decision_confidence": 0.53,
+                    "watchouts": ["score_conflict"],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    report_path = report_run(run_dir)
+    report = report_path.read_text(encoding="utf-8")
+
+    assert "该最终分数需复核/可靠性较低" in report
+    assert "CV extraction quality is low." in report
+    assert "score_conflict" in report
+    assert "Final score requires manual review" in report
 
 
 def test_analyze_quality_gate_reports_requirement_matrix_pollution(tmp_path: Path) -> None:

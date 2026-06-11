@@ -254,6 +254,17 @@ type RunReport = {
   markdown: string;
 };
 
+type RunStatusSnapshot = {
+  runId: string;
+  draftStatus: RunDraftStatus;
+  runStatus: RunStatusFile | null;
+  completedStages: StageName[];
+  stageStatuses: StageStatus[];
+  hasResults: boolean;
+  hasReport: boolean;
+  reviewItemCount: number;
+};
+
 const REQUIRED_STAGE_FILES: Record<StageName, string[]> = {
   ingest: ["ingest/manifest.json"],
   analyze: ["analyze/candidate_profile.json", "analyze/jd_profiles.json"],
@@ -425,6 +436,26 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
   };
 }
 
+export async function loadRunStatusSnapshot(runId: string): Promise<RunStatusSnapshot> {
+  const runDir = path.join(getRunsDir(), runId);
+  const completedStages = await getCompletedStages(runDir);
+  const draft = await readJsonIfExists<UploadManifest>(path.join(runDir, "ingest", "upload_manifest.json"));
+  const runStatus = await readJsonIfExists<RunStatusFile>(path.join(runDir, "run_status.json"));
+  const preflightGates =
+    (await readJsonIfExists<PreflightGate[]>(path.join(runDir, "analyze", "preflight_gates.json"))) ?? [];
+  const evalSummary = await readJsonIfExists<EvalSummaryItem[]>(path.join(runDir, "evaluate", "eval_summary.json"));
+  return {
+    runId,
+    draftStatus: buildDraftStatus(draft, completedStages, runStatus),
+    runStatus,
+    completedStages,
+    stageStatuses: buildStageStatuses(completedStages, runStatus),
+    hasResults: (evalSummary ?? []).length > 0,
+    hasReport: completedStages.includes("report"),
+    reviewItemCount: preflightGates.filter((gate) => gate.status === "blocked" || gate.status === "needs_review").length,
+  };
+}
+
 
 export async function saveUserEvidenceOverride(
   runId: string,
@@ -576,7 +607,7 @@ function buildStageStatuses(completedStages: StageName[], runStatus: RunStatusFi
     if ((runStatus?.status === "failed" || runStatus?.status === "partial_failed") && runStatus.error_stage === stage) {
       return { stage, status: "failed" };
     }
-    if (runStatus?.status === "running" && runStatus.current_stage === stage) {
+    if ((runStatus?.status === "running" || runStatus?.status === "partial_running") && runStatus.current_stage === stage) {
       return { stage, status: "running" };
     }
     if (completedStages.includes(stage)) {
@@ -690,6 +721,7 @@ export type {
   PostRunReview,
   RunDetail,
   RunReport,
+  RunStatusSnapshot,
   RunSummary,
   UserEvidenceOverride,
   UserEvidenceOverrideAction,

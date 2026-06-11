@@ -20,7 +20,7 @@ python -m shotguncv_cli.main report --run-dir ./runs/demo
 
 `--cv` 与 `--jd` 可重复传入，也可指向文件或目录。支持 `.txt`、`.md`、文本型 `.pdf`，以及图片输入。
 
-图片会先走本地 Tesseract OCR；OCR 为空或失败时，默认尝试 OpenAI-compatible 视觉兜底；如果同名 `.txt` / `.md` sidecar 存在，也可以作为最后兜底。完全本地运行时可加 `--no-vision-fallback`：
+图片默认走 **RapidOCR**（ONNX 运行时，无需额外安装可执行程序），可切换为 Tesseract（`--ocr-engine tesseract`）。PDF 支持逐页质量评分 + 按页 OCR 降级 + CJK 语义质量检测。OCR 为空或失败时，默认尝试 OpenAI-compatible 视觉兜底；如果同名 `.txt` / `.md` sidecar 存在，也可以作为最后兜底。完全本地运行时可加 `--no-vision-fallback`：
 
 ```bash
 python -m shotguncv_cli.main run --run-dir ./runs/image-demo --candidate-id cand-001 --cv ./private_inputs/resume.png --jd ./fixtures/jds/sample_batch.txt --no-vision-fallback

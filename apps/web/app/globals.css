@@ -1539,6 +1539,17 @@ p {
   .eval-summary-hint {
     margin-left: 0;
   }
+  .draft-primary-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .draft-primary-actions .pill-row {
+    width: 100%;
+  }
+  .draft-summary-grid,
+  .draft-material-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .status-strip-item {
@@ -2748,6 +2759,7 @@ label.primary-link {
 
 .run-action-stack,
 .draft-edit-form,
+.draft-launch-panel,
 .upload-workspace,
 .upload-form,
 .jd-text-stack,
@@ -2811,6 +2823,115 @@ label.primary-link {
 
 .draft-edit-form {
   padding-top: 8px;
+}
+
+.draft-primary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.draft-primary-actions > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.draft-primary-actions span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.draft-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.draft-summary-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.draft-summary-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.draft-summary-item strong {
+  overflow-wrap: anywhere;
+}
+
+.draft-material-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.draft-material-list section {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.draft-material-list h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.draft-material-list ul,
+.draft-material-list ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.draft-material-list li {
+  overflow-wrap: anywhere;
+}
+
+.draft-advanced-editor {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.draft-advanced-editor summary {
+  cursor: pointer;
+  padding: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.draft-advanced-editor .draft-edit-form {
+  padding: 0 12px 12px;
+}
+
+.run-poller-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: -8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.run-poller-status strong {
+  color: var(--warning);
 }
 
 .detail-grid {

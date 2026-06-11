@@ -38,14 +38,16 @@ python -m shotguncv_cli.main run --run-dir ./runs/demo --candidate-id cand-001 -
 `--cv` 与 `--jd` 都可以重复传入，也可以指向文件或目录。当前输入模块支持：
 
 - `.txt` / `.md` / `.markdown`
-- 文本型 `.pdf`
-- 图片文件（`.png` / `.jpg` / `.jpeg` / `.webp` 等），默认先走本地 OCR，再走 OpenAI-compatible 视觉兜底，最后使用同名 `.txt` 或 `.md` sidecar 兜底
+- `.pdf`（文本层提取 + 逐页质量评分，低质量页面自动触发 OCR）
+- 图片文件（`.png` / `.jpg` / `.jpeg` / `.webp` 等），先走本地 OCR，再走 OpenAI-compatible 视觉兜底，最后使用同名 `.txt` 或 `.md` sidecar 兜底
 
-图片 OCR 依赖本机安装 Tesseract 可执行程序及语言包；Python 依赖由项目安装提供。默认 OCR 语言为 `chi+eng`，可通过 `--ocr-languages` 或 `.env` 中的 `SHOTGUNCV_OCR_LANGUAGES` 覆盖。
+PDF 提取采用 **page-level 质量决策策略**：pypdf 逐页提取原生文本后，对每页做 quality score；只有低质量页面才触发单页 OCR。OCR 引擎默认使用 **RapidOCR**（ONNX 运行时，无需额外安装可执行程序），同时保留 Tesseract 作为备选引擎（通过 `--ocr-engine tesseract` 切换）。
+
+PDF 原生文本还会经过 **CJK bigram 语义质量检测**：对中文文本计算 bigram 词典命中率，命中率极低时自动判定为 CMap 编码损坏并触发 OCR 降级。
+
+图片 OCR 支持 RapidOCR（默认）和 Tesseract 双引擎。OCR 语言可通过 `--ocr-languages` 或 `.env` 中的 `SHOTGUNCV_OCR_LANGUAGES` 覆盖。
 
 如果本地 OCR 提取为空或失败，系统会自动尝试视觉模型。视觉兜底沿用项目 `.env` 的 OpenAI-compatible 配置，可通过 `SHOTGUNCV_VISION_MODEL` 指定模型。若希望完全本地运行，可传入 `--no-vision-fallback`。
-
-扫描 PDF 暂不做 OCR；若 PDF 无法提取文本，系统会给出明确错误提示。
 
 ### 2. 分阶段 Deterministic 回放
 
@@ -124,10 +126,12 @@ Web 不执行 pipeline，完整运行仍由 CLI 触发。
 
 v0.5.2 起，PDF、图片 OCR/vision fallback 与文本抽取统一由 Python ingest 执行。Web 仍只写入原始上传文件和 `ingest/upload_manifest.json`，不写正文解析结果。单个文件不可解析时，Python manifest 会将该输入记录为 `extraction_status: "unparseable"` 并写入 `input_warnings[]`；只有 CV 或 JD 角色最终没有任何有效文本时，ingest 阶段才失败。
 
+v0.10+ 起，PDF 提取引入 **逐页质量评分 + 按页 OCR 降级**：每页保留 native/pypdf 提取结果，对低质量页单独触发 OCR，OCR 结果仅在得分显著优于 native 时才替换。同时引入 **CJK 语义质量检测**（bigram 词典命中率）防止 CMap 编码损坏的 PDF 逃逸质量门。提取产物支持 **ExtractionBlock 中间表示**（text/page/source/quality_score/block_type/section），并包含 **CV 专项后处理**（section 识别 + 技术栈模糊归一化 + corrections 证据链）。
+
 ## 产品边界（当前阶段）
 
 - 仅面向海投工作流。
-- 输入支持文本、Markdown、文本型 PDF，以及图片（OCR/vision 兜底由 CLI 完成）。
+- 输入支持文本、Markdown、PDF（含文本层提取 + 按页 OCR 降级）、图片（RapidOCR/Tesseract + vision 兜底）。
 - 候选人画像来源于主简历与补充资料。
 - 生成策略采用岗位簇版本 + 高价值 JD 定制版本。
 - 从第一天内建评估系统。

@@ -198,6 +198,8 @@ function buildReportSummary(detail: DetailForReport) {
   const riskScore = topScorecard?.risk_score ?? topScorecard?.gap_risk_score;
   const guardrailFlags = toRawStringArray(topScorecard?.guardrail_flags);
   const gateReasons = toRawStringArray(topScorecard?.gate_reasons);
+  const hasScoreConflict = guardrailFlags.includes("score_conflict");
+  const hasQualityWarning = detail.runStatus?.quality_status === "warning";
 
   return {
     topTitle: topVariant?.title ?? "暂无推荐岗位",
@@ -237,6 +239,8 @@ function buildReportSummary(detail: DetailForReport) {
       `决策依据：${formatUserText(topScorecard?.final_decision_source || "未提供")}`,
     ],
     guardrailSignals: [
+      ...(hasScoreConflict || hasQualityWarning ? ["最终分数需复核/可靠性较低"] : []),
+      ...(hasQualityWarning && detail.runStatus?.quality_summary ? [`质量提示：${formatUserText(detail.runStatus.quality_summary)}`] : []),
       `门槛状态：${formatUserText(topScorecard?.gate_status || "未提供")}`,
       ...(guardrailFlags.length ? guardrailFlags.map((flag) => `风险标记：${formatUserText(flag)}`) : ["风险标记：无"]),
       ...gateReasons.map((reason) => `门槛原因：${formatUserText(reason)}`),
@@ -313,6 +317,7 @@ function formatUserText(value: string): string {
     hard_gate_missing: "硬性要求缺少证据",
     needs_review: "需要复核",
     manual_review: "人工复核",
+    score_conflict: "评分冲突",
     final_overall_score: "综合得分",
     risk_score: "风险",
     gate_status: "门槛状态",

@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-import re
 import base64
 import json
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 from urllib import request
+
+from shotguncv_core.cv_extraction import (
+    ExtractionBlock,
+    PageExtractionResult,
+    _cjk_bigram_hit_rate,
+    decide_page_source,
+    score_text_quality,
+)
 
 
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown"}
@@ -45,11 +53,13 @@ class InputDocument:
     text_quality_status: str = "unchecked"
     text_quality_error: str = ""
     analysis_eligible: bool = True
+    quality_score: float = 0.0
 
 
 @dataclass(slots=True)
 class InputExtractionOptions:
     ocr_provider: str = "local_ocr"
+    ocr_engine: str = "rapidocr"  # "tesseract" | "rapidocr"
     vision_provider: str = "openai_vision"
     vision_model: str = "gpt-5.4-mini"
     ocr_languages: str = "eng+chi_sim"
@@ -108,20 +118,7 @@ def _extract_document(path: Path, options: InputExtractionOptions) -> InputDocum
             size_bytes=path.stat().st_size,
         )
     if suffix in PDF_EXTENSIONS:
-        text = _extract_pdf_text(path)
-        quality_warning = _pdf_text_quality_warning(text)
-        if quality_warning is not None:
-            return _extract_pdf_with_image_fallback(path, options, quality_warning)
-        return InputDocument(
-            source_type="file",
-            source_value=str(path),
-            media_type="application/pdf",
-            text=text,
-            extraction_status="extracted",
-            extraction_provider="local_pdf",
-            original_name=path.name,
-            size_bytes=path.stat().st_size,
-        )
+        return _extract_pdf_document_page_level(path, options)
     if suffix in IMAGE_EXTENSIONS:
         return _extract_image_document(path, suffix, options)
     raise InputExtractionError(f"Unsupported input type `{path.suffix}` for `{path}`.")
@@ -132,6 +129,106 @@ def _safe_extract_document(path: Path, options: InputExtractionOptions) -> Input
         return _extract_document(path, options)
     except InputExtractionError as exc:
         return _unparseable_document(path, str(exc))
+
+
+def _extract_pdf_document_page_level(path: Path, options: InputExtractionOptions) -> InputDocument:
+    """Page-level PDF extraction with per-page quality scoring and selective OCR.
+
+    Replaces the old document-level (all-or-nothing) fallback.
+    """
+    import fitz  # type: ignore[import-not-found]
+
+    native_pages = _extract_pdf_pages_native(path)
+    all_native_empty = all(not p.native_text.strip() for p in native_pages)
+
+    # If every native page is empty, fall back to full-document OCR
+    if all_native_empty:
+        quality_warning = "PDF text extraction returned empty text."
+        return _extract_pdf_with_image_fallback(path, options, quality_warning)
+
+    # Page-level: native-first with selective OCR fallback.
+    # pypdf is fast and free — use it as the primary source.
+    # Only trigger OCR per page when native text quality is clearly bad.
+    final_pages: list[PageExtractionResult] = []
+    ocr_used_any = False
+
+    for native_page in native_pages:
+        page_num = native_page.page
+        native_text = native_page.native_text
+        native_score = native_page.native_score
+
+        # Skip OCR if native text quality is good enough
+        cjk_suspicious = _cjk_bigram_hit_rate(native_text) < 0.15
+        if native_score >= 0.35 and not cjk_suspicious:
+            final_pages.append(native_page)
+            continue
+
+        # Native quality below threshold or CJK-corrupted — trigger OCR
+        ocr_text = ""
+        ocr_score = 0.0
+        try:
+            page_img = _render_single_pdf_page(path, page_num)
+            try:
+                ocr_raw = _extract_image_text_with_ocr(page_img, options.ocr_languages, engine=options.ocr_engine)
+                ocr_text = _normalize_extracted_text_for_ingest(ocr_raw).strip()
+                ocr_score = score_text_quality(ocr_text) if ocr_text else 0.0
+            finally:
+                _cleanup_rendered_pdf_pages([page_img])
+        except Exception:
+            ocr_text = ""
+            ocr_score = 0.0
+
+        result = decide_page_source(
+            native_text=native_text,
+            native_score=native_score,
+            ocr_text=ocr_text,
+            ocr_score=ocr_score,
+        )
+        result.page = page_num
+        if result.ocr_used:
+            ocr_used_any = True
+        final_pages.append(result)
+
+    # Build final text
+    final_text = "\n\n".join(p.text for p in final_pages if p.text.strip())
+
+    # Determine extraction status
+    if ocr_used_any:
+        final_status = "ocr"
+        final_provider = "local_pdf+ocr"
+    else:
+        final_status = "extracted"
+        final_provider = "local_pdf"
+
+    avg_score = round(sum(p.quality_score for p in final_pages) / max(1, len(final_pages)), 4)
+
+    return InputDocument(
+        source_type="file",
+        source_value=str(path),
+        media_type="application/pdf",
+        text=final_text,
+        extraction_status=final_status,
+        extraction_provider=final_provider,
+        original_name=path.name,
+        size_bytes=path.stat().st_size,
+        quality_score=avg_score,
+    )
+
+
+def _render_single_pdf_page(path: Path, page_num: int) -> Path:
+    """Render one PDF page to a PNG image for OCR."""
+    import fitz  # type: ignore[import-not-found]
+
+    output_dir = Path(tempfile.mkdtemp(prefix="shotguncv-pdf-pages-"))
+    document = fitz.open(str(path))
+    try:
+        page = document[page_num - 1]  # fitz is 0-indexed
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        page_path = output_dir / f"{path.stem}-page-{page_num:03d}.png"
+        pixmap.save(str(page_path))
+    finally:
+        document.close()
+    return page_path
 
 
 def _unparseable_document(path: Path, error: str) -> InputDocument:
@@ -166,7 +263,7 @@ def _extract_image_document(path: Path, suffix: str, options: InputExtractionOpt
     sidecar = _find_sidecar(path)
     try:
         if options.ocr_provider != "disabled":
-            raw_ocr_text = _extract_image_text_with_ocr(path, options.ocr_languages)
+            raw_ocr_text = _extract_image_text_with_ocr(path, options.ocr_languages, engine=options.ocr_engine)
             ocr_text = _normalize_extracted_text_for_ingest(raw_ocr_text)
             if ocr_text:
                 quality_warning = _image_ocr_text_quality_warning(raw_ocr_text, ocr_text)
@@ -485,6 +582,54 @@ def _extract_pdf_text(path: Path) -> str:
     return _extract_pdf_literal_text(path.read_bytes())
 
 
+def _extract_pdf_pages_native(path: Path) -> list[PageExtractionResult]:
+    """Extract native text from each PDF page via pypdf, with scoring."""
+    page_results: list[PageExtractionResult] = []
+    try:
+        from pypdf import PdfReader  # type: ignore[import-not-found]
+
+        reader = PdfReader(str(path))
+        for idx, page in enumerate(reader.pages, start=1):
+            native_text = (page.extract_text() or "").strip()
+            page_score = score_text_quality(native_text) if native_text else 0.0
+            page_results.append(
+                PageExtractionResult(
+                    page=idx,
+                    text=native_text,
+                    source="native",
+                    quality_score=page_score,
+                    ocr_used=False,
+                    native_text=native_text,
+                    ocr_text="",
+                    native_score=page_score,
+                    ocr_score=0.0,
+                    ocr_triggered=False,
+                )
+            )
+        return page_results
+    except Exception:
+        pass
+
+    # pypdf failed entirely — try literal extraction and split by page break marker
+    raw = _extract_pdf_literal_text(path.read_bytes())
+    # Simple split: treat each page as one block since literal extraction loses page boundaries
+    page_score = score_text_quality(raw) if raw.strip() else 0.0
+    return [
+        PageExtractionResult(
+            page=1,
+            text=raw.strip(),
+            source="native",
+            quality_score=page_score,
+            ocr_used=False,
+            native_text=raw.strip(),
+            ocr_text="",
+            native_score=page_score,
+            ocr_score=0.0,
+            ocr_triggered=False,
+        )
+    ]
+
+
 def _pdf_text_quality_warning(text: str) -> str | None:
     stripped = text.strip()
     if not stripped:
@@ -496,10 +641,6 @@ def _pdf_text_quality_warning(text: str) -> str | None:
     lines = [line.strip() for line in stripped.splitlines() if line.strip()]
     single_char_lines = sum(1 for line in lines if len(line) == 1)
     average_line_length = visible_chars / max(1, len(lines))
-    debug_token_hits = sum(
-        stripped.lower().count(token)
-        for token in ("execute_tools", "submit_debug", "hit_rate", "offset/limit", "diff", "> analyze")
-    )
     if visible_chars < 8:
         return f"PDF text extraction returned too little usable text ({visible_chars} visible chars)."
     if replacement_chars / max(1, len(stripped)) > 0.05:
@@ -510,8 +651,8 @@ def _pdf_text_quality_warning(text: str) -> str | None:
         return f"PDF text extraction produced escaped control sequences ({escaped_control_sequences} matches)."
     if len(lines) >= 12 and single_char_lines / max(1, len(lines)) > 0.35 and average_line_length < 12:
         return "PDF text extraction produced fragmented low-information lines."
-    if debug_token_hits >= 3:
-        return "PDF text extraction appears to contain tool/debug noise instead of document text."
+    if _cjk_bigram_hit_rate(stripped) < 0.08:
+        return "PDF text extraction produced semantically corrupted CJK text (CJK bigram dictionary hit rate near zero)."
     return None
 
 
@@ -547,7 +688,14 @@ def _unescape_pdf_literal(value: str) -> str:
     return value.replace(r"\(", "(").replace(r"\)", ")").replace(r"\\", "\\")
 
 
-def _extract_image_text_with_ocr(path: Path, languages: str) -> str:
+def _extract_image_text_with_ocr(path: Path, languages: str, *, engine: str = "tesseract") -> str:
+    """Dispatch to the configured OCR engine."""
+    if engine == "rapidocr":
+        return _extract_image_text_with_rapidocr(path)
+    return _extract_image_text_with_tesseract(path, languages)
+
+
+def _extract_image_text_with_tesseract(path: Path, languages: str) -> str:
     try:
         from PIL import Image  # type: ignore[import-not-found]
         import pytesseract  # type: ignore[import-not-found]
@@ -555,6 +703,46 @@ def _extract_image_text_with_ocr(path: Path, languages: str) -> str:
         raise RuntimeError("Tesseract OCR requires Pillow, pytesseract, and the Tesseract executable.") from exc
     with Image.open(path) as image:
         return str(pytesseract.image_to_string(image, lang=languages))
+
+
+# Lazy-loaded RapidOCR singleton
+_rapidocr_engine: object | None = None
+
+
+def _get_rapidocr_engine() -> object:
+    global _rapidocr_engine
+    if _rapidocr_engine is None:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore[import-not-found]
+
+        _rapidocr_engine = RapidOCR()
+    return _rapidocr_engine
+
+
+def _extract_image_text_with_rapidocr(path: Path) -> str:
+    """Extract text from an image using RapidOCR (ONNX-based, no GPU needed)."""
+    engine = _get_rapidocr_engine()
+    result, _ = engine(str(path))  # type: ignore[call-arg]
+    if result is None or not result:
+        return ""
+    # result is list of [bbox, text, confidence] tuples
+    # Group by Y-coordinate for line ordering
+    lines: list[list[tuple[float, str]]] = []
+    current_y = -1.0
+    current_line: list[tuple[float, str]] = []
+    for item in result:
+        bbox = item[0]  # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+        text = str(item[1])
+        conf = float(item[2])
+        y_center = (bbox[0][1] + bbox[2][1]) / 2
+        if current_y < 0 or abs(y_center - current_y) < 8:
+            current_line.append((bbox[0][0], text))
+        else:
+            lines.append(sorted(current_line, key=lambda t: t[0]))
+            current_line = [(bbox[0][0], text)]
+        current_y = y_center
+    if current_line:
+        lines.append(sorted(current_line, key=lambda t: t[0]))
+    return "\n".join(" ".join(token for _, token in line) for line in lines)
 
 
 def _extract_image_text_with_vision(path: Path, options: InputExtractionOptions, ocr_error: str) -> str:

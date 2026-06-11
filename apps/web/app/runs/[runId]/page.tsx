@@ -6,6 +6,7 @@ import { STAGE_LABELS, STATUS_LABELS } from "../../../lib/labels";
 import { loadRunDetail } from "../../../lib/runs";
 import { formatRunDisplayName, sanitizeUserFacingText } from "../../../lib/user-facing";
 import { RunActionPanel } from "./RunActionPanel";
+import { RunStatusPoller } from "./RunStatusPoller";
 import { ScoreMatrixRow } from "./ScoreMatrixRow";
 
 
@@ -89,6 +90,12 @@ export default async function RunPage({ params }: PageProps) {
         </section>
 
         <RunExecutionState detail={detail} />
+        <RunStatusPoller
+          runId={detail.runId}
+          initialStatus={detail.draftStatus}
+          initialStage={detail.runStatus?.current_stage ?? null}
+          initialCompletedStages={detail.completedStages}
+        />
 
         {canShowActions ? (
           <section className="section evaluation-action-section">
@@ -174,7 +181,7 @@ function RunExecutionState({ detail }: { detail: RunDetail }) {
     statusKind,
   );
 
-  if (status === "running" || status === "queued") {
+  if (status === "running" || status === "queued" || status === "partial_running") {
     const runningText = buildRunningText(currentStage);
     return (
       <section className="section run-state-panel running" aria-live="polite">
